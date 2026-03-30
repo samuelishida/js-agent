@@ -1,0 +1,3 @@
+(() => {
+  window.AgentSkillGroups = window.AgentSkillGroups || {};
+})();

@@ -1,10 +1,23 @@
-﻿(() => {
+(() => {
   const state = {
     roots: new Map(),
     defaultRootId: null,
     uploads: new Map()
   };
-  const instanceId = Math.random().toString(36).slice(2);
+  // Sync with state.js agentInstanceId via sessionStorage so the echo filter works
+  // even if shared.js loads before state.js sets window.AgentSkills.
+  const instanceId = (() => {
+    const key = '_agent_instance_id_session';
+    try {
+      const stored = sessionStorage.getItem(key);
+      if (stored) return stored;
+      const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      sessionStorage.setItem(key, id);
+      return id;
+    } catch {
+      return Math.random().toString(36).slice(2);
+    }
+  })();
   const AGENT_CHANNEL = 'loopagent-v1';
   let broadcastChannel = null;
   const broadcastListeners = new Map();
@@ -749,15 +762,39 @@
     return formatToolResult('notification_send', `Notification sent: "${safeTitle}"`);
   }
 
+
+  // Tracks all active tab_listen abort functions so the agent loop can cancel them on stop.
+  const activeTabListeners = new Set();
+
+  function abortAllTabListeners(reason = 'Agent run stopped.') {
+    for (const abort of [...activeTabListeners]) {
+      try { abort(reason); } catch {}
+    }
+    activeTabListeners.clear();
+  }
+
+  // Clean up on page unload to avoid memory leaks.
+  window.addEventListener('beforeunload', () => abortAllTabListeners('Page unloaded.'), { once: true });
+
   async function tabBroadcast({ topic, payload }) {
     if (!topic) {
       throw new Error('tab_broadcast: topic is required.');
     }
 
+    // Validate payload is structured-cloneable before postMessage.
+    let safePayload = null;
+    if (payload !== undefined && payload !== null) {
+      try {
+        safePayload = JSON.parse(JSON.stringify(payload));
+      } catch {
+        throw new Error('tab_broadcast: payload must be JSON-serializable.');
+      }
+    }
+
     const channel = getBroadcastChannel();
     channel.postMessage({
       topic: String(topic),
-      payload: payload ?? null,
+      payload: safePayload,
       from: instanceId,
       timestamp: new Date().toISOString()
     });
@@ -781,21 +818,36 @@
     const callbacks = broadcastListeners.get(normalizedTopic);
 
     return new Promise((resolve, reject) => {
+      let settled = false;
+
       const timer = window.setTimeout(() => {
-        callbacks.delete(onMessage);
+        cleanup();
         reject(new Error(`tab_listen: no message on "${normalizedTopic}" within ${waitMs}ms.`));
       }, waitMs);
 
-      function onMessage(payload) {
+      function cleanup() {
+        if (settled) return;
+        settled = true;
         window.clearTimeout(timer);
         callbacks.delete(onMessage);
+        activeTabListeners.delete(abortFn);
+      }
+
+      function onMessage(payload) {
+        cleanup();
         resolve(formatToolResult(
           'tab_listen',
           `Topic: ${normalizedTopic}\nPayload: ${JSON.stringify(payload ?? null, null, 2).slice(0, 2000)}`
         ));
       }
 
+      function abortFn(reason) {
+        cleanup();
+        reject(new Error(`tab_listen aborted: ${reason}`));
+      }
+
       callbacks.add(onMessage);
+      activeTabListeners.add(abortFn);
     });
   }
 
@@ -1441,16 +1493,17 @@
   };
 
   window.AgentSkills = {
-    instanceId,
     state,
     registry,
+    instanceId,
     extractEntities,
     detectFxPair,
     formatToolResult,
     buildPreflightPlan,
     runSearchSkills,
     fetchReadablePage,
-    buildInitialContext
+    buildInitialContext,
+    abortAllTabListeners
   };
 })();
 

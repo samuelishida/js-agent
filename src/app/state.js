@@ -1,4 +1,4 @@
-﻿// -- STATE ---------------------------------------------------------------------
+// -- STATE ---------------------------------------------------------------------
 let apiKey = localStorage.getItem('cloud_api_key') || localStorage.getItem('gemini_api_key') || '';
 let messages = [];   // agentic loop history [{role, content}]
 let sessionStats = { rounds: 0, tools: 0, resets: 0, msgs: 0 };
@@ -20,7 +20,20 @@ const NON_CACHEABLE_TOOLS = new Set([
   'tab_broadcast'
 ]);
 let notificationPermissionRequested = false;
-const agentInstanceId = window.AgentSkills?.instanceId || Math.random().toString(36).slice(2);
+// Derive a stable instance ID from localStorage so it survives module load order races.
+// Each page load gets a fresh ID (not persisted), but within a load it is consistent.
+const agentInstanceId = (() => {
+  const key = '_agent_instance_id_session';
+  try {
+    const stored = sessionStorage.getItem(key);
+    if (stored) return stored;
+    const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    sessionStorage.setItem(key, id);
+    return id;
+  } catch {
+    return Math.random().toString(36).slice(2);
+  }
+})();
 let cacheSyncChannel = null;
 let busyChannel = null;
 let otherTabBusy = false;

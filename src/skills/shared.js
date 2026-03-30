@@ -955,6 +955,21 @@
       }
     }
 
+    // Support paths that redundantly include the authorized root name,
+    // e.g. /agent, /Agent/src when rootId is "Agent".
+    const normalizedSegments = normalized.replace(/^\/+/, '').split('/').filter(Boolean);
+    if (normalizedSegments.length) {
+      const first = normalizedSegments[0].toLowerCase();
+      for (const rootId of state.roots.keys()) {
+        if (String(rootId || '').toLowerCase() === first) {
+          return {
+            rootId,
+            segments: normalizedSegments.slice(1)
+          };
+        }
+      }
+    }
+
     return {
       rootId: state.defaultRootId,
       segments: normalized.replace(/^\/+/, '').split('/').filter(Boolean)

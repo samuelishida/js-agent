@@ -39,14 +39,128 @@ function looksLikeHtmlFragment(text) {
   return /<\/?[a-z][^>]*>/i.test(String(text || ''));
 }
 
-function formatPlainTextAsHtml(text) {
-  const value = String(text || '').trim();
-  if (!value) return '<p></p>';
+function escapeInlineHtml(text) {
+  return escHtml(String(text || ''));
+}
 
-  return value
-    .split(/\n{2,}/)
-    .map(block => `<p>${escHtml(block).replace(/\n/g, '<br>')}</p>`)
-    .join('');
+function renderInlineMarkdown(text) {
+  let value = escapeInlineHtml(text);
+  value = value.replace(/`([^`]+)`/g, '<code>$1</code>');
+  value = value.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+|tel:[^\s)]+)\)/g, '<a href="$2">$1</a>');
+  value = value.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  value = value.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+  value = value.replace(/(^|[^\*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+  value = value.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>');
+  return value;
+}
+
+function renderMarkdownBlocks(text) {
+  const source = String(text || '').replace(/\r\n/g, '\n').trim();
+  if (!source) return '<p></p>';
+
+  const lines = source.split('\n');
+  const html = [];
+  let i = 0;
+
+  const isUl = line => /^(\s*[-*+]\s+)/.test(line);
+  const isOl = line => /^(\s*\d+\.\s+)/.test(line);
+  const isQuote = line => /^\s*>\s?/.test(line);
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      i++;
+      continue;
+    }
+
+    const fence = trimmed.match(/^```([\w-]+)?\s*$/);
+    if (fence) {
+      const lang = fence[1] ? ` class="language-${escapeInlineHtml(fence[1])}"` : '';
+      const chunk = [];
+      i++;
+      while (i < lines.length && !lines[i].trim().match(/^```\s*$/)) {
+        chunk.push(lines[i]);
+        i++;
+      }
+      if (i < lines.length) i++;
+      html.push(`<pre><code${lang}>${escapeInlineHtml(chunk.join('\n'))}</code></pre>`);
+      continue;
+    }
+
+    if (/^---+$/.test(trimmed) || /^\*\*\*+$/.test(trimmed)) {
+      html.push('<hr>');
+      i++;
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+      i++;
+      continue;
+    }
+
+    if (isQuote(line)) {
+      const chunk = [];
+      while (i < lines.length && isQuote(lines[i])) {
+        chunk.push(lines[i].replace(/^\s*>\s?/, ''));
+        i++;
+      }
+      html.push(`<blockquote>${chunk.map(item => `<p>${renderInlineMarkdown(item)}</p>`).join('')}</blockquote>`);
+      continue;
+    }
+
+    if (isUl(line)) {
+      const items = [];
+      while (i < lines.length && isUl(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*+]\s+/, ''));
+        i++;
+      }
+      html.push(`<ul>${items.map(item => `<li>${renderInlineMarkdown(item)}</li>`).join('')}</ul>`);
+      continue;
+    }
+
+    if (isOl(line)) {
+      const items = [];
+      while (i < lines.length && isOl(lines[i])) {
+        items.push(lines[i].replace(/^\s*\d+\.\s+/, ''));
+        i++;
+      }
+      html.push(`<ol>${items.map(item => `<li>${renderInlineMarkdown(item)}</li>`).join('')}</ol>`);
+      continue;
+    }
+
+    const paragraph = [line];
+    i++;
+    while (i < lines.length) {
+      const next = lines[i];
+      const nextTrimmed = next.trim();
+      if (!nextTrimmed) {
+        i++;
+        break;
+      }
+      if (
+        nextTrimmed.match(/^```/) ||
+        nextTrimmed.match(/^(#{1,4})\s+/) ||
+        /^---+$/.test(nextTrimmed) ||
+        /^\*\*\*+$/.test(nextTrimmed) ||
+        isQuote(next) ||
+        isUl(next) ||
+        isOl(next)
+      ) {
+        break;
+      }
+      paragraph.push(next);
+      i++;
+    }
+
+    html.push(`<p>${renderInlineMarkdown(paragraph.join('\n')).replace(/\n/g, '<br>')}</p>`);
+  }
+
+  return html.join('');
 }
 
 function sanitizeUrl(url) {
@@ -112,7 +226,7 @@ function sanitizeHtmlFragment(html) {
 }
 
 function renderAgentHtml(text) {
-  const source = looksLikeHtmlFragment(text) ? String(text || '') : formatPlainTextAsHtml(text);
+  const source = looksLikeHtmlFragment(text) ? String(text || '') : renderMarkdownBlocks(text);
   return sanitizeHtmlFragment(source);
 }
 

@@ -5,7 +5,7 @@ function abortActiveLlmRequest() {
   activeLlmController.abort();
 }
 
-async function callGemini(msgs) { return callLLM(msgs); }
+async function callGemini(msgs, options = {}) { return callLLM(msgs, options); }
 
 function sanitizeModelReply(text) {
   return splitModelReply(text).visible;
@@ -243,7 +243,7 @@ function renderAgentHtml(text) {
   return sanitizeHtmlFragment(source);
 }
 
-async function callLLM(msgs) {
+async function callLLM(msgs, options = {}) {
   if (activeLlmController) {
     activeLlmController.abort();
   }
@@ -253,7 +253,7 @@ async function callLLM(msgs) {
 
   if (localBackend.enabled && localBackend.url) {
     try {
-      return await callLocal(msgs, signal);
+      return await callLocal(msgs, signal, options);
     } finally {
       if (activeLlmController?.signal === signal) {
         activeLlmController = null;
@@ -262,7 +262,7 @@ async function callLLM(msgs) {
   }
 
   try {
-    return await callGeminiDirect(msgs, signal);
+    return await callGeminiDirect(msgs, signal, options);
   } finally {
     if (activeLlmController?.signal === signal) {
       activeLlmController = null;
@@ -270,7 +270,7 @@ async function callLLM(msgs) {
   }
 }
 
-async function callGeminiDirect(msgs, signal) {
+async function callGeminiDirect(msgs, signal, options = {}) {
   const modelSelect = document.getElementById('model-select');
   let model = modelSelect.value;
   if (!localBackend.enabled) document.getElementById('badge-model').textContent = model;
@@ -282,7 +282,9 @@ async function callGeminiDirect(msgs, signal) {
       parts: [{ text: m.content }]
     }));
   const systemInstruction = msgs.find(m => m.role === 'system');
-  const body = { contents, generationConfig: { maxOutputTokens: 2048, temperature: 0.7 } };
+  const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
+  const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
+  const body = { contents, generationConfig: { maxOutputTokens: maxTokens, temperature } };
   if (systemInstruction) body.systemInstruction = { parts: [{ text: systemInstruction.content }] };
 
   const fallbackModels = {
@@ -316,18 +318,54 @@ async function callGeminiDirect(msgs, signal) {
   if (!data.candidates?.[0]) throw new Error('No candidates returned');
   return data.candidates[0].content.parts[0].text || '';
 }
-async function callLocal(msgs, signal) {
+async function callLocal(msgs, signal, options = {}) {
+    const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
+    const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
+
   // Detect endpoint type from model select or probed URL
   const modelSel = document.getElementById('local-model-select').value;
-  const model = modelSel || localBackend.model || 'local-model';
+  const model = modelSel || localBackend.model || 'mistralai/ministral-3-3b';
   localBackend.model = model;
   localStorage.setItem('agent_local_backend_model', localBackend.model || '');
 
-  // Build OpenAI-compatible messages (works for LM Studio + llama.cpp + Ollama /v1/)
-  const openaiMsgs = msgs.map(m => ({
+  // Build OpenAI-compatible messages and normalize for strict templates that require
+  // user/assistant alternation after an optional system message.
+  const rawMsgs = msgs.map(m => ({
     role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
-    content: m.content
+    content: String(m.content || '')
   }));
+
+  function normalizeLocalMessages(messages) {
+    const system = messages.find(m => m.role === 'system');
+    const body = messages.filter(m => m.role !== 'system' && String(m.content || '').trim());
+
+    if (!body.length) {
+      return system ? [system, { role: 'user', content: 'Continue.' }] : [{ role: 'user', content: 'Continue.' }];
+    }
+
+    // Strict templates often require first non-system role to be user.
+    if (body[0].role !== 'user') {
+      body[0] = {
+        role: 'user',
+        content: `[context from previous assistant]\n${body[0].content}`
+      };
+    }
+
+    // Merge adjacent messages with same role to enforce alternation.
+    const normalized = [];
+    for (const msg of body) {
+      const prev = normalized[normalized.length - 1];
+      if (prev && prev.role === msg.role) {
+        prev.content = `${prev.content}\n\n${msg.content}`;
+      } else {
+        normalized.push({ role: msg.role, content: msg.content });
+      }
+    }
+
+    return system ? [system, ...normalized] : normalized;
+  }
+
+  const openaiMsgs = normalizeLocalMessages(rawMsgs);
 
   const inferred = inferProbeConfigFromUrl(localBackend.url || '');
   const preferredChatPath = localBackend.chatPath || inferred.chatPath || '/v1/chat/completions';
@@ -341,13 +379,15 @@ async function callLocal(msgs, signal) {
   pushEndpoint('/v1/chat/completions', 'openai');
   pushEndpoint('/api/chat', 'ollama');
 
+  let lastEndpointError = '';
+
   for (const ep of endpoints) {
     try {
       let body;
       if (ep.format === 'ollama') {
         body = { model, messages: openaiMsgs, stream: false };
       } else {
-        body = { model, messages: openaiMsgs, max_tokens: 2048, temperature: 0.7, stream: false };
+        body = { model, messages: openaiMsgs, max_tokens: maxTokens, temperature, stream: false };
       }
 
       const res = await fetch(localBackend.url + ep.path, {
@@ -360,16 +400,31 @@ async function callLocal(msgs, signal) {
       if (!res.ok) continue;
       const data = await res.json();
 
+      const payloadError = typeof data?.error === 'string'
+        ? data.error
+        : (typeof data?.error?.message === 'string' ? data.error.message : '');
+
+      // Some local gateways respond with HTTP 200 and an error payload for unsupported endpoints.
+      if (payloadError) {
+        lastEndpointError = `${ep.path}: ${payloadError}`;
+        continue;
+      }
+
       // OpenAI format
       if (data.choices?.[0]) return data.choices[0].message?.content || data.choices[0].text || '';
       // Ollama format
       if (data.message?.content) return data.message.content;
       if (data.response) return data.response;
+      lastEndpointError = `${ep.path}: unrecognized response schema`;
       return JSON.stringify(data);
     } catch (e) {
       if (ep.format === 'openai') continue; // try next
-      throw new Error(`Local LLM error: ${e.message}`);
+      lastEndpointError = `${ep.path}: ${e.message}`;
+      continue;
     }
+  }
+  if (lastEndpointError) {
+    throw new Error(`Local LLM: no compatible endpoint at ${localBackend.url}. Last error: ${lastEndpointError}`);
   }
   throw new Error(`Local LLM: no endpoint responded at ${localBackend.url}`);
 }

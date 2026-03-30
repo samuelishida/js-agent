@@ -44,68 +44,24 @@ function getToolCallSignature(call) {
   return `${call?.tool || 'unknown'}:${JSON.stringify(call?.args || {})}`;
 }
 
-function isFilesystemTask(userMessage) {
-  return /(arquivo|arquivos|file|files|readme|path|caminho|pasta|folder|diret[oó]rio|directory|fs_)/i.test(String(userMessage || ''));
+function parseJsonObjectFromText(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  const unfenced = raw.replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, '$1').trim();
+
+  try {
+    return JSON.parse(unfenced);
+  } catch {
+    const match = unfenced.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
+    }
+  }
 }
 
-function requiresFilesystemPath(toolName) {
-  return new Set([
-    'fs_read_file',
-    'fs_preview_file',
-    'fs_exists',
-    'fs_stat',
-    'fs_tree',
-    'fs_search_name',
-    'fs_search_content',
-    'fs_mkdir',
-    'fs_touch',
-    'fs_delete_path',
-    'fs_rename_path',
-    'fs_move_file',
-    'fs_copy_file',
-    'fs_write_file'
-  ]).has(String(toolName || ''));
-}
-
-function applyFilesystemExplorationGuardrail(call, userMessage) {
-  if (!call?.tool) return { call, guarded: false };
-
-  const tool = String(call.tool);
-  const args = call.args || {};
-  const isFsTool = tool.startsWith('fs_');
-  const fileTask = isFilesystemTask(userMessage);
-
-  if (!fileTask) return { call, guarded: false };
-
-  // For file tasks, if model drifts into non-filesystem tools, force root exploration first.
-  if (!isFsTool && !runFsRootExplored) {
-    return {
-      call: { tool: 'fs_list_dir', args: { path: '/' } },
-      guarded: true,
-      reason: `Guardrail: switched ${tool} to fs_list_dir('/') to discover files before other operations.`
-    };
-  }
-
-  // For first filesystem action in a file task, require a root exploration pass.
-  if (isFsTool && tool !== 'fs_list_dir' && tool !== 'fs_list_roots' && !runFsRootExplored) {
-    return {
-      call: { tool: 'fs_list_dir', args: { path: '/' } },
-      guarded: true,
-      reason: `Guardrail: forcing fs_list_dir('/') before ${tool} to anchor path resolution.`
-    };
-  }
-
-  // If a path-required filesystem tool came without path, recover by exploring root instead of looping errors.
-  if (isFsTool && requiresFilesystemPath(tool) && !args.path) {
-    return {
-      call: { tool: 'fs_list_dir', args: { path: '/' } },
-      guarded: true,
-      reason: `Guardrail: ${tool} requires args.path; running fs_list_dir('/') to recover context.`
-    };
-  }
-
-  return { call, guarded: false };
-}
 
 function recordToolFailure(call, result) {
   if (!/^ERROR\b/i.test(String(result || ''))) {
@@ -168,6 +124,55 @@ async function buildRecoverySteering(userMessage, call, toolError) {
     return steering;
   } catch {
     return fallback;
+  }
+}
+
+async function maybeFinalizeFromToolEvidenceWithLlm(userMessage, toolCall, toolResult) {
+  const systemInstruction = [
+    'You decide whether a single tool result already contains enough evidence to answer the user now.',
+    'Return JSON only with schema: {"finalize":true|false,"answer":"markdown answer when finalize=true"}.',
+    'If evidence is insufficient, set finalize=false.'
+  ].join(' ');
+  const userInstruction = `User request: ${userMessage}\nTool call: ${JSON.stringify(toolCall)}\nTool result:\n${String(toolResult || '').slice(0, 12000)}`;
+
+  try {
+    const raw = await callGemini([
+      { role: 'system', content: systemInstruction },
+      { role: 'user', content: userInstruction }
+    ], { maxTokens: 260, temperature: 0.1 });
+    const parsed = parseJsonObjectFromText(splitModelReply(raw).visible);
+    if (parsed?.finalize && String(parsed.answer || '').trim()) {
+      return String(parsed.answer).trim();
+    }
+  } catch {
+    // Continue loop on decision errors.
+  }
+
+  return '';
+}
+
+async function evaluateTurnGuardrailsWithLlm({ userMessage, replyText, proposedToolCall, round, maxRounds }) {
+  const systemInstruction = [
+    'You are a turn guardrail controller for a tool-using agent.',
+    'Return strict JSON only with schema:',
+    '{"request_continuation":boolean,"show_intermediate":boolean,"action":"keep|replace","reason":"...","call":{"tool":"...","args":{...}}|null}',
+    'If there is no tool call and text is intermediary, set request_continuation=true.',
+    'If action is keep, return the original call in call.',
+    'Never output markdown or prose.'
+  ].join(' ');
+
+  const userInstruction = `User request: ${userMessage}\nRound: ${round}/${maxRounds}\nDraft reply: ${replyText}\nProposed call: ${proposedToolCall ? JSON.stringify(proposedToolCall) : 'NONE'}`;
+
+  try {
+    const raw = await callGemini([
+      { role: 'system', content: systemInstruction },
+      { role: 'user', content: userInstruction }
+    ], { maxTokens: 260, temperature: 0.1 });
+    const parsed = parseJsonObjectFromText(splitModelReply(raw).visible);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
   }
 }
 
@@ -313,11 +318,29 @@ async function summarizeContext(userQuery) {
     { role: 'user', content: prompt }
   ]);
 
+  const summaryText = String(summary || '').trim();
+  const looksLikeErrorJson = /^\{[\s\S]*"error"\s*:/i.test(summaryText);
+  const looksLikeEndpointError = /Unexpected endpoint or method|no compatible endpoint|Local LLM:/i.test(summaryText);
+  if (!summaryText || looksLikeErrorJson || looksLikeEndpointError) {
+    throw new Error('Summarization returned an invalid backend payload.');
+  }
+
   return [
     sysMsg,
-    { role: 'assistant', content: `[SUMMARISED CONTEXT]\n${summary}` },
+    { role: 'assistant', content: `[SUMMARISED CONTEXT]\n${summaryText}` },
     { role: 'user', content: userQuery }
   ];
+}
+
+function fallbackCompressContext(userQuery) {
+  const sysMsg = messages.find(m => m.role === 'system') || { role: 'system', content: '' };
+  const tail = messages.filter(m => m.role !== 'system').slice(-8);
+
+  if (!tail.length || tail[tail.length - 1].role !== 'user') {
+    tail.push({ role: 'user', content: userQuery });
+  }
+
+  return [sysMsg, ...tail];
 }
 
 async function generateFinalMarkdownAnswer(candidateAnswer, userMessage) {
@@ -337,39 +360,6 @@ async function generateFinalMarkdownAnswer(candidateAnswer, userMessage) {
   }
 
   return finalText;
-}
-
-function isExplicitFileDisplayRequest(userMessage) {
-  return /(mostre|mostrar|show|display|conteudo|conteúdo|full|completo|inteiro).*(readme|arquivo|file)|((readme|arquivo|file).*(no chat|in chat|aqui))/i.test(String(userMessage || ''));
-}
-
-function extractReadFilePayload(result) {
-  const raw = String(result || '');
-  const hasMore = /Has more:\s*yes/i.test(raw);
-  const match = raw.match(/Next offset:[^\n]*\n\n([\s\S]*)$/i);
-  return {
-    content: (match ? match[1] : raw).trim(),
-    hasMore
-  };
-}
-
-function looksLikeMetaPromptLeak(text) {
-  const value = String(text || '').trim();
-  if (!value) return false;
-  return /(You are a response formatter|Draft Assistant Reply|Polish this for user display|execution_steering|Return strict guidance)/i.test(value);
-}
-
-function looksLikeIntermediaryReply(text) {
-  const value = String(text || '').trim();
-  if (!value) return true;
-
-  const progressRegex = /(verificando|checking|let me check|vou verificar|analisando|aguarde|one moment|um momento|investigando|working on it|processing)/i;
-  const hasProgressCue = progressRegex.test(value);
-  const isShort = value.length <= 220;
-  const hasToolBlock = /<tool_call>[\s\S]*?<\/tool_call>/i.test(value);
-  const endsLikeFinal = /[.!?]$/.test(value);
-
-  return !hasToolBlock && hasProgressCue && isShort && !endsLikeFinal;
 }
 
 // -- AGENTIC LOOP --------------------------------------------------------------
@@ -433,12 +423,18 @@ async function agentLoop(userMessage) {
     let toolCall = await resolveToolCallFromModelReply(reply, rawReply, userMessage);
     throwIfStopRequested();
 
-    if (toolCall?.tool) {
-      const guard = applyFilesystemExplorationGuardrail(toolCall, userMessage);
-      if (guard.guarded) {
-        toolCall = guard.call;
-        addNotice(guard.reason);
-      }
+    const turnGuard = await evaluateTurnGuardrailsWithLlm({
+      userMessage,
+      replyText: reply,
+      proposedToolCall: toolCall,
+      round,
+      maxRounds: MAX_ROUNDS
+    });
+    throwIfStopRequested();
+
+    if (toolCall?.tool && turnGuard?.action === 'replace' && turnGuard?.call?.tool) {
+      toolCall = { tool: String(turnGuard.call.tool), args: turnGuard.call.args && typeof turnGuard.call.args === 'object' ? turnGuard.call.args : {} };
+      addNotice(String(turnGuard.reason || 'Guardrail replaced tool call.'));
     }
 
     const leakedReasoning = !toolCall && orchestrator.hasReasoningLeak(reply);
@@ -454,8 +450,9 @@ async function agentLoop(userMessage) {
     if (!toolCall) {
       const cleanReply = reply.replace(getToolRegex(), '').trim();
 
-      // Guardrail: do not accept short progress-style replies as final output.
-      if (round < MAX_ROUNDS && looksLikeIntermediaryReply(cleanReply)) {
+      const intermediary = !!turnGuard?.request_continuation;
+
+      if (intermediary) {
         messages.push({ role: 'assistant', content: rawReply || reply });
         messages.push({
           role: 'user',
@@ -480,8 +477,13 @@ async function agentLoop(userMessage) {
 
     // Tool call detected
     const toolContent = reply.replace(getToolRegex(), '').trim();
-    if (toolContent && !looksLikeMetaPromptLeak(toolContent)) {
-      addMessage('agent', toolContent, round, false, false, []);
+    if (toolContent) {
+      const shouldShowIntermediate = turnGuard?.show_intermediate !== undefined
+        ? !!turnGuard.show_intermediate
+        : true;
+      if (shouldShowIntermediate) {
+        addMessage('agent', toolContent, round, false, false, []);
+      }
     }
 
     sessionStats.tools++;
@@ -498,19 +500,18 @@ async function agentLoop(userMessage) {
     hideThinking();
     addMessage('tool', `? ${result}`, round, false, true);
 
-    if (toolCall.tool === 'fs_read_file' && !/^ERROR\b/i.test(String(result || '')) && isExplicitFileDisplayRequest(userMessage)) {
-      const payload = extractReadFilePayload(result);
-      const finalMarkdown = payload.hasMore
-      ? `Aqui está a primeira parte do arquivo:\n\n\`\`\`text\n${payload.content}\n\`\`\`\n\nO arquivo é maior que um único bloco. Posso continuar com a próxima parte.`
-        : payload.content;
-
-      addMessage('agent', finalMarkdown, round, false, false, []);
-      messages.push({ role: 'assistant', content: finalMarkdown });
-      syncSessionState();
-      setStatus('ok', `done in ${round} round${round>1?'s':''}`);
-      notifyIfHidden('File content ready.');
-      updateCtxBar();
-      return;
+    if (!/^ERROR\b/i.test(String(result || ''))) {
+      const evidenceFinal = await maybeFinalizeFromToolEvidenceWithLlm(userMessage, toolCall, result);
+      throwIfStopRequested();
+      if (evidenceFinal) {
+        addMessage('agent', evidenceFinal, round, false, false, []);
+        messages.push({ role: 'assistant', content: evidenceFinal });
+        syncSessionState();
+        setStatus('ok', `done in ${round} round${round>1?'s':''}`);
+        notifyIfHidden(evidenceFinal);
+        updateCtxBar();
+        return;
+      }
     }
 
     if (toolCall.tool === 'fs_list_dir' && !/^ERROR\b/i.test(String(result || ''))) {
@@ -535,6 +536,8 @@ async function agentLoop(userMessage) {
         messages = await summarizeContext(userMessage);
       } catch (e) {
         addNotice(`? Summarization failed: ${e.message}`);
+        messages = fallbackCompressContext(userMessage);
+        addNotice('Applied fallback context compression without LLM.');
       }
     }
     syncSessionState();

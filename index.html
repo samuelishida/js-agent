@@ -239,6 +239,7 @@
       <textarea id="msg-input" rows="1" placeholder="Type a message… (Shift+Enter for newline)"
                 onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
     </div>
+    <button class="btn-stop" id="btn-stop" onclick="requestStop()" title="Stop" disabled>■</button>
     <button class="btn-send" id="btn-send" onclick="sendMessage()" title="Send">▶</button>
   </div>
   <div class="input-meta">

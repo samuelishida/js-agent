@@ -39,6 +39,8 @@ Rules:
 17. Final user-facing answers must be HTML only, using simple safe tags such as p, br, strong, em, ul, ol, li, code, pre, blockquote, a, table, thead, tbody, tr, th, td, h1-h4, and hr.
 18. Do not wrap final answers in ``` fences.
 19. Do not include <html>, <body>, <script>, <style>, or inline event handlers in final answers.
+20. If the user explicitly asks to show full file contents (for example README), prioritize fs_read_file and preserve verbatim text in a <pre> block.
+21. When fs_read_file indicates more content remains, continue with fs_read_file(path, offset, length) until Has more is no before claiming the file is complete.
 
 Query hint:
 {{query_hint}}

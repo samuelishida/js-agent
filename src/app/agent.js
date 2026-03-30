@@ -8,6 +8,29 @@ function parseToolCall(text) {
   return orchestrator.parseToolCall(text);
 }
 
+let stopRequested = false;
+
+function setStopButtonState(running) {
+  const stopBtn = document.getElementById('btn-stop');
+  if (!stopBtn) return;
+  stopBtn.disabled = !running;
+}
+
+function requestStop() {
+  if (!isBusy) return;
+  stopRequested = true;
+  setStatus('busy', 'stopping…');
+  document.getElementById('input-status').textContent = 'stopping…';
+  window.AgentLLMControl?.abortActiveLlmRequest?.();
+}
+
+function throwIfStopRequested() {
+  if (!stopRequested) return;
+  const error = new Error('RUN_STOPPED');
+  error.code = 'RUN_STOPPED';
+  throw error;
+}
+
 async function executeTool(call) {
   assertRuntimeReady();
   const { orchestrator } = getRuntimeModules();
@@ -144,6 +167,7 @@ function looksLikeIntermediaryReply(text) {
 // -- AGENTIC LOOP --------------------------------------------------------------
 async function agentLoop(userMessage) {
   assertRuntimeReady();
+  throwIfStopRequested();
   const { skills, orchestrator } = getRuntimeModules();
   const MAX_ROUNDS = getMaxRounds();
   const CTX_LIMIT  = getCtxLimit();
@@ -161,6 +185,7 @@ async function agentLoop(userMessage) {
   sessionStats.msgs++;
 
   while (round < MAX_ROUNDS) {
+    throwIfStopRequested();
     round++;
     sessionStats.rounds++;
     updateStats();
@@ -170,12 +195,14 @@ async function agentLoop(userMessage) {
 
     // Corporate delay simulation
     if (delay > 0) await sleep(delay);
+    throwIfStopRequested();
 
     let rawReply;
     let parsedReply;
     let reply;
     try {
       rawReply = await callGemini(messages);
+      throwIfStopRequested();
       parsedReply = splitModelReply(rawReply);
       reply = parsedReply.visible;
       if (parsedReply.thinkingBlocks.length) {
@@ -245,8 +272,10 @@ async function agentLoop(userMessage) {
     showThinking(`executing ${toolCall.tool}…`);
 
     if (delay > 0) await sleep(delay * 0.5);
+    throwIfStopRequested();
 
     const result = await executeTool(toolCall);
+    throwIfStopRequested();
     hideThinking();
     addMessage('tool', `? ${result}`, round, false, true);
 
@@ -270,7 +299,9 @@ async function agentLoop(userMessage) {
   messages.push({ role: 'user', content: 'Answer now with what you know so far. Return the final answer as valid HTML only.' });
   showThinking('forcing final answer…');
   try {
+    throwIfStopRequested();
     const finalReply = await callGemini(messages);
+    throwIfStopRequested();
     const parsedFinalReply = splitModelReply(finalReply);
     const finalMarkdown = isLocalModeActive()
       ? parsedFinalReply.visible.replace(getToolRegex(), '').trim()
@@ -406,8 +437,10 @@ async function sendMessage() {
   input.value = '';
   autoResize(input);
   isBusy = true;
+  stopRequested = false;
   broadcastBusyState(true);
   document.getElementById('btn-send').disabled = true;
+  setStopButtonState(true);
   document.getElementById('input-status').textContent = 'processing…';
 
   addMessage('user', text, null);
@@ -422,14 +455,20 @@ async function sendMessage() {
     await agentLoop(text);
   } catch (e) {
     hideThinking();
-    addMessage('error', e.message, null);
-    setStatus('error', 'error');
+    if (e?.code === 'RUN_STOPPED' || e?.name === 'AbortError') {
+      addNotice('Run stopped by user.');
+      setStatus('ok', 'stopped');
+    } else {
+      addMessage('error', e.message, null);
+      setStatus('error', 'error');
+    }
     syncSessionState();
   }
 
   isBusy = false;
   broadcastBusyState(false);
   document.getElementById('btn-send').disabled = false;
+  setStopButtonState(false);
   document.getElementById('input-status').textContent = `${sessionStats.msgs} message${sessionStats.msgs!==1?'s':''} sent`;
   input.focus();
 }
@@ -505,6 +544,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   // Auto-probe local backends on load
   probeLocal();
+  setStopButtonState(false);
 });
 
 

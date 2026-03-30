@@ -61,6 +61,19 @@
     return /(file|files|arquivo|arquivos|folder|pasta|directory|diret[oÃ³]rio|rename|renome|move|mover|copy|copiar|delete|deletar|remove|remover|list files|listar arquivos|search file|buscar arquivo|open file|abrir arquivo|read project|ler projeto|leia o projeto|leio o proejto|codebase|repo|repository|src\/|[a-z]:\\)/i.test(String(text || ''));
   }
 
+  function detectFullFileDisplayIntent(text) {
+    const value = String(text || '');
+    return /(show|mostre|mostrar|exiba|print|imprima|cat|dump|full|complete|completo|inteiro).*(readme|README|arquivo|file)|((readme|README).*(full|complete|completo|inteiro))/i.test(value);
+  }
+
+  function detectProjectSkillsIntent(text) {
+    return /(explain|explique|skills|habilidades|capabilities|capacidades).*(project|projeto|repo|codebase)|((project|projeto|repo|codebase).*(skills|habilidades|capabilities))/i.test(String(text || ''));
+  }
+
+  function detectReadmeIntent(text) {
+    return /(readme|README\.md|leia o readme|conteudo do readme|conteúdo do readme|show readme|mostre o readme)/i.test(String(text || ''));
+  }
+
   function detectSaveIntent(text) {
     return /(save|salvar|write file|escrever arquivo|export|exportar|download|baixar|save it|save as|json file|arquivo json)/i.test(String(text || ''));
   }
@@ -107,6 +120,23 @@
         const roots = [...state.roots.keys()];
         hints.push(`Authorized local roots are already available: ${roots.join(', ')}. Prefer using those roots instead of asking for access again.`);
       }
+    }
+
+    if (detectProjectSkillsIntent(text)) {
+      plan.push('fs_list_dir', 'fs_read_file');
+      hints.push('Project + skills intent detected: read README and src/skills files before answering; prefer evidence-based summaries over assumptions.');
+    }
+
+    if (detectFullFileDisplayIntent(text)) {
+      plan.push('fs_read_file');
+      hints.push('Full-file display intent detected: use fs_read_file directly and preserve source text; avoid paraphrasing.');
+      hints.push('If the file exceeds one response, read in chunks with fs_read_file(path, offset, length) and continue until has_more is false.');
+    }
+
+    if (detectReadmeIntent(text)) {
+      plan.push('fs_read_file');
+      hints.push('README intent detected: prefer fs_read_file with a concrete file path ending in README.md (not a directory path).');
+      hints.push('If only a project directory is provided, list the directory first, then read /README.md from the authorized root.');
     }
 
     if (detectSaveIntent(text)) {
@@ -928,10 +958,25 @@
     return formatToolResult('fs_list_dir', `Root: ${rootId}\nPath: ${path || '/'}\n${entries.map(item => `${item.kind}: ${item.name}`).join('\n') || '(empty)'}`);
   }
 
-  async function readLocalFile({ path }) {
+  async function readLocalFile({ path, offset = 0, length = 12000 }) {
     const { handle } = await resolveFile(path, false);
     const text = await readFileAsText(handle);
-    return formatToolResult(`fs_read_file ${path}`, text.slice(0, 12000));
+    const safeOffset = Math.max(0, Number(offset) || 0);
+    const safeLength = Math.min(20000, Math.max(500, Number(length) || 12000));
+    const chunk = text.slice(safeOffset, safeOffset + safeLength);
+    const nextOffset = safeOffset + chunk.length;
+    const hasMore = nextOffset < text.length;
+
+    const header = [
+      `Path: ${path}`,
+      `Offset: ${safeOffset}`,
+      `Returned chars: ${chunk.length}`,
+      `Total chars: ${text.length}`,
+      `Has more: ${hasMore ? 'yes' : 'no'}`,
+      `Next offset: ${hasMore ? nextOffset : safeOffset}`
+    ].join('\n');
+
+    return formatToolResult(`fs_read_file ${path}`, `${header}\n\n${chunk}`);
   }
 
   async function pickUpload() {
@@ -1267,7 +1312,7 @@
     },
     fs_read_file: {
       name: 'fs_read_file',
-      description: 'Opens and reads a local file as text.',
+      description: 'Opens and reads a local file as text, with optional chunking via offset and length.',
       retries: 1,
       run: args => readLocalFile(args)
     },

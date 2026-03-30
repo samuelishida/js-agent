@@ -24,9 +24,21 @@
   function tryParseToolObject(raw) {
     const parsed = parseJsonSafely(raw);
     if (parsed?.tool) {
+      const parsedArgs = parsed.args && typeof parsed.args === 'object' && !Array.isArray(parsed.args)
+        ? parsed.args
+        : {
+            ...(parsed.path && { path: parsed.path }),
+            ...(parsed.url && { url: parsed.url }),
+            ...(parsed.query && { query: parsed.query }),
+            ...(parsed.expression && { expression: parsed.expression }),
+            ...(parsed.text && { text: parsed.text }),
+            ...(parsed.offset !== undefined && { offset: parsed.offset }),
+            ...(parsed.length !== undefined && { length: parsed.length })
+          };
+
       return {
         tool: String(parsed.tool),
-        args: parsed.args && typeof parsed.args === 'object' && !Array.isArray(parsed.args) ? parsed.args : {}
+        args: parsedArgs
       };
     }
 
@@ -38,6 +50,63 @@
     return { tool, args };
   }
 
+  function findBalancedJsonObjectWithTool(text) {
+    const value = String(text || '');
+    const toolIndex = value.search(/"tool"\s*:/i);
+    if (toolIndex < 0) return null;
+
+    let start = value.lastIndexOf('{', toolIndex);
+    while (start >= 0) {
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+
+      for (let i = start; i < value.length; i++) {
+        const ch = value[i];
+
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+            continue;
+          }
+          if (ch === '\\') {
+            escaped = true;
+            continue;
+          }
+          if (ch === '"') {
+            inString = false;
+          }
+          continue;
+        }
+
+        if (ch === '"') {
+          inString = true;
+          continue;
+        }
+
+        if (ch === '{') {
+          depth += 1;
+          continue;
+        }
+
+        if (ch === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            const candidate = value.slice(start, i + 1);
+            if (/"tool"\s*:/i.test(candidate)) {
+              return candidate;
+            }
+            break;
+          }
+        }
+      }
+
+      start = value.lastIndexOf('{', start - 1);
+    }
+
+    return null;
+  }
+
   function extractStandaloneToolCall(text) {
     const value = String(text || '').trim();
     if (!value) return null;
@@ -47,10 +116,10 @@
     const direct = tryParseToolObject(unfenced);
     if (direct?.tool) return direct;
 
-    const objectLike = unfenced.match(/\{[\s\S]*"tool"\s*:\s*"[^"\n]+"[\s\S]*\}/i);
+    const objectLike = findBalancedJsonObjectWithTool(unfenced);
     if (!objectLike) return null;
 
-    return tryParseToolObject(objectLike[0]);
+    return tryParseToolObject(objectLike);
   }
 
   function extractToolCall(text) {

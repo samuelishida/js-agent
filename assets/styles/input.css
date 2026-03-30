@@ -46,6 +46,33 @@ textarea::placeholder { color: var(--text3); }
 }
 .btn-send:hover { background: linear-gradient(135deg, var(--accent), #4aa7d6); }
 .btn-send:disabled { background: var(--bg4); color: var(--text3); cursor: not-allowed; }
+
+.btn-stop {
+  background: linear-gradient(135deg, #a14a4a, #7b2d2d);
+  border: none;
+  border-radius: 6px;
+  width: 36px;
+  height: 36px;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s;
+}
+
+.btn-stop:hover {
+  background: linear-gradient(135deg, #bb5555, #913737);
+}
+
+.btn-stop:disabled {
+  background: var(--bg4);
+  color: var(--text3);
+  cursor: not-allowed;
+}
+
 .input-meta { display: flex; justify-content: space-between; margin-top: 6px; font-size: 9px; color: var(--text3); }
 .input-hint kbd {
   background: var(--bg4);

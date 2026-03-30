@@ -1,4 +1,11 @@
-﻿async function callGemini(msgs) { return callLLM(msgs); }
+﻿let activeLlmController = null;
+
+function abortActiveLlmRequest() {
+  if (!activeLlmController) return;
+  activeLlmController.abort();
+}
+
+async function callGemini(msgs) { return callLLM(msgs); }
 
 function sanitizeModelReply(text) {
   return splitModelReply(text).visible;
@@ -231,13 +238,33 @@ function renderAgentHtml(text) {
 }
 
 async function callLLM(msgs) {
-  if (localBackend.enabled && localBackend.url) {
-    return callLocal(msgs);
+  if (activeLlmController) {
+    activeLlmController.abort();
   }
-  return callGeminiDirect(msgs);
+
+  activeLlmController = new AbortController();
+  const { signal } = activeLlmController;
+
+  if (localBackend.enabled && localBackend.url) {
+    try {
+      return await callLocal(msgs, signal);
+    } finally {
+      if (activeLlmController?.signal === signal) {
+        activeLlmController = null;
+      }
+    }
+  }
+
+  try {
+    return await callGeminiDirect(msgs, signal);
+  } finally {
+    if (activeLlmController?.signal === signal) {
+      activeLlmController = null;
+    }
+  }
 }
 
-async function callGeminiDirect(msgs) {
+async function callGeminiDirect(msgs, signal) {
   const modelSelect = document.getElementById('model-select');
   let model = modelSelect.value;
   if (!localBackend.enabled) document.getElementById('badge-model').textContent = model;
@@ -260,7 +287,12 @@ async function callGeminiDirect(msgs) {
 
   const requestModel = async activeModel => {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${apiKey}`;
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal
+    });
     return { res, text: await res.text() };
   };
 
@@ -278,7 +310,7 @@ async function callGeminiDirect(msgs) {
   if (!data.candidates?.[0]) throw new Error('No candidates returned');
   return data.candidates[0].content.parts[0].text || '';
 }
-async function callLocal(msgs) {
+async function callLocal(msgs, signal) {
   // Detect endpoint type from model select or probed URL
   const modelSel = document.getElementById('local-model-select').value;
   const model = modelSel || localBackend.model || 'local-model';
@@ -315,7 +347,8 @@ async function callLocal(msgs) {
       const res = await fetch(localBackend.url + ep.path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal
       });
 
       if (!res.ok) continue;
@@ -334,5 +367,9 @@ async function callLocal(msgs) {
   }
   throw new Error(`Local LLM: no endpoint responded at ${localBackend.url}`);
 }
+
+window.AgentLLMControl = {
+  abortActiveLlmRequest
+};
 
 // -- TOOL EXECUTOR -------------------------------------------------------------

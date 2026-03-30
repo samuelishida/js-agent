@@ -9,7 +9,7 @@
       { name: 'fs_tree', signature: 'fs_tree(path)' },
       { name: 'fs_exists', signature: 'fs_exists(path)' },
       { name: 'fs_stat', signature: 'fs_stat(path)' },
-      { name: 'fs_read_file', signature: 'fs_read_file(path)' },
+      { name: 'fs_read_file', signature: 'fs_read_file(path, offset?, length?)' },
       { name: 'fs_preview_file', signature: 'fs_preview_file(path)' },
       { name: 'fs_search_name', signature: 'fs_search_name(...)' },
       { name: 'fs_search_content', signature: 'fs_search_content(...)' },

@@ -19,7 +19,7 @@
   </div>
   <div class="header-badges">
     <div class="badge badge-purple" id="badge-rounds">rounds 10</div>
-    <div class="badge badge-amber"  id="badge-ctx">context 100k</div>
+    <div class="badge badge-amber"  id="badge-ctx">context 50k</div>
     <div class="badge badge-green"  id="badge-model">gemini-2.5-flash-lite</div>
     <div class="badge badge-red"    id="badge-local" style="cursor:pointer" onclick="probeLocal()" title="Click to re-probe">local: —</div>
     <div class="badge badge-blue"   id="badge-status">
@@ -109,16 +109,16 @@
 
       <div class="constraint-row">
         <span class="constraint-key">Context budget (k chars)</span>
-        <span class="constraint-val" id="val-ctx">100</span>
+        <span class="constraint-val" id="val-ctx">50</span>
       </div>
-      <input type="range" id="sl-ctx" min="10" max="200" value="100"
+      <input type="range" id="sl-ctx" min="10" max="200" value="50"
              oninput="document.getElementById('val-ctx').textContent=this.value;updateBadge()">
 
       <div class="constraint-row">
         <span class="constraint-key">Response pacing (ms)</span>
-        <span class="constraint-val" id="val-delay">0</span>
+        <span class="constraint-val" id="val-delay">500</span>
       </div>
-      <input type="range" id="sl-delay" min="0" max="3000" step="100" value="0"
+      <input type="range" id="sl-delay" min="0" max="3000" step="100" value="500"
              oninput="document.getElementById('val-delay').textContent=this.value">
 
       <div class="ctx-bar-wrap">

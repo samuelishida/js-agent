@@ -21,9 +21,43 @@
     }
   }
 
+  function tryParseToolObject(raw) {
+    const parsed = parseJsonSafely(raw);
+    if (parsed?.tool) {
+      return {
+        tool: String(parsed.tool),
+        args: parsed.args && typeof parsed.args === 'object' && !Array.isArray(parsed.args) ? parsed.args : {}
+      };
+    }
+
+    const tool = extractJsonString(raw, 'tool');
+    if (!tool) return null;
+
+    const argsMatch = String(raw || '').match(/"args"\s*:\s*(\{[\s\S]*\})/i);
+    const args = argsMatch ? (parseJsonSafely(argsMatch[1]) || {}) : {};
+    return { tool, args };
+  }
+
+  function extractStandaloneToolCall(text) {
+    const value = String(text || '').trim();
+    if (!value) return null;
+
+    const unfenced = value.replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, '$1').trim();
+
+    const direct = tryParseToolObject(unfenced);
+    if (direct?.tool) return direct;
+
+    const objectLike = unfenced.match(/\{[\s\S]*"tool"\s*:\s*"[^"\n]+"[\s\S]*\}/i);
+    if (!objectLike) return null;
+
+    return tryParseToolObject(objectLike[0]);
+  }
+
   function extractToolCall(text) {
     const match = String(text || '').match(TOOL_BLOCK);
-    if (!match) return null;
+    if (!match) {
+      return extractStandaloneToolCall(text);
+    }
 
     const parsed = parseJsonSafely(match[1]);
     if (parsed?.tool) return parsed;

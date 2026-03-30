@@ -112,7 +112,7 @@ async function summarizeContext(userQuery) {
 async function generateFinalMarkdownAnswer(candidateAnswer, userMessage) {
   assertRuntimeReady();
 
-  const systemInstruction = `You are a concise, final-answer-only assistant. Return exactly one answer formatted in Markdown. Do not include analysis, tool call syntax, or surrounding words like 'final answer'.`;
+  const systemInstruction = `You are a concise, final-answer-only assistant. Return exactly one answer formatted in Markdown. Do not include analysis, tool call syntax, or surrounding words like 'final answer'. Never output <think> tags.`;
   const userInstruction = `Context-based finalization request.\n\nOriginal assistant output:\n${candidateAnswer}\n\nProvide a single cleaned final response in Markdown format, without HTML wrapper.`;
 
   const finalReply = await callGemini([
@@ -126,6 +126,19 @@ async function generateFinalMarkdownAnswer(candidateAnswer, userMessage) {
   }
 
   return finalText;
+}
+
+function looksLikeIntermediaryReply(text) {
+  const value = String(text || '').trim();
+  if (!value) return true;
+
+  const progressRegex = /(verificando|checking|let me check|vou verificar|analisando|aguarde|one moment|um momento|investigando|working on it|processing)/i;
+  const hasProgressCue = progressRegex.test(value);
+  const isShort = value.length <= 220;
+  const hasToolBlock = /<tool_call>[\s\S]*?<\/tool_call>/i.test(value);
+  const endsLikeFinal = /[.!?]$/.test(value);
+
+  return !hasToolBlock && hasProgressCue && isShort && !endsLikeFinal;
 }
 
 // -- AGENTIC LOOP --------------------------------------------------------------
@@ -189,11 +202,30 @@ async function agentLoop(userMessage) {
     }
 
     if (!toolCall) {
-      // Final answer (post-process for markdown finalization)
       const cleanReply = reply.replace(getToolRegex(), '').trim();
-      const finalMarkdown = await generateFinalMarkdownAnswer(cleanReply, userMessage);
 
-      addMessage('agent', finalMarkdown, round, false, false, parsedReply?.thinkingBlocks || []);
+      // Guardrail: do not accept short progress-style replies as final output.
+      if (round < MAX_ROUNDS && looksLikeIntermediaryReply(cleanReply)) {
+        messages.push({ role: 'assistant', content: rawReply || reply });
+        messages.push({
+          role: 'user',
+          content: 'Your previous answer looked like an intermediary status update. Continue the task now: either call exactly one tool, or provide a complete final answer.'
+        });
+        addNotice('Model returned an intermediary status update. Requesting continuation.');
+        updateCtxBar();
+        continue;
+      }
+
+      let finalMarkdown = cleanReply;
+      if (!isLocalModeActive()) {
+        try {
+          finalMarkdown = await generateFinalMarkdownAnswer(cleanReply, userMessage);
+        } catch {
+          finalMarkdown = cleanReply;
+        }
+      }
+
+      addMessage('agent', finalMarkdown, round, false, false, []);
       messages.push({ role: 'assistant', content: finalMarkdown });
       syncSessionState();
       setStatus('ok', `done in ${round} round${round>1?'s':''}`);
@@ -240,10 +272,12 @@ async function agentLoop(userMessage) {
   try {
     const finalReply = await callGemini(messages);
     const parsedFinalReply = splitModelReply(finalReply);
-    const finalMarkdown = await generateFinalMarkdownAnswer(parsedFinalReply.visible, userMessage);
+    const finalMarkdown = isLocalModeActive()
+      ? parsedFinalReply.visible.replace(getToolRegex(), '').trim()
+      : await generateFinalMarkdownAnswer(parsedFinalReply.visible, userMessage);
 
     hideThinking();
-    addMessage('agent', finalMarkdown, MAX_ROUNDS, false, false, parsedFinalReply.thinkingBlocks);
+    addMessage('agent', finalMarkdown, MAX_ROUNDS, false, false, []);
     messages.push({ role: 'assistant', content: finalMarkdown });
     syncSessionState();
     notifyIfHidden(finalMarkdown || 'Response ready. Check the latest result.');

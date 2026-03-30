@@ -83,8 +83,40 @@
     return `ERROR executing ${call.tool}: ${lastError?.message || 'unknown failure'}`;
   }
 
+  function canonicalToolName(name) {
+    return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function normalizeToolCall(call) {
+    if (!call?.tool) return null;
+
+    const registry = window.AgentSkills?.registry || {};
+    if (registry[call.tool]) {
+      return { tool: call.tool, args: call.args || {} };
+    }
+
+    const requested = canonicalToolName(call.tool);
+    const candidates = Object.keys(registry);
+    const exact = candidates.find(name => canonicalToolName(name) === requested);
+    if (exact) {
+      return { tool: exact, args: call.args || {} };
+    }
+
+    const prefixed = candidates.find(name => {
+      const normalized = canonicalToolName(name);
+      return normalized.startsWith(requested) || requested.startsWith(normalized);
+    });
+
+    if (prefixed) {
+      return { tool: prefixed, args: call.args || {} };
+    }
+
+    return { tool: call.tool, args: call.args || {} };
+  }
+
   function parseToolCall(text) {
-    return window.AgentRegex.extractToolCall(text);
+    const call = window.AgentRegex.extractToolCall(text);
+    return normalizeToolCall(call);
   }
 
   function hasReasoningLeak(text) {

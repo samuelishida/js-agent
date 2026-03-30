@@ -242,6 +242,15 @@ function toggleLocalBackend() {
 function _activateLocal(isSilent=false) {
   localBackend.enabled = true;
   localStorage.setItem('agent_prefer_local_backend', 'true');
+
+  const ctxSlider = document.getElementById('sl-ctx');
+  const ctxValue = document.getElementById('val-ctx');
+  if (ctxSlider && ctxValue) {
+    ctxSlider.value = '45';
+    ctxValue.textContent = '45';
+    if (typeof updateBadge === 'function') updateBadge();
+  }
+
   const tog = document.getElementById('toggle-local');
   tog.classList.add('active');
   document.getElementById('local-toggle-label').textContent = 'on';

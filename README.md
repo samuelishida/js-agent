@@ -77,7 +77,7 @@ If local routing is enabled, the UI switches model execution to the local backen
 
 Recommended local model (current best result):
 
-- `mistralai/ministral-3-3b`
+- `mistralai/ministral-3-14b-reasoning`
 
 ## Skills
 

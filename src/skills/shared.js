@@ -103,6 +103,10 @@
     return /(other tab|another tab|open tab|other window|another window|dashboard|share|send to other tab|manda pra outra aba|outra aba|outra janela|espera a outra aba|broadcast|all tabs|todas as abas)/i.test(String(text || ''));
   }
 
+  function detectRecencyIntent(text) {
+    return /(recent|recente|latest|last\s+(hour|day|week|month|year)|today|hoje|agora|atual|atualizado|news|noticia|noticias|ultim[ao]s?|202[4-9]|2030)/i.test(String(text || ''));
+  }
+
   function buildPreflightPlan(userMessage) {
     const plan = [];
     const hints = [];
@@ -476,11 +480,38 @@
     return entries.length ? formatToolResult('DuckDuckGo search', entries.join('\n\n')) : null;
   }
 
+  async function searchGoogleNewsRss(query) {
+    const terms = String(query || '').trim();
+    if (!terms) return null;
+
+    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(terms)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`;
+    const res = await window.fetchWithTimeout(url, { cache: 'no-store' }, 8000);
+    if (!res.ok) throw new Error(`Google News RSS HTTP ${res.status}`);
+
+    const xml = await res.text();
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
+    const items = [...doc.querySelectorAll('item')].slice(0, 6);
+    if (!items.length) return null;
+
+    const entries = items.map((item, index) => {
+      const title = normalizeSearchSnippet(item.querySelector('title')?.textContent || 'Untitled');
+      const link = normalizeSearchSnippet(item.querySelector('link')?.textContent || '');
+      const pubDate = normalizeSearchSnippet(item.querySelector('pubDate')?.textContent || '');
+      const source = normalizeSearchSnippet(item.querySelector('source')?.textContent || 'Google News');
+
+      const snippet = pubDate ? `Published: ${pubDate}` : 'Published date unavailable';
+      return formatSearchEntry(index + 1, title, snippet, link, source);
+    });
+
+    return formatToolResult('Google News RSS', entries.join('\n\n'));
+  }
+
   async function runSearchSkills(query) {
     const diagnostics = [];
     const runners = [
       { name: 'weather_current', run: () => detectWeatherIntent(query) ? getCurrentWeather({}) : null },
       { name: 'fx_rate', run: () => searchFxRate(query) },
+      { name: 'google_news', run: () => searchGoogleNewsRss(query) },
       { name: 'duckduckgo', run: () => searchDuckDuckGo(query) },
       { name: 'wikipedia', run: () => searchWikipedia(query) },
       { name: 'wikidata', run: () => searchWikidata(query) }
@@ -491,7 +522,7 @@
       try {
         const result = await runner.run();
         if (result) {
-          results.push(result);
+          results.push({ source: runner.name, content: result });
           diagnostics.push(`${runner.name}: ok`);
         } else {
           diagnostics.push(`${runner.name}: no match`);
@@ -505,7 +536,17 @@
       throw new Error(`No search providers returned usable results. Diagnostics: ${diagnostics.join('; ')}`);
     }
 
-    return [results.join('\n\n'), formatToolResult('Search diagnostics', diagnostics.join('\n'))].join('\n\n');
+    const recencyRequested = detectRecencyIntent(query);
+    const nonEncyclopedic = results.filter(entry => !['wikipedia', 'wikidata'].includes(entry.source));
+    if (recencyRequested && !nonEncyclopedic.length) {
+      diagnostics.push('recency-check: only encyclopedic sources responded; answer may be outdated.');
+    }
+
+    if (results.length < 2) {
+      diagnostics.push('source-diversity: only one provider returned data for this query.');
+    }
+
+    return [results.map(entry => entry.content).join('\n\n'), formatToolResult('Search diagnostics', diagnostics.join('\n'))].join('\n\n');
   }
   async function fetchReadablePage(url) {
     const normalizedUrl = String(url || '').trim();

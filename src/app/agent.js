@@ -64,6 +64,29 @@ function parseJsonObjectFromText(text) {
   }
 }
 
+function normalizeComparableText(text) {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function looksLikeFinalAnswerText(text) {
+  const value = String(text || '').trim();
+  if (!value) return false;
+
+  if (parseToolCall(value)) return false;
+  if (/^\s*<tool_call>/i.test(value)) return false;
+
+  const progressCue = /(verificando|checking|let me check|vou verificar|analisando|aguarde|one moment|um momento|investigando|working on it|processing|continuando|continuing)/i;
+  const asksMoreWork = /(continue a tarefa|continue the task|chame uma ferramenta|call exactly one tool|preciso verificar|i need to check)/i;
+  if (progressCue.test(value) || asksMoreWork.test(value)) return false;
+
+  const hasSentenceShape = /[.!?]\s*$/.test(value) || value.includes('\n');
+  const minLength = value.length >= 90;
+  return minLength && hasSentenceShape;
+}
+
 
 function recordToolFailure(call, result) {
   if (!/^ERROR\b/i.test(String(result || ''))) {
@@ -456,7 +479,14 @@ async function agentLoop(userMessage) {
     if (!toolCall) {
       const cleanReply = reply.replace(getToolRegex(), '').trim();
 
-      const intermediary = !!turnGuard?.request_continuation;
+      const likelyFinalAnswer = looksLikeFinalAnswerText(cleanReply);
+      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+      const repeatedAssistantAnswer = normalizeComparableText(lastAssistant?.content) === normalizeComparableText(cleanReply) && !!cleanReply;
+      const intermediary = !!turnGuard?.request_continuation && !likelyFinalAnswer && !repeatedAssistantAnswer;
+
+      if (!!turnGuard?.request_continuation && !intermediary) {
+        addNotice('Guardrail requested continuation, but answer looks final. Accepting final response.');
+      }
 
       if (intermediary) {
         messages.push({ role: 'assistant', content: rawReply || reply });

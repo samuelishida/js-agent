@@ -270,15 +270,27 @@ function extractThinkingBlocks(text) {
     .filter(Boolean);
 }
 
+function normalizeVisibleModelText(text) {
+  let value = String(text || '').trim();
+  if (!value) return '';
+
+  value = value
+    .replace(/^```(?:xml|html)?\s*([\s\S]*?)\s*```$/i, '$1')
+    .trim();
+
+  // Some models prepend a literal "markdown" token before the actual answer.
+  value = value.replace(/^markdown\s+(?=[#>*\-\d`\[]|\w)/i, '');
+
+  return value.trim();
+}
+
 function splitModelReply(text) {
   const raw = String(text || '');
+  const withoutThinking = raw.replace(/<think>[\s\S]*?<\/think>/gi, '');
   return {
     raw,
     thinkingBlocks: extractThinkingBlocks(raw),
-    visible: raw
-      .replace(/<think>[\s\S]*?<\/think>/gi, '')
-      .replace(/^\s*```(?:xml|html)?\s*([\s\S]*?)\s*```$/i, '$1')
-      .trim()
+    visible: normalizeVisibleModelText(withoutThinking)
   };
 }
 

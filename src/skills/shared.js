@@ -240,14 +240,15 @@
       .trim();
   }
 
-  async function fetchJsonWithTimeout(url, timeoutMs = 6000) {
-    const res = await window.fetchWithTimeout(url, { cache: 'no-store' }, timeoutMs);
+  async function fetchJsonWithTimeout(url, timeoutMs = 6000, init = {}) {
+    const res = await window.fetchWithTimeout(url, { cache: 'no-store', ...init }, timeoutMs);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   }
 
   function normalizeSearchQuery(query) {
     return String(query || '')
+      .replace(/[+]/g, ' ')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
@@ -260,7 +261,9 @@
   }
 
   function buildSearchQueryVariants(query) {
-    const original = String(query || '').trim();
+    const original = String(query || '')
+      .replace(/[+]/g, ' ')
+      .trim();
     const normalized = normalizeSearchQuery(query);
     const variants = [original, normalized];
 
@@ -506,12 +509,53 @@
     return formatToolResult('Google News RSS', entries.join('\n\n'));
   }
 
+  function hasMeaningfulToolBody(result) {
+    const text = String(result || '').trim();
+    if (!text) return false;
+
+    const lines = text.split(/\r?\n/).map(line => line.trim());
+    if (lines.length <= 1) return false;
+
+    const contentLines = lines.filter(line => line && !line.startsWith('## '));
+    return contentLines.length > 0;
+  }
+
+  async function searchGithubRepositories(query) {
+    const terms = String(query || '').replace(/[+]/g, ' ').trim();
+    if (!terms) return null;
+
+    const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(`${terms} in:name,description,readme`)}&sort=stars&order=desc&per_page=6`;
+    const data = await fetchJsonWithTimeout(url, 8000, {
+      headers: {
+        Accept: 'application/vnd.github+json'
+      }
+    });
+
+    const repos = Array.isArray(data?.items) ? data.items.slice(0, 6) : [];
+    if (!repos.length) return null;
+
+    const entries = repos.map((repo, index) => {
+      const title = normalizeSearchSnippet(repo.full_name || repo.name || 'Unknown repository');
+      const snippet = [
+        normalizeSearchSnippet(repo.description || ''),
+        `Stars: ${Number(repo.stargazers_count || 0).toLocaleString('en-US')}`,
+        repo.language ? `Language: ${repo.language}` : '',
+        repo.updated_at ? `Updated: ${new Date(repo.updated_at).toISOString().slice(0, 10)}` : ''
+      ].filter(Boolean).join(' | ');
+
+      return formatSearchEntry(index + 1, title, snippet || 'No description available.', repo.html_url || '', 'github');
+    });
+
+    return formatToolResult('GitHub repositories', entries.join('\n\n'));
+  }
+
   async function runSearchSkills(query) {
     const diagnostics = [];
     const runners = [
       { name: 'weather_current', run: () => detectWeatherIntent(query) ? getCurrentWeather({}) : null },
       { name: 'fx_rate', run: () => searchFxRate(query) },
       { name: 'google_news', run: () => searchGoogleNewsRss(query) },
+      { name: 'github_repositories', run: () => searchGithubRepositories(query) },
       { name: 'duckduckgo', run: () => searchDuckDuckGo(query) },
       { name: 'wikipedia', run: () => searchWikipedia(query) },
       { name: 'wikidata', run: () => searchWikidata(query) }
@@ -521,9 +565,11 @@
     for (const runner of runners) {
       try {
         const result = await runner.run();
-        if (result) {
+        if (hasMeaningfulToolBody(result)) {
           results.push({ source: runner.name, content: result });
           diagnostics.push(`${runner.name}: ok`);
+        } else if (result) {
+          diagnostics.push(`${runner.name}: empty`);
         } else {
           diagnostics.push(`${runner.name}: no match`);
         }
@@ -548,14 +594,83 @@
 
     return [results.map(entry => entry.content).join('\n\n'), formatToolResult('Search diagnostics', diagnostics.join('\n'))].join('\n\n');
   }
+
+  function parseGithubRepositoryUrl(url) {
+    try {
+      const parsed = new URL(String(url || ''));
+      const host = parsed.hostname.toLowerCase();
+      if (host !== 'github.com' && host !== 'www.github.com') return null;
+
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      if (parts.length < 2) return null;
+      const owner = parts[0];
+      const repo = parts[1];
+      if (!owner || !repo || repo.endsWith('.git')) return null;
+
+      return { owner, repo };
+    } catch {
+      return null;
+    }
+  }
+
+  async function fetchGithubRepositorySnapshot(url) {
+    const repoInfo = parseGithubRepositoryUrl(url);
+    if (!repoInfo) return null;
+
+    const { owner, repo } = repoInfo;
+    const baseApi = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+    const headers = { Accept: 'application/vnd.github+json' };
+
+    const meta = await fetchJsonWithTimeout(baseApi, 8000, { headers });
+    let readme = '';
+
+    try {
+      const readmeRes = await window.fetchWithTimeout(`${baseApi}/readme`, {
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/vnd.github.raw+json'
+        }
+      }, 8000);
+
+      if (readmeRes.ok) {
+        readme = (await readmeRes.text()).trim();
+      }
+    } catch {}
+
+    const summaryLines = [
+      `Repository: ${meta.full_name || `${owner}/${repo}`}`,
+      `URL: ${meta.html_url || url}`,
+      `Description: ${meta.description || 'No description provided.'}`,
+      `Stars: ${Number(meta.stargazers_count || 0).toLocaleString('en-US')}`,
+      `Language: ${meta.language || 'Unknown'}`,
+      `Updated: ${meta.updated_at || 'Unknown'}`,
+      ''
+    ];
+
+    if (readme) {
+      summaryLines.push('README preview:');
+      summaryLines.push(readme.slice(0, 7000));
+    } else {
+      summaryLines.push('README preview unavailable.');
+    }
+
+    return summaryLines.join('\n').trim();
+  }
+
   async function fetchReadablePage(url) {
     const normalizedUrl = String(url || '').trim();
     if (!/^https?:\/\//i.test(normalizedUrl)) {
       throw new Error('Invalid URL. Use a full http:// or https:// address.');
     }
 
+    // GitHub HTML often exceeds short browser timeouts; API snapshot is faster and stable.
     try {
-      const res = await window.fetchWithTimeout(normalizedUrl, { cache: 'no-store' }, 6000);
+      const githubSnapshot = await fetchGithubRepositorySnapshot(normalizedUrl);
+      if (githubSnapshot) return githubSnapshot.slice(0, 8000);
+    } catch {}
+
+    try {
+      const res = await window.fetchWithTimeout(normalizedUrl, { cache: 'no-store' }, 7000);
       if (res.ok) {
         const type = res.headers.get('content-type') || '';
         const raw = await res.text();
@@ -564,12 +679,27 @@
       }
     } catch {}
 
-    const readerUrl = `https://r.jina.ai/http://${normalizedUrl.replace(/^https?:\/\//i, '')}`;
-    const proxyRes = await window.fetchWithTimeout(readerUrl, { cache: 'no-store' }, 10000);
-    if (!proxyRes.ok) throw new Error(`Reader proxy failed with HTTP ${proxyRes.status}`);
-    const text = (await proxyRes.text()).trim();
-    if (!text) throw new Error('No readable content returned.');
-    return text.slice(0, 8000);
+    const bareUrl = normalizedUrl.replace(/^https?:\/\//i, '');
+    const readerUrls = [
+      `https://r.jina.ai/http://${bareUrl}`,
+      `https://r.jina.ai/https://${bareUrl}`
+    ];
+
+    let lastError = null;
+    for (const readerUrl of readerUrls) {
+      try {
+        const proxyRes = await window.fetchWithTimeout(readerUrl, { cache: 'no-store' }, 15000);
+        if (!proxyRes.ok) throw new Error(`Reader proxy failed with HTTP ${proxyRes.status}`);
+
+        const text = (await proxyRes.text()).trim();
+        if (!text) throw new Error('No readable content returned.');
+        return text.slice(0, 8000);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw new Error(`Unable to fetch readable page content. ${lastError?.message || 'All fetch strategies failed.'}`);
   }
 
   async function getCurrentPosition() {

@@ -424,6 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
   chatSessions = loadSessions();
   initCacheSync();
   initBusySync();
+  updateFileAccessStatus();
   if (!chatSessions.length) createSession();
   if (!getActiveSession()) activeSessionId = chatSessions[0]?.id || createSession().id;
   renderSessionList();

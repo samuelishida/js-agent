@@ -101,6 +101,12 @@
     if (detectFilesystemIntent(text)) {
       plan.push('fs_list_dir', 'fs_read_file', 'fs_search_name', 'fs_search_content');
       hints.push('Filesystem intent detected: explore before mutating unless the user explicitly asked to save/export a file.');
+      if (!state.roots.size) {
+        hints.push('No local folder is authorized yet. Ask the user to click the "Authorize Folder" button in the Files panel before trying direct file access.');
+      } else {
+        const roots = [...state.roots.keys()];
+        hints.push(`Authorized local roots are already available: ${roots.join(', ')}. Prefer using those roots instead of asking for access again.`);
+      }
     }
 
     if (detectSaveIntent(text)) {
@@ -802,7 +808,9 @@
     const raw = String(path || '').trim();
     if (!raw) return { rootId: state.defaultRootId, segments: [] };
 
-    const explicit = raw.match(/^([^:]+):\/?(.*)$/);
+    const normalized = raw.replace(/\\/g, '/').replace(/\/+/g, '/');
+
+    const explicit = normalized.match(/^([^:]+):\/?(.*)$/);
     if (explicit && state.roots.has(explicit[1])) {
       return {
         rootId: explicit[1],
@@ -810,22 +818,33 @@
       };
     }
 
+    const windowsAbsolute = normalized.match(/^[A-Za-z]:\/(.+)$/);
+    if (windowsAbsolute) {
+      const absoluteSegments = windowsAbsolute[1].split('/').filter(Boolean);
+      for (const rootId of state.roots.keys()) {
+        const rootName = String(rootId || '').toLowerCase();
+        const matchIndex = absoluteSegments.findIndex(segment => segment.toLowerCase() === rootName);
+        if (matchIndex >= 0) {
+          return {
+            rootId,
+            segments: absoluteSegments.slice(matchIndex + 1)
+          };
+        }
+      }
+    }
+
     return {
       rootId: state.defaultRootId,
-      segments: raw.replace(/^\/+/, '').split('/').filter(Boolean)
+      segments: normalized.replace(/^\/+/, '').split('/').filter(Boolean)
     };
   }
 
   async function ensureRoot(rootId) {
     const id = rootId || state.defaultRootId;
-    let root = state.roots.get(id);
-
-    if (!root && supportsFsAccess()) {
-      await pickDirectory();
-      root = state.roots.get(rootId || state.defaultRootId);
+    const root = state.roots.get(id);
+    if (!root) {
+      throw new Error('No directory root selected. Ask the user to click "Authorize Folder" in the Files panel first.');
     }
-
-    if (!root) throw new Error('No directory root selected. Run fs_pick_directory first.');
     return { rootId: rootId || state.defaultRootId, root };
   }
 
@@ -889,7 +908,15 @@
 
   async function pickDirectory() {
     assertFsAccess();
-    const handle = await window.showDirectoryPicker();
+    let handle;
+    try {
+      handle = await window.showDirectoryPicker();
+    } catch (error) {
+      if (/user gesture/i.test(String(error?.message || ''))) {
+        throw new Error('Directory access requires a direct user gesture. Ask the user to click "Authorize Folder" in the Files panel.');
+      }
+      throw error;
+    }
     const rootId = registerRoot(handle, handle.name);
     const entries = await collectEntries(handle);
     return formatToolResult('fs_pick_directory', `Root: ${rootId}\nEntries: ${entries.length}\n${entries.map(item => `${item.kind}: ${item.name}`).join('\n')}`);
@@ -1039,7 +1066,15 @@
 
   async function listRoots() {
     const roots = [...state.roots.keys()];
-    return formatToolResult('fs_list_roots', roots.length ? roots.join('\n') : '(no roots selected)');
+    if (!roots.length) {
+      return formatToolResult('fs_list_roots', '(no roots selected)');
+    }
+
+    const lines = roots.map(rootId => {
+      const marker = rootId === state.defaultRootId ? ' (default)' : '';
+      return `${rootId}${marker}`;
+    });
+    return formatToolResult('fs_list_roots', lines.join('\n'));
   }
 
   async function fileExists({ path }) {
@@ -1219,7 +1254,7 @@
     },
     fs_pick_directory: {
       name: 'fs_pick_directory',
-      description: 'Prompts the user to pick a local directory root for direct file operations when the browser supports File System Access API.',
+      description: 'Prompts the user to pick a local directory root for direct file operations. This must be triggered from a direct user gesture, such as clicking the Authorize Folder button in the Files panel.',
       retries: 1,
       run: () => pickDirectory()
     },

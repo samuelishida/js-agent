@@ -149,6 +149,31 @@ function handleResponsiveSidebar() {
   }
 }
 
+function updateFileAccessStatus() {
+  const el = document.getElementById('file-access-status');
+  if (!el) return;
+
+  const roots = [...(window.AgentSkills?.state?.roots?.keys?.() || [])];
+  el.textContent = roots.length
+    ? `authorized: ${roots.join(', ')}`
+    : 'no folder authorized';
+}
+
+async function requestDirectoryAccess() {
+  if (!runtimeReady()) return;
+
+  try {
+    setStatus('busy', 'authorizing folder');
+    const result = await window.AgentSkills.registry.fs_pick_directory.run();
+    addNotice(result.replace(/^##\s*fs_pick_directory\s*/i, '').trim());
+    updateFileAccessStatus();
+    setStatus('ok', 'folder authorized');
+  } catch (error) {
+    addNotice(`File access failed: ${error.message}`);
+    setStatus('error', 'file access blocked');
+  }
+}
+
 function supportsNotifications() {
   return 'Notification' in window;
 }

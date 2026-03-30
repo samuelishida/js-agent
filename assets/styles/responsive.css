@@ -1,0 +1,29 @@
+﻿  body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto 1fr auto;
+    grid-template-areas:
+      "header"
+      "sidebar"
+      "main"
+      "input";
+  }
+
+  aside {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    max-height: 42vh;
+    transform: none !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+
+  body.sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-groups {
+    max-height: 220px;
+  }
+}
+
+

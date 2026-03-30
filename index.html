@@ -3,22 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Agentic Search  Prototype</title>
+<title>JS Agent</title>
 <link rel="stylesheet" href="assets/styles.css">
 </head>
 <body>
 <!-- HEADER -->
 <header>
   <div class="header-left">
+    <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
     <div class="logo">⬡</div>
     <div>
-      <div class="header-title">Agentic Search — Prototype</div>
-      <div class="header-sub">GEMINI · LM STUDIO · OLLAMA · CORPORATE SIMULATION</div>
+      <div class="header-title">JS Agent</div>
+      <div class="header-sub">Multi-model workspace for search, files, and local automation</div>
     </div>
   </div>
   <div class="header-badges">
-    <div class="badge badge-purple" id="badge-rounds">max 10 rounds</div>
-    <div class="badge badge-amber"  id="badge-ctx">100k ctx</div>
+    <div class="badge badge-purple" id="badge-rounds">rounds 10</div>
+    <div class="badge badge-amber"  id="badge-ctx">context 100k</div>
     <div class="badge badge-green"  id="badge-model">gemini-2.5-flash-lite</div>
     <div class="badge badge-red"    id="badge-local" style="cursor:pointer" onclick="probeLocal()" title="Click to re-probe">local: —</div>
     <div class="badge badge-blue"   id="badge-status">
@@ -29,134 +30,170 @@
 
 <!-- SIDEBAR -->
 <aside>
+  <div class="sidebar-topbar">
+    <div class="sidebar-topbar-title">Workspace</div>
+    <button class="sidebar-topbar-btn" onclick="toggleSidebar()" title="Collapse sidebar">Hide</button>
+  </div>
 
   <!-- API KEY -->
-  <div class="sidebar-section">
-    <div class="sidebar-label">Gemini API Key</div>
-    <div class="api-row">
-      <input class="api-input" id="api-key" type="password" placeholder="AIza..." autocomplete="off" />
-      <button class="btn-sm" onclick="saveKey()">Save</button>
+  <details class="sidebar-section sidebar-panel" data-panel="cloud" open>
+    <summary class="sidebar-summary">
+      <span class="sidebar-label">Cloud Model</span>
+      <span class="sidebar-chevron">⌄</span>
+    </summary>
+    <div class="sidebar-panel-body">
+      <div class="sidebar-copy">Connect a hosted Gemini model for browser-based runs.</div>
+      <div class="api-row">
+        <input class="api-input" id="api-key" type="password" placeholder="AIza..." autocomplete="off" />
+        <button class="btn-sm" onclick="saveKey()">Save</button>
+      </div>
+      <div style="margin-top:8px">
+        <div class="sidebar-label" style="margin-bottom:4px">Hosted Model</div>
+        <select id="model-select">
+          <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+          <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+          <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+        </select>
+      </div>
     </div>
-    <div style="margin-top:8px">
-      <div class="sidebar-label" style="margin-bottom:4px">Model</div>
-      <select id="model-select">
-        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
-        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-        <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-        <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-      </select>
-    </div>
-  </div>
+  </details>
 
   <!-- LOCAL BACKEND -->
-  <div class="sidebar-section">
-    <div class="sidebar-label">Local Backend</div>
-    <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
-      <div class="status-dot" id="local-dot"></div>
-      <span style="font-size:10px;color:var(--text2)" id="local-status-label">not probed</span>
-      <button class="btn-sm" style="margin-left:auto" onclick="probeLocal()">Probe</button>
-    </div>
-    <div class="api-row" style="margin-bottom:6px">
-      <input class="api-input" id="local-url" type="text" placeholder="http://localhost:1234" value="http://localhost:1234" />
-    </div>
-    <div style="font-size:9px;color:var(--text3);margin-bottom:8px">LM Studio :1234 · Ollama :11434</div>
-    <div class="constraint-row">
-      <span class="constraint-key">use local backend</span>
-      <div class="tool-toggle" id="toggle-local" onclick="toggleLocalBackend()" style="padding:4px 8px;margin:0">
-        <span class="tool-name" id="local-toggle-label">off</span>
-        <span class="tool-dot" id="local-toggle-dot"></span>
+  <details class="sidebar-section sidebar-panel" data-panel="local" open>
+    <summary class="sidebar-summary">
+      <span class="sidebar-label">Local Model</span>
+      <span class="sidebar-chevron">⌄</span>
+    </summary>
+    <div class="sidebar-panel-body">
+      <div class="sidebar-copy">Run through LM Studio or Ollama when you want local inference.</div>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
+        <div class="status-dot" id="local-dot"></div>
+        <span style="font-size:10px;color:var(--text2)" id="local-status-label">not probed</span>
+        <button class="btn-sm" style="margin-left:auto" onclick="probeLocal()">Probe</button>
+      </div>
+      <div class="api-row" style="margin-bottom:6px">
+        <input class="api-input" id="local-url" type="text" placeholder="http://localhost:1234" value="http://localhost:1234" />
+      </div>
+      <div style="font-size:9px;color:var(--text3);margin-bottom:8px">LM Studio :1234 · Ollama :11434</div>
+      <div class="constraint-row">
+        <span class="constraint-key">Enable local routing</span>
+        <div class="tool-toggle" id="toggle-local" onclick="toggleLocalBackend()" style="padding:4px 8px;margin:0">
+          <span class="tool-name" id="local-toggle-label">off</span>
+          <span class="tool-dot" id="local-toggle-dot"></span>
+        </div>
+      </div>
+      <div id="local-model-row" style="display:none;margin-top:6px">
+        <div class="sidebar-label" style="margin-bottom:4px">Local Model</div>
+        <select id="local-model-select" style="font-size:10px">
+          <option value="">— probe to detect —</option>
+        </select>
       </div>
     </div>
-    <div id="local-model-row" style="display:none;margin-top:6px">
-      <div class="sidebar-label" style="margin-bottom:4px">Local Model</div>
-      <select id="local-model-select" style="font-size:10px">
-        <option value="">— probe to detect —</option>
-      </select>
-    </div>
-  </div>
+  </details>
 
-  <!-- CORPORATE CONSTRAINTS -->
-  <div class="sidebar-section">
-    <div class="sidebar-label">Corporate Constraints</div>
-    <div class="constraint-row">
-      <span class="constraint-key">max_rounds</span>
-      <span class="constraint-val" id="val-rounds">10</span>
-    </div>
-    <input type="range" id="sl-rounds" min="1" max="20" value="10"
-           oninput="document.getElementById('val-rounds').textContent=this.value;updateBadge()">
-
-    <div class="constraint-row">
-      <span class="constraint-key">ctx_limit (k chars)</span>
-      <span class="constraint-val" id="val-ctx">100</span>
-    </div>
-    <input type="range" id="sl-ctx" min="10" max="200" value="100"
-           oninput="document.getElementById('val-ctx').textContent=this.value;updateBadge()">
-
-    <div class="constraint-row">
-      <span class="constraint-key">response_delay (ms)</span>
-      <span class="constraint-val" id="val-delay">0</span>
-    </div>
-    <input type="range" id="sl-delay" min="0" max="3000" step="100" value="0"
-           oninput="document.getElementById('val-delay').textContent=this.value">
-
-    <!-- context bar -->
-    <div class="ctx-bar-wrap">
-      <div class="ctx-bar-label">
-        <span>context usage</span>
-        <span id="ctx-pct">0%</span>
+  <!-- RUNTIME -->
+  <details class="sidebar-section sidebar-panel" data-panel="runtime" open>
+    <summary class="sidebar-summary">
+      <span class="sidebar-label">Runtime</span>
+      <span class="sidebar-chevron">⌄</span>
+    </summary>
+    <div class="sidebar-panel-body">
+      <div class="sidebar-copy">Tune response depth, context budget, and pacing for the session.</div>
+      <div class="constraint-row">
+        <span class="constraint-key">Planning depth</span>
+        <span class="constraint-val" id="val-rounds">10</span>
       </div>
-      <div class="ctx-bar-track">
-        <div class="ctx-bar-fill" id="ctx-bar"></div>
+      <input type="range" id="sl-rounds" min="1" max="20" value="10"
+             oninput="document.getElementById('val-rounds').textContent=this.value;updateBadge()">
+
+      <div class="constraint-row">
+        <span class="constraint-key">Context budget (k chars)</span>
+        <span class="constraint-val" id="val-ctx">100</span>
+      </div>
+      <input type="range" id="sl-ctx" min="10" max="200" value="100"
+             oninput="document.getElementById('val-ctx').textContent=this.value;updateBadge()">
+
+      <div class="constraint-row">
+        <span class="constraint-key">Response pacing (ms)</span>
+        <span class="constraint-val" id="val-delay">0</span>
+      </div>
+      <input type="range" id="sl-delay" min="0" max="3000" step="100" value="0"
+             oninput="document.getElementById('val-delay').textContent=this.value">
+
+      <div class="ctx-bar-wrap">
+        <div class="ctx-bar-label">
+          <span>Context usage</span>
+          <span id="ctx-pct">0%</span>
+        </div>
+        <div class="ctx-bar-track">
+          <div class="ctx-bar-fill" id="ctx-bar"></div>
+        </div>
       </div>
     </div>
-  </div>
+  </details>
 
   <!-- SESSIONS -->
-  <div class="sidebar-section">
-    <div class="sidebar-label">Chat Sessions</div>
-    <div class="session-actions">
-      <button class="btn-sm" onclick="clearSession()">New</button>
-      <button class="btn-sm" onclick="deleteAllSessions()">Delete all</button>
+  <details class="sidebar-section sidebar-panel" data-panel="conversations" open>
+    <summary class="sidebar-summary">
+      <span class="sidebar-label">Conversations</span>
+      <span class="sidebar-chevron">⌄</span>
+    </summary>
+    <div class="sidebar-panel-body">
+      <div class="session-actions">
+        <button class="btn-sm" onclick="clearSession()">New</button>
+        <button class="btn-sm" onclick="deleteAllSessions()">Delete all</button>
+      </div>
+      <div id="session-list" class="session-list"></div>
     </div>
-    <div id="session-list" class="session-list"></div>
-  </div>
+  </details>
 
   <!-- TOOLS -->
-  <div class="sidebar-section tools-section">
-    <div class="sidebar-label">Enabled Tools</div>
-    <div class="tool-groups" id="tool-groups"></div>
-  </div>
+  <details class="sidebar-section sidebar-panel tools-section" data-panel="capabilities" open>
+    <summary class="sidebar-summary">
+      <span class="sidebar-label">Capabilities</span>
+      <span class="sidebar-chevron">⌄</span>
+    </summary>
+    <div class="sidebar-panel-body">
+      <div class="tool-groups" id="tool-groups"></div>
+    </div>
+  </details>
 
   <!-- STATS -->
-  <div class="sidebar-section" style="flex:1">
-    <div class="sidebar-label">Session Stats</div>
-    <div class="stats-grid">
-      <div class="stat-box">
-        <div class="stat-key">ROUNDS</div>
-        <div class="stat-val" id="stat-rounds">0</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-key">TOOL CALLS</div>
-        <div class="stat-val" id="stat-tools">0</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-key">CTX RESETS</div>
-        <div class="stat-val" id="stat-resets">0</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-key">MESSAGES</div>
-        <div class="stat-val" id="stat-msgs">0</div>
-      </div>
-      <div class="stat-box stat-full">
-        <div class="stat-key">CTX SIZE (chars)</div>
-        <div class="stat-val" id="stat-ctx">0</div>
+  <details class="sidebar-section sidebar-panel" data-panel="activity" open style="flex:1">
+    <summary class="sidebar-summary">
+      <span class="sidebar-label">Activity</span>
+      <span class="sidebar-chevron">⌄</span>
+    </summary>
+    <div class="sidebar-panel-body">
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-key">ROUNDS</div>
+          <div class="stat-val" id="stat-rounds">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-key">TOOL CALLS</div>
+          <div class="stat-val" id="stat-tools">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-key">CTX RESETS</div>
+          <div class="stat-val" id="stat-resets">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-key">MESSAGES</div>
+          <div class="stat-val" id="stat-msgs">0</div>
+        </div>
+        <div class="stat-box stat-full">
+          <div class="stat-key">CTX SIZE (chars)</div>
+          <div class="stat-val" id="stat-ctx">0</div>
+        </div>
       </div>
     </div>
-  </div>
+  </details>
 
   <!-- CLEAR -->
-  <div style="padding:12px 16px; border-top:1px solid var(--border)">
-    <button class="btn-clear" onclick="clearSession()" style="width:100%">✕ Clear session</button>
+  <div class="sidebar-footer">
+    <button class="btn-clear" onclick="clearSession()" style="width:100%">Reset current conversation</button>
   </div>
 </aside>
 
@@ -164,10 +201,9 @@
 <main id="chat">
   <div class="empty-state" id="empty">
     <div class="empty-logo">⬡</div>
-    <div class="empty-title">Agentic loop ready</div>
+    <div class="empty-title">Ready to help</div>
     <div class="empty-sub">
-      Simulates the corporate environment:<br>
-      max_rounds · ctx_limit · tool dispatch · context summarization
+      Search the web, work with files, use local models, and complete multi-step tasks from one workspace.
     </div>
     <div class="empty-examples">
       <button class="example-chip" onclick="useExample(this)">What's the current BRL/USD exchange rate?</button>
@@ -201,6 +237,10 @@
 <script src="src/skills/filesystem.js" defer></script>
 <script src="src/skills/index.js" defer></script>
 <script src="src/core/orchestrator.js" defer></script>
-<script src="src/app.js" defer></script>
+<script src="src/app/state.js" defer></script>
+<script src="src/app/local-backend.js" defer></script>
+<script src="src/app/tools.js" defer></script>
+<script src="src/app/llm.js" defer></script>
+<script src="src/app/agent.js" defer></script>
 </body>
 </html>

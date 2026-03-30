@@ -1,0 +1,329 @@
+﻿// -- STATE ---------------------------------------------------------------------
+let apiKey = localStorage.getItem('gemini_api_key') || '';
+let messages = [];   // agentic loop history [{role, content}]
+let sessionStats = { rounds: 0, tools: 0, resets: 0, msgs: 0 };
+let isBusy = false;
+const CHAT_SESSIONS_KEY = 'agent_chat_sessions_v1';
+const ACTIVE_SESSION_KEY = 'agent_active_session_v1';
+const TOOL_CACHE_KEY = 'agent_tool_cache_v1';
+const TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
+const SIDEBAR_COLLAPSED_KEY = 'agent_sidebar_collapsed_v1';
+const SIDEBAR_PANELS_KEY = 'agent_sidebar_panels_v1';
+let enabledTools = {
+  web_search: true,
+  calc: true,
+  datetime: true,
+  read_page: true,
+  geo_current_location: true,
+  weather_current: true,
+  http_fetch: true,
+  extract_links: true,
+  page_metadata: true,
+  parse_json: true,
+  parse_csv: true,
+  clipboard_read: true,
+  clipboard_write: true,
+  storage_list_keys: true,
+  storage_get: true,
+  storage_set: true,
+  fs_list_roots: true,
+  fs_pick_directory: true,
+  fs_list_dir: true,
+  fs_read_file: true,
+  fs_upload_pick: true,
+  fs_save_upload: true,
+  fs_download_file: true,
+  fs_preview_file: true,
+  fs_search_name: true,
+  fs_search_content: true,
+  fs_tree: true,
+  fs_exists: true,
+  fs_stat: true,
+  fs_mkdir: true,
+  fs_touch: true,
+  fs_write_file: true,
+  fs_copy_file: true,
+  fs_move_file: true,
+  fs_delete_path: true,
+  fs_rename_path: true
+};
+let localBackend = {
+  enabled: localStorage.getItem('agent_prefer_local_backend') !== 'false',
+  url: localStorage.getItem('agent_local_backend_url') || '',
+  model: localStorage.getItem('agent_local_backend_model') || '',
+  chatPath: localStorage.getItem('agent_local_backend_chat_path') || '',
+  name: localStorage.getItem('agent_local_backend_name') || '',
+  detected: false,
+  corsBlocked: false
+};
+let chatSessions = [];
+let activeSessionId = localStorage.getItem(ACTIVE_SESSION_KEY) || null;
+
+function getRuntimeModules() {
+  return {
+    skills: window.AgentSkills,
+    regex: window.AgentRegex,
+    orchestrator: window.AgentOrchestrator,
+    prompts: window.AgentPrompts
+  };
+}
+
+function runtimeReady() {
+  const modules = getRuntimeModules();
+  return !!(modules.skills && modules.regex && modules.orchestrator && modules.prompts);
+}
+
+function assertRuntimeReady() {
+  if (!runtimeReady()) {
+    throw new Error('Agent bootstrap failed: required modules were not loaded.');
+  }
+}
+
+// -- CONSTRAINTS ---------------------------------------------------------------
+function getMaxRounds() { return parseInt(document.getElementById('sl-rounds').value); }
+function getCtxLimit()  { return parseInt(document.getElementById('sl-ctx').value) * 1000; }
+function getDelay()     { return parseInt(document.getElementById('sl-delay').value); }
+
+function updateBadge() {
+  document.getElementById('badge-rounds').textContent = `rounds ${document.getElementById('sl-rounds').value}`;
+  document.getElementById('badge-ctx').textContent = `context ${document.getElementById('sl-ctx').value}k`;
+}
+
+function loadSidebarPanels() {
+  try {
+    return JSON.parse(localStorage.getItem(SIDEBAR_PANELS_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function applySidebarState() {
+  const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+
+  const panels = loadSidebarPanels();
+  document.querySelectorAll('.sidebar-panel[data-panel]').forEach(panel => {
+    const key = panel.dataset.panel;
+    if (Object.prototype.hasOwnProperty.call(panels, key)) {
+      panel.open = !!panels[key];
+    }
+  });
+}
+
+function bindSidebarPanels() {
+  document.querySelectorAll('.sidebar-panel[data-panel]').forEach(panel => {
+    panel.addEventListener('toggle', () => {
+      const panels = loadSidebarPanels();
+      panels[panel.dataset.panel] = panel.open;
+      localStorage.setItem(SIDEBAR_PANELS_KEY, JSON.stringify(panels));
+    });
+  });
+}
+
+function toggleSidebar() {
+  const next = !document.body.classList.contains('sidebar-collapsed');
+  document.body.classList.toggle('sidebar-collapsed', next);
+  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
+}
+
+// -- API KEY -------------------------------------------------------------------
+function saveKey() {
+  apiKey = document.getElementById('api-key').value.trim();
+  localStorage.setItem('gemini_api_key', apiKey);
+  setStatus('ok', 'key saved');
+}
+
+function loadToolCache() {
+  try {
+    return JSON.parse(localStorage.getItem(TOOL_CACHE_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function saveToolCache(cache) {
+  localStorage.setItem(TOOL_CACHE_KEY, JSON.stringify(cache));
+}
+
+function getToolCacheKey(call) {
+  return `${call.tool}:${JSON.stringify(call.args || {})}`;
+}
+
+function getCachedToolResult(call) {
+  const cache = loadToolCache();
+  const key = getToolCacheKey(call);
+  const entry = cache[key];
+  if (!entry) return null;
+  if ((Date.now() - entry.timestamp) > TOOL_CACHE_TTL_MS) {
+    delete cache[key];
+    saveToolCache(cache);
+    return null;
+  }
+  return entry.result;
+}
+
+function setCachedToolResult(call, result) {
+  const cache = loadToolCache();
+  cache[getToolCacheKey(call)] = { result, timestamp: Date.now() };
+  saveToolCache(cache);
+}
+
+function loadSessions() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(CHAT_SESSIONS_KEY) || '[]');
+    return Array.isArray(stored) ? stored : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSessions() {
+  localStorage.setItem(CHAT_SESSIONS_KEY, JSON.stringify(chatSessions));
+}
+
+function makeSessionTitle(sourceText = 'New session') {
+  return String(sourceText || 'New session').trim().slice(0, 48) || 'New session';
+}
+
+function createSession(initialTitle = 'New session') {
+  const session = {
+    id: `session_${Date.now()}`,
+    title: makeSessionTitle(initialTitle),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    messages: [],
+    stats: { rounds: 0, tools: 0, resets: 0, msgs: 0 }
+  };
+  chatSessions.unshift(session);
+  activeSessionId = session.id;
+  localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+  saveSessions();
+  return session;
+}
+
+function resetLiveSessionState() {
+  messages = [];
+  sessionStats = { rounds: 0, tools: 0, resets: 0, msgs: 0 };
+}
+
+function getActiveSession() {
+  return chatSessions.find(session => session.id === activeSessionId) || null;
+}
+
+function syncSessionState() {
+  let session = getActiveSession();
+  if (!session) session = createSession();
+
+  session.updatedAt = new Date().toISOString();
+  session.messages = messages;
+  session.stats = sessionStats;
+  saveSessions();
+  renderSessionList();
+}
+
+function activateSession(sessionId) {
+  const session = chatSessions.find(item => item.id === sessionId);
+  if (!session) return;
+
+  activeSessionId = session.id;
+  localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+  messages = Array.isArray(session.messages) ? session.messages : [];
+  sessionStats = session.stats || { rounds: 0, tools: 0, resets: 0, msgs: 0 };
+  renderSessionList();
+  renderChatFromMessages();
+  updateStats();
+  updateCtxBar();
+  setStatus('ok', 'session loaded');
+}
+
+function renderSessionList() {
+  const host = document.getElementById('session-list');
+  if (!host) return;
+
+  host.innerHTML = chatSessions.length
+    ? chatSessions.map(session => `
+      <div class="session-item ${session.id === activeSessionId ? 'active' : ''}">
+        <button class="session-main" onclick="activateSession('${session.id}')">
+          <span class="session-title">${escHtml(session.title)}</span>
+          <span class="session-meta">${new Date(session.updatedAt).toLocaleString()}</span>
+        </button>
+        <button class="session-delete" onclick="deleteSession('${session.id}')" title="Delete session">×</button>
+      </div>`).join('')
+    : '<div class="session-empty">no sessions yet</div>';
+}
+
+function deleteSession(sessionId) {
+  const nextSessions = chatSessions.filter(session => session.id !== sessionId);
+  if (nextSessions.length === chatSessions.length) return;
+
+  chatSessions = nextSessions;
+
+  if (!chatSessions.length) {
+    const created = createSession();
+    resetLiveSessionState();
+    activeSessionId = created.id;
+  } else if (activeSessionId === sessionId) {
+    activeSessionId = chatSessions[0].id;
+    localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+    saveSessions();
+    activateSession(activeSessionId);
+    return;
+  }
+
+  localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+  saveSessions();
+  renderSessionList();
+  renderChatFromMessages();
+  updateStats();
+  updateCtxBar();
+  setStatus('ok', 'session deleted');
+}
+
+function deleteAllSessions() {
+  chatSessions = [];
+  localStorage.removeItem(CHAT_SESSIONS_KEY);
+  const created = createSession();
+  resetLiveSessionState();
+  activeSessionId = created.id;
+  localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+  renderSessionList();
+  renderChatFromMessages();
+  updateStats();
+  updateCtxBar();
+  setStatus('ok', 'all sessions deleted');
+}
+
+function renderChatFromMessages() {
+  const chat = document.getElementById('chat');
+  chat.innerHTML = '';
+
+  if (!messages.length) {
+    chat.innerHTML = `
+      <div class="empty-state" id="empty">
+        <div class="empty-logo">?</div>
+        <div class="empty-title">Ready to help</div>
+        <div class="empty-sub">
+          Search the web, work with files, use local models, and complete multi-step tasks from one workspace.
+        </div>
+        <div class="empty-examples">
+          <button class="example-chip" onclick="useExample(this)">What's the current BRL/USD exchange rate?</button>
+          <button class="example-chip" onclick="useExample(this)">Calculate compound interest: $10k at 5.5% for 7 years</button>
+          <button class="example-chip" onclick="useExample(this)">Search for the latest Fed rate decision and summarize</button>
+          <button class="example-chip" onclick="useExample(this)">What's today's date and what day of the week is it?</button>
+        </div>
+      </div>`;
+    return;
+  }
+
+  for (const message of messages.filter(m => m.role !== 'system')) {
+    if (message.role === 'assistant') {
+      const parsed = splitModelReply(message.content);
+      addMessage('agent', parsed.visible, null, false, false, parsed.thinkingBlocks);
+      continue;
+    }
+
+    addMessage(message.role, message.content, null);
+  }
+}
+
+// -- LOCAL BACKEND PROBE ------------------------------------------------------

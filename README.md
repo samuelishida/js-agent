@@ -1,184 +1,140 @@
 # JS Agent
 
-> Browser-native agentic loop with local LLM routing, modular skills, and filesystem access.
+Browser-based multi-step agent with hosted and local model routing, modular skills, persistent sessions, and optional filesystem access.
 
-A zero-dependency, single-origin JavaScript agent that runs entirely in the browser. Started as a prototype to simulate a corporate LLM environment (Gemini endpoint + auth constraints), then evolved into a full skill-driven agent with local backend support, persistent sessions, and direct filesystem access via the File System Access API.
+## Overview
 
----
+JS Agent runs entirely in the browser. It sends chat history to a model, detects `<tool_call>` blocks in the reply, executes the requested skill, injects the result back into context, and repeats until the model answers directly or the round limit is reached.
 
-## What it does
+Key capabilities:
 
-The agent runs a `while (round < MAX_ROUNDS)` loop against any OpenAI-compatible LLM endpoint — Gemini, LM Studio, Ollama, or llama.cpp. On each round it:
+- Hosted Gemini model support
+- Local model routing through LM Studio, Ollama, and llama.cpp style endpoints
+- Web, clipboard, weather, parsing, and filesystem skills
+- Persistent conversations and cached tool results in `localStorage`
+- Context summarization when the session grows too large
+- Collapsible workspace UI with modular app and style architecture
 
-1. Sends the message history to the LLM
-2. Parses the response for a `<tool_call>` block via regex
-3. Executes the matched skill (search, fs, clipboard, weather, calc, etc.)
-4. Injects the result back into context as a tool message
-5. Repeats until the model replies without a tool call, or `MAX_ROUNDS` is hit
-6. Compresses context via a summarization call when `CTX_LIMIT` is exceeded
+## Project Structure
 
-Final answers are expected as HTML fragments and are sanitized before rendering.
-
----
-
-## Structure
-
-```
+```text
 Agent/
-├── index.html                  # App shell + sidebar + chat UI
-├── assets/styles.css           # All styles
-├── src/
-│   ├── app.js                  # Bootstrap, agentic loop, session state, LLM router, UI
-│   ├── core/
-│   │   ├── orchestrator.js     # Prompt composition, skill dispatch, fallback chains
-│   │   ├── prompt-loader.js    # fetch() loader with built-in fallbacks for file:// usage
-│   │   └── regex.js            # Tool-call extraction, reasoning-leak detection, output validation
-│   └── skills/
-│       ├── shared.js           # All skill implementations + registry
-│       ├── web.js              # Web skill group metadata
-│       ├── device.js           # Device/browser skill group metadata
-│       ├── data.js             # Data/parsing skill group metadata
-│       ├── filesystem.js       # Filesystem skill group metadata
-│       └── index.js            # AgentSkillGroups namespace init
-├── prompts/
-│   ├── system.md               # Main system prompt (template with {{vars}})
-│   ├── repair.md               # Injected when model leaks chain-of-thought
-│   ├── summarize.md            # Context compression prompt
-│   └── orchestrator.md         # Orchestration policy
-└── docs/
-    └── agentic-search-arch.html  # Interactive architecture diagram (EN/PT-BR)
+|- index.html                     # App shell
+|- assets/
+|  |- styles.css                 # CSS entrypoint
+|  `- styles/
+|     |- base.css                # tokens, layout, header
+|     |- sidebar.css             # sidebar, controls, stats
+|     |- chat.css                # chat stream, messages, notices
+|     |- input.css               # composer and footer controls
+|     `- responsive.css          # responsive layout rules
+|- prompts/
+|  |- system.md
+|  |- repair.md
+|  |- summarize.md
+|  `- orchestrator.md
+|- src/
+|  |- app.js                     # compatibility stub
+|  |- app/
+|  |  |- state.js               # shared state, sessions, sidebar state
+|  |  |- local-backend.js       # local backend probing and activation
+|  |  |- tools.js               # tool panel rendering and prompt helpers
+|  |  |- llm.js                 # hosted/local model routing and sanitization
+|  |  `- agent.js               # loop orchestration, UI events, init
+|  |- core/
+|  |  |- orchestrator.js        # prompt composition and skill dispatch
+|  |  |- prompt-loader.js       # prompt loading with built-in fallback content
+|  |  `- regex.js               # tool-call extraction and validation
+|  `- skills/
+|     |- shared.js              # skill implementations and registry
+|     |- web.js
+|     |- device.js
+|     |- data.js
+|     |- filesystem.js
+|     `- index.js
+`- docs/
+   `- agentic-search-arch.html  # architecture reference
 ```
-
----
 
 ## Backends
 
-The app probes local ports on load and auto-activates the first one found. Preferences persist in `localStorage`.
+The app can route requests to either hosted Gemini models or local OpenAI-compatible endpoints.
 
-| Backend    | Default port | Endpoint                 |
-|------------|-------------|--------------------------|
-| LM Studio  | 1234        | `/v1/chat/completions`   |
-| Ollama     | 11434       | `/api/chat`              |
-| llama.cpp  | 8080        | `/v1/chat/completions`   |
-| Gemini     | —           | `generativelanguage.googleapis.com` |
+Default local probes:
 
-**CORS requirement:** LM Studio and Ollama must have CORS enabled for `file://` or `localhost` origins. In LM Studio: Settings → Local Server → enable CORS. In Ollama: set `OLLAMA_ORIGINS=*`.
+- LM Studio: `http://localhost:1234`
+- Ollama: `http://localhost:11434`
+- llama.cpp: `http://localhost:8080`
+- Generic local server: `http://localhost:5000`
 
-The probe uses three fallback strategies in order:
-1. `GET /v1/models` — reads model list if CORS is open
-2. `GET /v1/models` with `mode: no-cors` — detects opaque response (server reachable, CORS closed)
-3. `POST /v1/chat/completions` with a minimal payload — catches servers that only respond to chat requests
+Probe flow:
 
----
+1. Try model-list endpoints such as `/v1/models` or `/api/tags`
+2. Fall back to opaque `no-cors` detection
+3. Fall back to a minimal chat request for reachability
+
+If local routing is enabled, the UI switches model execution to the local backend. Otherwise it uses the selected Gemini model.
 
 ## Skills
 
-Skills are registered in `src/skills/shared.js` under `window.AgentSkills.registry`. Each entry has `name`, `description`, `run(args, context)`, optional `retries`, and optional `fallbacks` chain.
+Skills are registered in `src/skills/shared.js` under `window.AgentSkills.registry`.
 
-### Web & Context
-| Skill | Description |
-|-------|-------------|
-| `web_search(query)` | DuckDuckGo + Wikipedia + Wikidata + FX rates in parallel |
-| `read_page(url)` | Direct fetch → Jina reader proxy fallback |
-| `http_fetch(url, method)` | Raw HTTP resource fetch |
-| `extract_links(url\|text)` | Extracts all `href` and inline URLs |
-| `page_metadata(url)` | title, description, canonical |
+Main groups:
 
-### Device & Browser
-| Skill | Description |
-|-------|-------------|
-| `datetime()` | Current local datetime (BRT) |
-| `geo_current_location()` | Navigator geolocation |
-| `weather_current()` | open-meteo.com via current coordinates |
-| `clipboard_read()` | System clipboard read |
-| `clipboard_write(text)` | System clipboard write |
-| `storage_list_keys()` | Lists localStorage keys |
-| `storage_get(key)` | Read localStorage |
-| `storage_set(key, value)` | Write localStorage |
+- Web and context: search, page reading, metadata, HTTP fetch, link extraction
+- Device and browser: datetime, geolocation, weather, clipboard, localStorage helpers
+- Filesystem: directory picking, file read/write, upload, download, preview, search
+- Data: calculator, JSON parsing, CSV parsing
 
-### Local Files (File System Access API — Chromium only)
-| Skill | Description |
-|-------|-------------|
-| `fs_pick_directory()` | Opens directory picker, registers root |
-| `fs_list_dir(path)` | Lists directory entries |
-| `fs_tree(path)` | Recursive directory tree |
-| `fs_read_file(path)` | Reads text file |
-| `fs_write_file(path, content)` | Writes file; falls back to browser download |
-| `fs_download_file(path\|content, filename)` | Triggers browser download |
-| `fs_upload_pick()` | Opens file picker, registers uploads |
-| `fs_save_upload(uploadName, destinationPath)` | Saves picked upload to disk |
-| `fs_search_name(path, pattern)` | Filename search |
-| `fs_search_content(path, pattern)` | Content search in text files |
-| `fs_copy_file / fs_move_file / fs_delete_path / fs_rename_path` | File operations |
-| `fs_exists / fs_stat / fs_mkdir / fs_touch` | Metadata and creation |
+Notable behavior:
 
-### Data
-| Skill | Description |
-|-------|-------------|
-| `calc(expression)` | Safe JS expression eval |
-| `parse_json(text)` | Validate and pretty-print JSON |
-| `parse_csv(text)` | Parse and preview CSV |
+- `fs_write_file` falls back to browser download when direct filesystem access is unavailable
+- `web_search` combines multiple sources and reports diagnostics when providers fail
+- malformed tool-call JSON is parsed with a resilient fallback extractor
 
----
+## Runtime Behavior
 
-## Preflight enrichment
+Each turn follows this pattern:
 
-Before the first LLM round, `buildInitialContext()` runs a preflight plan based on intent detected in the user message:
+1. Build system prompt and initial context
+2. Call the active model
+3. Parse tool call or final answer
+4. Execute one tool when requested
+5. Inject `<tool_result>` into context
+6. Repeat until completion or round limit
 
-- **FX intent** (e.g. "cotação do dólar") → fetches live rate from `open.er-api.com` and injects into context
-- **URL in message** → fetches the page and pre-loads content
-- **Weather/filesystem/save/clipboard/parsing intents** → annotates recommended tools in a `<initial_context>` block
+Configurable runtime controls in the UI:
 
-This reduces the number of agentic rounds needed on the first response.
+- Planning depth
+- Context budget
+- Response pacing
 
----
+When the accumulated context exceeds the limit, the app summarizes the conversation and rebuilds the message array with compact context.
 
-## Context management
+## Sessions and Cache
 
-| Constraint | Default | Configurable |
-|------------|---------|--------------|
-| `max_rounds` | 10 | Sidebar slider (1–20) |
-| `ctx_limit` | 100k chars | Sidebar slider (10k–200k) |
-| `response_delay` | 0 ms | Sidebar slider (simulation) |
+Conversation state is stored in `localStorage`.
 
-When context exceeds `ctx_limit`, the agent calls the LLM with `prompts/summarize.md` to compress history into a single block, then rebuilds the message array as `[system, summarized_context, current_query]`.
+Persisted data includes:
 
----
+- sessions and message history
+- per-session stats
+- selected local backend preferences
+- sidebar collapsed/open state
+- cached tool results with a short TTL
 
-## Sessions
-
-Chat sessions are persisted in `localStorage` under `agent_chat_sessions_v1`. Each session stores:
-- message history (full `[{role, content}]` array)
-- session stats (rounds, tool calls, context resets, messages)
-- title derived from the first user message
-
-Sessions can be switched, deleted individually, or cleared all at once from the sidebar.
-
-Tool results are cached in `localStorage` with a 10-minute TTL (`agent_tool_cache_v1`) to avoid redundant calls within a session.
-
----
-
-## Reasoning leak detection
-
-`AgentRegex.looksLikeReasoningLeak()` detects when a model returns internal chain-of-thought instead of a tool call or a final answer (patterns like `"Let me…"`, `"The user is asking…"`, `"Okay, the user…"`). When detected, the agent injects `prompts/repair.md` into the next round and continues without surfacing the leak to the UI.
-
----
-
-## Run
+## Running the App
 
 Open `index.html` in a Chromium-based browser.
 
-```
-# No build step. No npm. No bundler.
-# Just open the file.
-```
+There is no build step and no package manager requirement.
 
-For local filesystem skills, Chrome or Edge is required (File System Access API). For local LLM routing, start LM Studio or Ollama with CORS enabled before opening the file.
+Notes:
 
-For Gemini: enter your API key in the sidebar. It is stored only in `localStorage` and never sent anywhere other than `generativelanguage.googleapis.com`.
+- Chrome or Edge is recommended for filesystem features
+- LM Studio or Ollama should have CORS enabled for browser access
+- Gemini API keys are stored in browser `localStorage`
 
----
+## Architecture Reference
 
-## Architecture reference
-
-Open `docs/agentic-search-arch.html` for an interactive diagram of the full execution flow, component relationships, and annotated pseudocode for each loop phase. Includes EN/PT-BR toggle.
+Open `docs/agentic-search-arch.html` for the interactive architecture diagram and flow reference.

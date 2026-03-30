@@ -109,6 +109,25 @@ async function summarizeContext(userQuery) {
   ];
 }
 
+async function generateFinalMarkdownAnswer(candidateAnswer, userMessage) {
+  assertRuntimeReady();
+
+  const systemInstruction = `You are a concise, final-answer-only assistant. Return exactly one answer formatted in Markdown. Do not include analysis, tool call syntax, or surrounding words like 'final answer'.`;
+  const userInstruction = `Context-based finalization request.\n\nOriginal assistant output:\n${candidateAnswer}\n\nProvide a single cleaned final response in Markdown format, without HTML wrapper.`;
+
+  const finalReply = await callGemini([
+    { role: 'system', content: systemInstruction },
+    { role: 'user', content: userInstruction }
+  ]);
+
+  const finalText = splitModelReply(finalReply).visible.replace(getToolRegex(), '').trim();
+  if (!finalText) {
+    return candidateAnswer.trim();
+  }
+
+  return finalText;
+}
+
 // -- AGENTIC LOOP --------------------------------------------------------------
 async function agentLoop(userMessage) {
   assertRuntimeReady();
@@ -170,13 +189,15 @@ async function agentLoop(userMessage) {
     }
 
     if (!toolCall) {
-      // Final answer
+      // Final answer (post-process for markdown finalization)
       const cleanReply = reply.replace(getToolRegex(), '').trim();
-      addMessage('agent', cleanReply, round, false, false, parsedReply?.thinkingBlocks || []);
-      messages.push({ role: 'assistant', content: rawReply || reply });
+      const finalMarkdown = await generateFinalMarkdownAnswer(cleanReply, userMessage);
+
+      addMessage('agent', finalMarkdown, round, false, false, parsedReply?.thinkingBlocks || []);
+      messages.push({ role: 'assistant', content: finalMarkdown });
       syncSessionState();
       setStatus('ok', `done in ${round} round${round>1?'s':''}`);
-      notifyIfHidden(cleanReply);
+      notifyIfHidden(finalMarkdown);
       updateCtxBar();
       return;
     }
@@ -219,11 +240,13 @@ async function agentLoop(userMessage) {
   try {
     const finalReply = await callGemini(messages);
     const parsedFinalReply = splitModelReply(finalReply);
+    const finalMarkdown = await generateFinalMarkdownAnswer(parsedFinalReply.visible, userMessage);
+
     hideThinking();
-    addMessage('agent', parsedFinalReply.visible, MAX_ROUNDS, false, false, parsedFinalReply.thinkingBlocks);
-    messages.push({ role: 'assistant', content: finalReply });
+    addMessage('agent', finalMarkdown, MAX_ROUNDS, false, false, parsedFinalReply.thinkingBlocks);
+    messages.push({ role: 'assistant', content: finalMarkdown });
     syncSessionState();
-    notifyIfHidden(parsedFinalReply.visible || 'Response ready. Check the latest result.');
+    notifyIfHidden(finalMarkdown || 'Response ready. Check the latest result.');
   } catch (e) {
     hideThinking();
     addMessage('error', `Final answer failed: ${e.message}`, MAX_ROUNDS);
@@ -424,6 +447,7 @@ document.addEventListener('DOMContentLoaded', () => {
   chatSessions = loadSessions();
   initCacheSync();
   initBusySync();
+  updateFileAccessStatus();
   if (!chatSessions.length) createSession();
   if (!getActiveSession()) activeSessionId = chatSessions[0]?.id || createSession().id;
   renderSessionList();

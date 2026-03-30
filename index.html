@@ -148,6 +148,24 @@
     </div>
   </details>
 
+  <!-- FILE ACCESS -->
+  <details class="sidebar-section sidebar-panel" data-panel="files" open>
+    <summary class="sidebar-summary">
+      <span class="sidebar-label">Files</span>
+      <span class="sidebar-chevron">⌄</span>
+    </summary>
+    <div class="sidebar-panel-body">
+      <div class="sidebar-copy">Authorize a local folder before asking the agent to read or edit project files.</div>
+      <div class="session-actions" style="justify-content:flex-start;margin-bottom:10px">
+        <button class="btn-sm" onclick="requestDirectoryAccess()">Authorize Folder</button>
+      </div>
+      <div class="tool-group" style="padding:10px">
+        <div class="tool-group-label">Access status</div>
+        <div id="file-access-status" class="session-empty">no folder authorized</div>
+      </div>
+    </div>
+  </details>
+
   <!-- TOOLS -->
   <details class="sidebar-section sidebar-panel tools-section" data-panel="capabilities" open>
     <summary class="sidebar-summary">

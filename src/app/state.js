@@ -12,6 +12,13 @@ const SIDEBAR_PANELS_KEY = 'agent_sidebar_panels_v1';
 const SIDEBAR_AUTO_COLLAPSE_WIDTH = 1180;
 const CACHE_SYNC_CHANNEL = 'loopagent-cache-v1';
 const BUSY_CHANNEL = 'loopagent-busy-v1';
+const NON_CACHEABLE_TOOL_PREFIXES = ['fs_'];
+const NON_CACHEABLE_TOOLS = new Set([
+  'notification_request_permission',
+  'notification_send',
+  'tab_listen',
+  'tab_broadcast'
+]);
 let notificationPermissionRequested = false;
 const agentInstanceId = window.AgentSkills?.instanceId || Math.random().toString(36).slice(2);
 let cacheSyncChannel = null;
@@ -149,6 +156,32 @@ function handleResponsiveSidebar() {
   }
 }
 
+function updateFileAccessStatus() {
+  const el = document.getElementById('file-access-status');
+  if (!el) return;
+
+  const roots = [...(window.AgentSkills?.state?.roots?.keys?.() || [])];
+  el.textContent = roots.length
+    ? `authorized: ${roots.join(', ')}`
+    : 'no folder authorized';
+}
+
+async function requestDirectoryAccess() {
+  if (!runtimeReady()) return;
+
+  try {
+    setStatus('busy', 'authorizing folder');
+    const result = await window.AgentSkills.registry.fs_pick_directory.run();
+    clearToolCache(key => key.startsWith('fs_'));
+    addNotice(result.replace(/^##\s*fs_pick_directory\s*/i, '').trim());
+    updateFileAccessStatus();
+    setStatus('ok', 'folder authorized');
+  } catch (error) {
+    addNotice(`File access failed: ${error.message}`);
+    setStatus('error', 'file access blocked');
+  }
+}
+
 function supportsNotifications() {
   return 'Notification' in window;
 }
@@ -193,7 +226,32 @@ function getToolCacheKey(call) {
   return `${call.tool}:${JSON.stringify(call.args || {})}`;
 }
 
+function isCacheableTool(call) {
+  const name = String(call?.tool || '');
+  if (!name) return false;
+  if (NON_CACHEABLE_TOOLS.has(name)) return false;
+  if (NON_CACHEABLE_TOOL_PREFIXES.some(prefix => name.startsWith(prefix))) return false;
+  return true;
+}
+
+function clearToolCache(predicate = () => true) {
+  const cache = loadToolCache();
+  let changed = false;
+
+  for (const key of Object.keys(cache)) {
+    if (predicate(key, cache[key])) {
+      delete cache[key];
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    saveToolCache(cache);
+  }
+}
+
 function getCachedToolResult(call) {
+  if (!isCacheableTool(call)) return null;
   const cache = loadToolCache();
   const key = getToolCacheKey(call);
   const entry = cache[key];
@@ -207,6 +265,7 @@ function getCachedToolResult(call) {
 }
 
 function setCachedToolResult(call, result) {
+  if (!isCacheableTool(call)) return;
   const cache = loadToolCache();
   const key = getToolCacheKey(call);
   const entry = { result, timestamp: Date.now() };

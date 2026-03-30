@@ -263,7 +263,7 @@ function _deactivateLocal() {
   const m = document.getElementById('model-select').value;
   document.getElementById('badge-model').textContent = m;
   document.getElementById('badge-model').style.color = '';
-  addNotice('Local backend deactivated. Back to Gemini.');
+  addNotice('Local backend deactivated. Back to cloud model.');
 }
 
 // -- TOOLS ---------------------------------------------------------------------

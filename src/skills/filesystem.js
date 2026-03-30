@@ -4,6 +4,7 @@
     label: 'Local Files',
     tools: [
       { name: 'fs_list_roots', signature: 'fs_list_roots()' },
+      { name: 'fs_authorize_folder', signature: 'fs_authorize_folder() // explains/validates folder authorization flow' },
       { name: 'fs_pick_directory', signature: 'fs_pick_directory() // direct disk access when supported' },
       { name: 'fs_list_dir', signature: 'fs_list_dir(path)' },
       { name: 'fs_tree', signature: 'fs_tree(path)' },

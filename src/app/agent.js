@@ -94,7 +94,7 @@ async function buildPreflightSteering(userMessage, enrichedContext) {
     const response = await callGemini([
       { role: 'system', content: systemInstruction },
       { role: 'user', content: userInstruction }
-    ]);
+    ], { maxTokens: 220, temperature: 0.1 });
 
     const steering = splitModelReply(response).visible.replace(getToolRegex(), '').trim();
     if (!steering || parseToolCall(steering)) return '';
@@ -117,7 +117,7 @@ async function buildRecoverySteering(userMessage, call, toolError) {
         role: 'user',
         content: `User request: ${userMessage}\nFailed tool: ${call.tool}\nError: ${toolError}\nReturn one short recovery instruction.`
       }
-    ]);
+    ], { maxTokens: 180, temperature: 0.1 });
 
     const steering = splitModelReply(response).visible.replace(getToolRegex(), '').trim();
     if (!steering || parseToolCall(steering)) return fallback;
@@ -190,13 +190,15 @@ async function normalizeToolCallWithLlm(replyText, userMessage) {
     'No prose, no markdown fences, no XML.'
   ].join(' ');
 
-  const userInstruction = `Allowed tools: ${allowedTools}\nUser request: ${userMessage}\nDraft reply: ${replyText}\nReturn JSON or NONE.`;
+  const compactReply = String(replyText || '').slice(0, 2600);
+  const compactUser = String(userMessage || '').slice(0, 600);
+  const userInstruction = `Allowed tools: ${allowedTools}\nUser request: ${compactUser}\nDraft reply: ${compactReply}\nReturn JSON or NONE.`;
 
   try {
     const raw = await callGemini([
       { role: 'system', content: systemInstruction },
       { role: 'user', content: userInstruction }
-    ]);
+    ], { maxTokens: 140, temperature: 0.05 });
 
     const text = splitModelReply(raw).visible.trim();
     if (!text || /^NONE$/i.test(text)) return null;
@@ -316,7 +318,7 @@ async function summarizeContext(userQuery) {
   const summary = await callGemini([
     sysMsg,
     { role: 'user', content: prompt }
-  ]);
+  ], { maxTokens: 700, temperature: 0.2, timeoutMs: 28000, retries: 1 });
 
   const summaryText = String(summary || '').trim();
   const looksLikeErrorJson = /^\{[\s\S]*"error"\s*:/i.test(summaryText);
@@ -352,7 +354,7 @@ async function generateFinalMarkdownAnswer(candidateAnswer, userMessage) {
   const finalReply = await callGemini([
     { role: 'system', content: systemInstruction },
     { role: 'user', content: userInstruction }
-  ]);
+  ], { maxTokens: 700, temperature: 0.2, timeoutMs: 22000, retries: 1 });
 
   const finalText = splitModelReply(finalReply).visible.replace(getToolRegex(), '').trim();
   if (!finalText) {
@@ -404,7 +406,7 @@ async function agentLoop(userMessage) {
     let parsedReply;
     let reply;
     try {
-      rawReply = await callGemini(messages);
+      rawReply = await callGemini(messages, { timeoutMs: isLocalModeActive() ? 70000 : 35000, retries: isLocalModeActive() ? 1 : 2 });
       throwIfStopRequested();
       parsedReply = splitModelReply(rawReply);
       reply = parsedReply.visible;
@@ -550,7 +552,7 @@ async function agentLoop(userMessage) {
   showThinking('forcing final answer…');
   try {
     throwIfStopRequested();
-    const finalReply = await callGemini(messages);
+    const finalReply = await callGemini(messages, { timeoutMs: isLocalModeActive() ? 70000 : 35000, retries: isLocalModeActive() ? 1 : 2 });
     throwIfStopRequested();
     const parsedFinalReply = splitModelReply(finalReply);
     const finalMarkdown = parsedFinalReply.visible.replace(getToolRegex(), '').trim();
@@ -678,8 +680,8 @@ async function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
 
-  if (!isLocalModeActive() && !canUseGemini()) {
-    addMessage('error', 'No Gemini API key set. Enter your key in the sidebar and click Save.', null);
+  if (!isLocalModeActive() && !canUseCloud()) {
+    addMessage('error', 'No cloud API key set. Enter your key in the sidebar and click Save.', null);
     return;
   }
 

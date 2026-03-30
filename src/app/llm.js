@@ -1,11 +1,251 @@
 ﻿let activeLlmController = null;
 
+const LLM_RATE_LIMIT_MS = {
+  local: 250,
+  cloud: 1200
+};
+
+const LLM_TIMEOUT_MS = {
+  local: 90000,
+  cloud: 45000,
+  control: 20000
+};
+
+const LLM_RETRY_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+const laneState = {
+  local: { chain: Promise.resolve(), nextAt: 0 },
+  cloud: { chain: Promise.resolve(), nextAt: 0 }
+};
+
+function delay(ms, signal) {
+  const timeout = Math.max(0, Number(ms) || 0);
+  if (!timeout) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const id = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, timeout);
+
+    const onAbort = () => {
+      clearTimeout(id);
+      cleanup();
+      const error = new Error('Request aborted');
+      error.name = 'AbortError';
+      reject(error);
+    };
+
+    const cleanup = () => {
+      if (signal) signal.removeEventListener('abort', onAbort);
+    };
+
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
+}
+
+function isRetryableError(error) {
+  if (!error) return false;
+  if (error.name === 'AbortError') return false;
+
+  const status = Number(error.status);
+  if (LLM_RETRY_STATUSES.has(status)) return true;
+
+  const message = String(error.message || '');
+  if (/\b(408|425|429|500|502|503|504)\b/.test(message)) return true;
+  if (/(timeout|timed out|network|failed to fetch|rate limit|temporarily unavailable|overloaded)/i.test(message)) {
+    return true;
+  }
+
+  return false;
+}
+
+async function retryWithBackoff(fn, { retries = 2, baseDelayMs = 700, signal } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (signal?.aborted) {
+      const error = new Error('Request aborted');
+      error.name = 'AbortError';
+      throw error;
+    }
+
+    try {
+      return await fn(attempt);
+    } catch (error) {
+      lastError = error;
+      const canRetry = attempt < retries && isRetryableError(error);
+      if (!canRetry) throw error;
+
+      const jitter = Math.floor(Math.random() * 180);
+      const backoff = Math.min(6000, baseDelayMs * (2 ** attempt) + jitter);
+      await delay(backoff, signal);
+    }
+  }
+
+  throw lastError;
+}
+
+function getLaneForRequest() {
+  return (localBackend.enabled && localBackend.url) ? 'local' : 'cloud';
+}
+
+function getRateLimitMs(lane, options = {}) {
+  const configured = Number(options.minIntervalMs);
+  if (Number.isFinite(configured) && configured >= 0) {
+    return Math.max(0, configured);
+  }
+  return lane === 'local' ? LLM_RATE_LIMIT_MS.local : LLM_RATE_LIMIT_MS.cloud;
+}
+
+function getTimeoutMs(lane, options = {}) {
+  const configured = Number(options.timeoutMs);
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.max(1000, configured);
+  }
+
+  const maxTokens = Number(options.maxTokens) || 0;
+  const isControlCall = maxTokens > 0 && maxTokens <= 300;
+  if (isControlCall) return LLM_TIMEOUT_MS.control;
+  return lane === 'local' ? LLM_TIMEOUT_MS.local : LLM_TIMEOUT_MS.cloud;
+}
+
+async function scheduleLaneExecution(lane, minIntervalMs, signal, work) {
+  const state = laneState[lane] || laneState.cloud;
+  const previous = state.chain.catch(() => undefined);
+  let release;
+  state.chain = new Promise(resolve => { release = resolve; });
+
+  const waitForPrevious = () => {
+    if (!signal) return previous;
+    if (signal.aborted) {
+      const error = new Error('Request aborted');
+      error.name = 'AbortError';
+      return Promise.reject(error);
+    }
+
+    return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        cleanup();
+        const error = new Error('Request aborted');
+        error.name = 'AbortError';
+        reject(error);
+      };
+
+      const cleanup = () => {
+        signal.removeEventListener('abort', onAbort);
+      };
+
+      signal.addEventListener('abort', onAbort, { once: true });
+      previous.then(() => {
+        cleanup();
+        resolve();
+      }).catch(error => {
+        cleanup();
+        reject(error);
+      });
+    });
+  };
+
+  try {
+    await waitForPrevious();
+
+    const waitMs = Math.max(0, state.nextAt - Date.now());
+    if (waitMs > 0) {
+      await delay(waitMs, signal);
+    }
+
+    state.nextAt = Date.now() + Math.max(0, minIntervalMs || 0);
+    return await work();
+  } finally {
+    release();
+  }
+}
+
+async function runWithTimeout(task, { timeoutMs, parentSignal, laneLabel }) {
+  const controller = new AbortController();
+  let timedOut = false;
+
+  const relayAbort = () => controller.abort();
+  if (parentSignal) {
+    if (parentSignal.aborted) controller.abort();
+    else parentSignal.addEventListener('abort', relayAbort, { once: true });
+  }
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    return await task(controller.signal);
+  } catch (error) {
+    if (timedOut) {
+      const timeoutError = new Error(`LLM timeout after ${timeoutMs}ms (${laneLabel})`);
+      timeoutError.code = 'LLM_TIMEOUT';
+      timeoutError.status = 408;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    if (parentSignal) parentSignal.removeEventListener('abort', relayAbort);
+  }
+}
+
 function abortActiveLlmRequest() {
   if (!activeLlmController) return;
   activeLlmController.abort();
 }
 
 async function callGemini(msgs, options = {}) { return callLLM(msgs, options); }
+
+function getSelectedCloudModel() {
+  const modelSelect = document.getElementById('model-select');
+  return String(modelSelect?.value || '').trim();
+}
+
+function parseCloudProviderModel(rawModel) {
+  const model = String(rawModel || '').trim();
+  if (!model) return { provider: 'gemini', model: 'gemini-2.5-flash' };
+
+  const prefixed = model.match(/^(gemini|openai|claude|azure)\/(.+)$/i);
+  if (prefixed) {
+    return {
+      provider: prefixed[1].toLowerCase(),
+      model: String(prefixed[2] || '').trim()
+    };
+  }
+
+  return { provider: 'gemini', model };
+}
+
+function buildOpenAiStyleMessages(msgs) {
+  return msgs.map(m => ({
+    role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
+    content: String(m.content || '')
+  }));
+}
+
+async function callCloud(msgs, signal, options = {}) {
+  const selected = parseCloudProviderModel(getSelectedCloudModel());
+  const provider = String(options.provider || selected.provider || 'gemini').toLowerCase();
+  const model = String(options.model || selected.model || '').trim();
+
+  if (!localBackend.enabled) {
+    document.getElementById('badge-model').textContent = provider === 'gemini'
+      ? model
+      : `${provider}/${model}`;
+  }
+
+  if (provider === 'openai') return callOpenAiCloud(msgs, signal, options, model);
+  if (provider === 'claude') return callClaudeCloud(msgs, signal, options, model);
+  if (provider === 'azure') return callAzureOpenAiCloud(msgs, signal, options, model);
+  return callGeminiDirect(msgs, signal, options, model);
+}
 
 function sanitizeModelReply(text) {
   return splitModelReply(text).visible;
@@ -249,30 +489,33 @@ async function callLLM(msgs, options = {}) {
   }
 
   activeLlmController = new AbortController();
-  const { signal } = activeLlmController;
-
-  if (localBackend.enabled && localBackend.url) {
-    try {
-      return await callLocal(msgs, signal, options);
-    } finally {
-      if (activeLlmController?.signal === signal) {
-        activeLlmController = null;
-      }
-    }
-  }
+  const { signal: outerSignal } = activeLlmController;
+  const lane = getLaneForRequest();
+  const timeoutMs = getTimeoutMs(lane, options);
+  const minIntervalMs = getRateLimitMs(lane, options);
+  const retries = Number.isInteger(options.retries) ? Math.max(0, options.retries) : (lane === 'local' ? 1 : 2);
 
   try {
-    return await callGeminiDirect(msgs, signal, options);
+    return await scheduleLaneExecution(lane, minIntervalMs, outerSignal, async () => {
+      return retryWithBackoff(async () => {
+        return runWithTimeout(async signal => {
+          if (lane === 'local') {
+            return callLocal(msgs, signal, options);
+          }
+          return callCloud(msgs, signal, options);
+        }, { timeoutMs, parentSignal: outerSignal, laneLabel: lane });
+      }, { retries, signal: outerSignal });
+    });
   } finally {
-    if (activeLlmController?.signal === signal) {
+    if (activeLlmController?.signal === outerSignal) {
       activeLlmController = null;
     }
   }
 }
 
-async function callGeminiDirect(msgs, signal, options = {}) {
+async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
   const modelSelect = document.getElementById('model-select');
-  let model = modelSelect.value;
+  let model = String(initialModel || modelSelect.value || 'gemini-2.5-flash-lite').trim();
   if (!localBackend.enabled) document.getElementById('badge-model').textContent = model;
 
   const contents = msgs
@@ -312,19 +555,145 @@ async function callGeminiDirect(msgs, signal, options = {}) {
     ({ res, text } = await requestModel(model));
   }
 
-  if (!res.ok) { throw new Error(`Gemini ${res.status}: ${text.slice(0,300)}`); }
+  if (!res.ok) {
+    const error = new Error(`Gemini ${res.status}: ${text.slice(0,300)}`);
+    error.status = res.status;
+    throw error;
+  }
   const data = JSON.parse(text);
-  if (data.error) throw new Error(data.error.message);
+  if (data.error) {
+    const error = new Error(data.error.message);
+    if (Number.isFinite(data.error?.code)) error.status = Number(data.error.code);
+    throw error;
+  }
   if (!data.candidates?.[0]) throw new Error('No candidates returned');
   return data.candidates[0].content.parts[0].text || '';
 }
+
+async function callOpenAiCloud(msgs, signal, options = {}, initialModel = '') {
+  const model = String(initialModel || 'gpt-4.1-mini').trim();
+  const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
+  const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
+  const body = {
+    model,
+    messages: buildOpenAiStyleMessages(msgs),
+    max_tokens: maxTokens,
+    temperature,
+    stream: false
+  };
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(body),
+    signal
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    const error = new Error(`OpenAI ${res.status}: ${text.slice(0, 300)}`);
+    error.status = res.status;
+    throw error;
+  }
+
+  const data = JSON.parse(text);
+  if (data.error) {
+    const error = new Error(data.error?.message || 'OpenAI error');
+    if (Number.isFinite(data.error?.code)) error.status = Number(data.error.code);
+    throw error;
+  }
+
+  return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || '';
+}
+
+async function callClaudeCloud(msgs, signal, options = {}, initialModel = '') {
+  const model = String(initialModel || 'claude-3-7-sonnet-latest').trim();
+  const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
+  const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
+  const system = msgs.find(m => m.role === 'system')?.content || '';
+  const body = {
+    model,
+    max_tokens: maxTokens,
+    temperature,
+    system,
+    messages: msgs
+      .filter(m => m.role !== 'system')
+      .map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') }))
+  };
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify(body),
+    signal
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    const error = new Error(`Claude ${res.status}: ${text.slice(0, 300)}`);
+    error.status = res.status;
+    throw error;
+  }
+
+  const data = JSON.parse(text);
+  const responseText = Array.isArray(data.content)
+    ? data.content.filter(block => block?.type === 'text').map(block => block.text || '').join('')
+    : '';
+  return responseText || data.output_text || '';
+}
+
+async function callAzureOpenAiCloud(msgs, signal, options = {}, initialDeployment = '') {
+  const endpoint = String(localStorage.getItem('agent_azure_openai_endpoint') || '').replace(/\/+$/, '');
+  const apiVersion = String(localStorage.getItem('agent_azure_openai_api_version') || '2024-10-21');
+  const deployment = String(initialDeployment || localStorage.getItem('agent_azure_openai_deployment') || '').trim();
+  if (!endpoint) throw new Error('Azure OpenAI endpoint is missing. Set localStorage key: agent_azure_openai_endpoint');
+  if (!deployment) throw new Error('Azure OpenAI deployment is missing. Set localStorage key: agent_azure_openai_deployment or use model azure/<deployment>.');
+
+  const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
+  const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
+  const body = {
+    messages: buildOpenAiStyleMessages(msgs),
+    max_tokens: maxTokens,
+    temperature,
+    stream: false
+  };
+
+  const url = `${endpoint}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'api-key': apiKey
+    },
+    body: JSON.stringify(body),
+    signal
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    const error = new Error(`Azure OpenAI ${res.status}: ${text.slice(0, 300)}`);
+    error.status = res.status;
+    throw error;
+  }
+
+  const data = JSON.parse(text);
+  return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || '';
+}
+
 async function callLocal(msgs, signal, options = {}) {
     const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
     const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
 
   // Detect endpoint type from model select or probed URL
   const modelSel = document.getElementById('local-model-select').value;
-  const model = modelSel || localBackend.model || 'mistralai/ministral-3-3b';
+  const model = modelSel || localBackend.model || 'mistralai/ministral-3-14b-reasoning';
   localBackend.model = model;
   localStorage.setItem('agent_local_backend_model', localBackend.model || '');
 
@@ -380,6 +749,7 @@ async function callLocal(msgs, signal, options = {}) {
   pushEndpoint('/api/chat', 'ollama');
 
   let lastEndpointError = '';
+  let lastEndpointStatus = 0;
 
   for (const ep of endpoints) {
     try {
@@ -397,7 +767,11 @@ async function callLocal(msgs, signal, options = {}) {
         signal
       });
 
-      if (!res.ok) continue;
+      if (!res.ok) {
+        lastEndpointStatus = res.status;
+        lastEndpointError = `${ep.path}: HTTP ${res.status}`;
+        continue;
+      }
       const data = await res.json();
 
       const payloadError = typeof data?.error === 'string'
@@ -407,6 +781,9 @@ async function callLocal(msgs, signal, options = {}) {
       // Some local gateways respond with HTTP 200 and an error payload for unsupported endpoints.
       if (payloadError) {
         lastEndpointError = `${ep.path}: ${payloadError}`;
+        if (/\b(408|425|429|500|502|503|504)\b/.test(payloadError)) {
+          lastEndpointStatus = Number(payloadError.match(/\b(408|425|429|500|502|503|504)\b/)?.[0] || 0);
+        }
         continue;
       }
 
@@ -420,13 +797,18 @@ async function callLocal(msgs, signal, options = {}) {
     } catch (e) {
       if (ep.format === 'openai') continue; // try next
       lastEndpointError = `${ep.path}: ${e.message}`;
+      if (Number.isFinite(e?.status)) lastEndpointStatus = Number(e.status);
       continue;
     }
   }
   if (lastEndpointError) {
-    throw new Error(`Local LLM: no compatible endpoint at ${localBackend.url}. Last error: ${lastEndpointError}`);
+    const error = new Error(`Local LLM: no compatible endpoint at ${localBackend.url}. Last error: ${lastEndpointError}`);
+    if (lastEndpointStatus) error.status = lastEndpointStatus;
+    throw error;
   }
-  throw new Error(`Local LLM: no endpoint responded at ${localBackend.url}`);
+  const error = new Error(`Local LLM: no endpoint responded at ${localBackend.url}`);
+  if (lastEndpointStatus) error.status = lastEndpointStatus;
+  throw error;
 }
 
 window.AgentLLMControl = {

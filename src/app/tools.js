@@ -25,8 +25,12 @@ function isLocalModeActive() {
   return localBackend.enabled && !!localBackend.url;
 }
 
-function canUseGemini() {
+function canUseCloud() {
   return !!apiKey;
+}
+
+function canUseGemini() {
+  return canUseCloud();
 }
 
 // -- SYSTEM PROMPT -------------------------------------------------------------

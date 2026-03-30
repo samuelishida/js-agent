@@ -42,18 +42,23 @@
       <span class="sidebar-chevron">⌄</span>
     </summary>
     <div class="sidebar-panel-body">
-      <div class="sidebar-copy">Connect a hosted Gemini model for browser-based runs.</div>
+      <div class="sidebar-copy">Connect a hosted cloud model for browser-based runs (Gemini, OpenAI, Claude, Azure OpenAI).</div>
       <div class="api-row">
-        <input class="api-input" id="api-key" type="password" placeholder="AIza..." autocomplete="off" />
+        <input class="api-input" id="api-key" type="password" placeholder="Cloud API key" autocomplete="off" />
         <button class="btn-sm" onclick="saveKey()">Save</button>
       </div>
       <div style="margin-top:8px">
         <div class="sidebar-label" style="margin-bottom:4px">Hosted Model</div>
         <select id="model-select">
-          <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
-          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-          <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-          <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+          <option value="gemini/gemini-2.5-flash">gemini/gemini-2.5-flash</option>
+          <option value="gemini/gemini-2.5-pro">gemini/gemini-2.5-pro</option>
+          <option value="gemini/gemini-2.5-flash-lite">gemini/gemini-2.5-flash-lite</option>
+          <option value="openai/gpt-4.1">openai/gpt-4.1</option>
+          <option value="openai/gpt-4.1-mini">openai/gpt-4.1-mini</option>
+          <option value="openai/o4-mini">openai/o4-mini</option>
+          <option value="claude/claude-3-7-sonnet-latest">claude/claude-3-7-sonnet-latest</option>
+          <option value="claude/claude-3-5-haiku-latest">claude/claude-3-5-haiku-latest</option>
+          <option value="azure/gpt-4.1-mini">azure/gpt-4.1-mini</option>
         </select>
       </div>
     </div>

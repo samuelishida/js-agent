@@ -1,5 +1,5 @@
 ﻿// -- STATE ---------------------------------------------------------------------
-let apiKey = localStorage.getItem('gemini_api_key') || '';
+let apiKey = localStorage.getItem('cloud_api_key') || localStorage.getItem('gemini_api_key') || '';
 let messages = [];   // agentic loop history [{role, content}]
 let sessionStats = { rounds: 0, tools: 0, resets: 0, msgs: 0 };
 let isBusy = false;
@@ -205,6 +205,7 @@ function maybeRequestNotifPermission() {
 // -- API KEY -------------------------------------------------------------------
 function saveKey() {
   apiKey = document.getElementById('api-key').value.trim();
+  localStorage.setItem('cloud_api_key', apiKey);
   localStorage.setItem('gemini_api_key', apiKey);
   setStatus('ok', 'key saved');
   maybeRequestNotifPermission();

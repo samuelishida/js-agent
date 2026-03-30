@@ -61,6 +61,10 @@
     return /(file|files|arquivo|arquivos|folder|pasta|directory|diret[oÃ³]rio|rename|renome|move|mover|copy|copiar|delete|deletar|remove|remover|list files|listar arquivos|search file|buscar arquivo|open file|abrir arquivo|read project|ler projeto|leia o projeto|leio o proejto|codebase|repo|repository|src\/|[a-z]:\\)/i.test(String(text || ''));
   }
 
+  function detectAuthorizeFolderIntent(text) {
+    return /(authorize folder|autorizar pasta|authorize|autoriz[aá]r|permiss[aã]o|directory access|acesso [àa] pasta)/i.test(String(text || ''));
+  }
+
   function detectFullFileDisplayIntent(text) {
     const value = String(text || '');
     return /(show|mostre|mostrar|exiba|print|imprima|cat|dump|full|complete|completo|inteiro).*(readme|README|arquivo|file)|((readme|README).*(full|complete|completo|inteiro))/i.test(value);
@@ -68,10 +72,6 @@
 
   function detectProjectSkillsIntent(text) {
     return /(explain|explique|skills|habilidades|capabilities|capacidades).*(project|projeto|repo|codebase)|((project|projeto|repo|codebase).*(skills|habilidades|capabilities))/i.test(String(text || ''));
-  }
-
-  function detectReadmeIntent(text) {
-    return /(readme|README\.md|leia o readme|conteudo do readme|conteúdo do readme|show readme|mostre o readme)/i.test(String(text || ''));
   }
 
   function detectSaveIntent(text) {
@@ -112,7 +112,7 @@
     }
 
     if (detectFilesystemIntent(text)) {
-      plan.push('fs_list_dir', 'fs_read_file', 'fs_search_name', 'fs_search_content');
+      plan.push('fs_list_roots', 'fs_authorize_folder', 'fs_list_dir', 'fs_read_file', 'fs_search_name', 'fs_search_content');
       hints.push('Filesystem intent detected: explore before mutating unless the user explicitly asked to save/export a file.');
       if (!state.roots.size) {
         hints.push('No local folder is authorized yet. Ask the user to click the "Authorize Folder" button in the Files panel before trying direct file access.');
@@ -120,6 +120,11 @@
         const roots = [...state.roots.keys()];
         hints.push(`Authorized local roots are already available: ${roots.join(', ')}. Prefer using those roots instead of asking for access again.`);
       }
+    }
+
+    if (detectAuthorizeFolderIntent(text)) {
+      plan.push('fs_list_roots', 'fs_authorize_folder');
+      hints.push('Folder authorization intent detected: explain that the user must click "Authorize Folder" in the Files panel due browser gesture requirements.');
     }
 
     if (detectProjectSkillsIntent(text)) {
@@ -131,12 +136,6 @@
       plan.push('fs_read_file');
       hints.push('Full-file display intent detected: use fs_read_file directly and preserve source text; avoid paraphrasing.');
       hints.push('If the file exceeds one response, read in chunks with fs_read_file(path, offset, length) and continue until has_more is false.');
-    }
-
-    if (detectReadmeIntent(text)) {
-      plan.push('fs_read_file');
-      hints.push('README intent detected: prefer fs_read_file with a concrete file path ending in README.md (not a directory path).');
-      hints.push('If only a project directory is provided, list the directory first, then read /README.md from the authorized root.');
     }
 
     if (detectSaveIntent(text)) {
@@ -952,6 +951,27 @@
     return formatToolResult('fs_pick_directory', `Root: ${rootId}\nEntries: ${entries.length}\n${entries.map(item => `${item.kind}: ${item.name}`).join('\n')}`);
   }
 
+  async function authorizeFolder() {
+    const roots = [...state.roots.keys()];
+    if (roots.length) {
+      const body = [
+        `Authorized roots: ${roots.join(', ')}`,
+        `Default root: ${state.defaultRootId || roots[0]}`,
+        'You can proceed with fs_list_dir or fs_read_file using one of these roots.'
+      ].join('\n');
+      return formatToolResult('fs_authorize_folder', body);
+    }
+
+    return formatToolResult(
+      'fs_authorize_folder',
+      [
+        'No folder is authorized yet.',
+        'Action required: click "Authorize Folder" in the Files panel (user gesture required by browser security).',
+        'After authorizing, call fs_list_roots and then fs_list_dir to continue.'
+      ].join('\n')
+    );
+  }
+
   async function listDirectory({ path = '' }) {
     const { rootId, handle } = await resolveDirectory(path);
     const entries = await collectEntries(handle);
@@ -1112,7 +1132,7 @@
   async function listRoots() {
     const roots = [...state.roots.keys()];
     if (!roots.length) {
-      return formatToolResult('fs_list_roots', '(no roots selected)');
+      return formatToolResult('fs_list_roots', '(no roots selected)\nTip: call fs_authorize_folder for the next authorization step.');
     }
 
     const lines = roots.map(rootId => {
@@ -1297,6 +1317,12 @@
       retries: 1,
       run: () => listRoots()
     },
+    fs_authorize_folder: {
+      name: 'fs_authorize_folder',
+      description: 'Reports folder authorization status and tells the user how to authorize a directory from the Files panel when needed.',
+      retries: 1,
+      run: () => authorizeFolder()
+    },
     fs_pick_directory: {
       name: 'fs_pick_directory',
       description: 'Prompts the user to pick a local directory root for direct file operations. This must be triggered from a direct user gesture, such as clicking the Authorize Folder button in the Files panel.',
@@ -1308,7 +1334,7 @@
       description: 'Lists entries inside a selected local directory.',
       retries: 1,
       run: args => listDirectory(args),
-      fallbacks: ['fs_pick_directory']
+      fallbacks: ['fs_authorize_folder', 'fs_pick_directory']
     },
     fs_read_file: {
       name: 'fs_read_file',

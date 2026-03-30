@@ -247,7 +247,7 @@
       <div class="card">
         <div class="k">Routing</div>
         <div class="v">Hosted or local model path</div>
-        <div class="d">Requests can go to Gemini or to a locally probed OpenAI-compatible backend such as LM Studio or Ollama-style endpoints.</div>
+        <div class="d">Requests can go to Gemini or to a locally probed OpenAI-compatible backend such as LM Studio or Ollama-style endpoints. Best local results so far: <code>mistralai/devstral-small-2-2512</code>.</div>
       </div>
       <div class="card">
         <div class="k">Storage</div>
@@ -308,7 +308,7 @@
           <span class="chev">+</span>
         </summary>
         <div class="body">
-          <p>The loop sends current history to the selected model, parses one tool call if present, executes it through the registry, appends a `tool_result` block, and continues. If the model answers directly, the loop stops and renders the HTML reply.</p>
+          <p>The loop sends current history to the selected model, parses one tool call if present, executes it through the registry, appends a `tool_result` block, and continues. If the model answers directly, the loop stops and renders a Markdown-first response through the sanitizer pipeline.</p>
           <pre>while (round &lt; MAX_ROUNDS) {
   const reply = await callModel(messages);
   const toolCall = parseToolCall(reply);
@@ -357,6 +357,7 @@
         <li>Multiple tabs share tool-cache entries over `BroadcastChannel`, reducing repeated work for identical calls.</li>
         <li>Tabs also broadcast busy state so another window can detect that a run is already in progress.</li>
         <li>The agent itself can publish and listen for messages across tabs through `tab_broadcast` and `tab_listen`.</li>
+        <li>For file-oriented tasks, guardrails force root exploration (`fs_list_dir('/')`) before direct file reads to reduce invalid-path loops.</li>
       </ul>
     </div>
   </section>

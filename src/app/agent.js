@@ -9,6 +9,9 @@ function parseToolCall(text) {
 }
 
 let stopRequested = false;
+let runDisabledToolCalls = new Set();
+const runToolFailureCounts = new Map();
+let runFsRootExplored = false;
 
 function setStopButtonState(running) {
   const stopBtn = document.getElementById('btn-stop');
@@ -31,10 +34,195 @@ function throwIfStopRequested() {
   throw error;
 }
 
+function resetRunGuards() {
+  runDisabledToolCalls = new Set();
+  runToolFailureCounts.clear();
+  runFsRootExplored = false;
+}
+
+function getToolCallSignature(call) {
+  return `${call?.tool || 'unknown'}:${JSON.stringify(call?.args || {})}`;
+}
+
+function isFilesystemTask(userMessage) {
+  return /(arquivo|arquivos|file|files|readme|path|caminho|pasta|folder|diret[oó]rio|directory|fs_)/i.test(String(userMessage || ''));
+}
+
+function requiresFilesystemPath(toolName) {
+  return new Set([
+    'fs_read_file',
+    'fs_preview_file',
+    'fs_exists',
+    'fs_stat',
+    'fs_tree',
+    'fs_search_name',
+    'fs_search_content',
+    'fs_mkdir',
+    'fs_touch',
+    'fs_delete_path',
+    'fs_rename_path',
+    'fs_move_file',
+    'fs_copy_file',
+    'fs_write_file'
+  ]).has(String(toolName || ''));
+}
+
+function applyFilesystemExplorationGuardrail(call, userMessage) {
+  if (!call?.tool) return { call, guarded: false };
+
+  const tool = String(call.tool);
+  const args = call.args || {};
+  const isFsTool = tool.startsWith('fs_');
+  const fileTask = isFilesystemTask(userMessage);
+
+  if (!fileTask) return { call, guarded: false };
+
+  // For file tasks, if model drifts into non-filesystem tools, force root exploration first.
+  if (!isFsTool && !runFsRootExplored) {
+    return {
+      call: { tool: 'fs_list_dir', args: { path: '/' } },
+      guarded: true,
+      reason: `Guardrail: switched ${tool} to fs_list_dir('/') to discover files before other operations.`
+    };
+  }
+
+  // For first filesystem action in a file task, require a root exploration pass.
+  if (isFsTool && tool !== 'fs_list_dir' && tool !== 'fs_list_roots' && !runFsRootExplored) {
+    return {
+      call: { tool: 'fs_list_dir', args: { path: '/' } },
+      guarded: true,
+      reason: `Guardrail: forcing fs_list_dir('/') before ${tool} to anchor path resolution.`
+    };
+  }
+
+  // If a path-required filesystem tool came without path, recover by exploring root instead of looping errors.
+  if (isFsTool && requiresFilesystemPath(tool) && !args.path) {
+    return {
+      call: { tool: 'fs_list_dir', args: { path: '/' } },
+      guarded: true,
+      reason: `Guardrail: ${tool} requires args.path; running fs_list_dir('/') to recover context.`
+    };
+  }
+
+  return { call, guarded: false };
+}
+
+function recordToolFailure(call, result) {
+  if (!/^ERROR\b/i.test(String(result || ''))) {
+    return { repeated: false, count: 0 };
+  }
+
+  const signature = String(result || '')
+    .replace(/\s+/g, ' ')
+    .replace(/\d+/g, '#')
+    .slice(0, 180);
+
+  const key = `${call.tool}::${signature}`;
+  const count = (runToolFailureCounts.get(key) || 0) + 1;
+  runToolFailureCounts.set(key, count);
+
+  if (count >= 2) {
+    runDisabledToolCalls.add(getToolCallSignature(call));
+    return { repeated: true, count };
+  }
+
+  return { repeated: false, count };
+}
+
+async function buildPreflightSteering(userMessage, enrichedContext) {
+  assertRuntimeReady();
+  const systemInstruction = 'You generate compact execution steering for an LLM tool-using agent. Return 3 short lines only. No tool_call, no XML, no markdown tables.';
+  const userInstruction = `User request:\n${userMessage}\n\nHeuristic preflight context:\n${enrichedContext}\n\nReturn strict guidance with this structure:\n1) Primary tools\n2) Tools to avoid unless explicitly requested\n3) Fallback sequence`;
+
+  try {
+    const response = await callGemini([
+      { role: 'system', content: systemInstruction },
+      { role: 'user', content: userInstruction }
+    ]);
+
+    const steering = splitModelReply(response).visible.replace(getToolRegex(), '').trim();
+    if (!steering || parseToolCall(steering)) return '';
+    return steering.slice(0, 900);
+  } catch {
+    return '';
+  }
+}
+
+async function buildRecoverySteering(userMessage, call, toolError) {
+  const fallback = `Do not repeat the exact failing call for ${call.tool}. Pick a different valid next step using available tools.`;
+
+  try {
+    const response = await callGemini([
+      {
+        role: 'system',
+        content: 'You produce one concise recovery instruction for a tool-using agent. No tool_call blocks, no analysis.'
+      },
+      {
+        role: 'user',
+        content: `User request: ${userMessage}\nFailed tool: ${call.tool}\nError: ${toolError}\nReturn one short recovery instruction.`
+      }
+    ]);
+
+    const steering = splitModelReply(response).visible.replace(getToolRegex(), '').trim();
+    if (!steering || parseToolCall(steering)) return fallback;
+    return steering;
+  } catch {
+    return fallback;
+  }
+}
+
+async function normalizeToolCallWithLlm(replyText, userMessage) {
+  const allowedTools = Object.entries(enabledTools)
+    .filter(([, enabled]) => enabled)
+    .map(([name]) => name)
+    .join(', ');
+
+  const systemInstruction = [
+    'You are a tool-call normalizer.',
+    'Extract at most one tool call from the draft reply.',
+    'Return exactly one JSON object: {"tool":"name","args":{...}} or NONE.',
+    'Use only tools from the allowed list.',
+    'No prose, no markdown fences, no XML.'
+  ].join(' ');
+
+  const userInstruction = `Allowed tools: ${allowedTools}\nUser request: ${userMessage}\nDraft reply: ${replyText}\nReturn JSON or NONE.`;
+
+  try {
+    const raw = await callGemini([
+      { role: 'system', content: systemInstruction },
+      { role: 'user', content: userInstruction }
+    ]);
+
+    const text = splitModelReply(raw).visible.trim();
+    if (!text || /^NONE$/i.test(text)) return null;
+    const parsed = parseToolCall(text);
+    if (!parsed) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveToolCallFromModelReply(reply, rawReply, userMessage) {
+  const direct = parseToolCall(reply);
+  if (direct?.tool) return direct;
+
+  const fromRaw = parseToolCall(rawReply);
+  if (fromRaw?.tool) return fromRaw;
+
+  return normalizeToolCallWithLlm(rawReply || reply, userMessage);
+}
+
 async function executeTool(call) {
   assertRuntimeReady();
   const { orchestrator } = getRuntimeModules();
   const { tool, args } = call;
+
+  const callSignature = getToolCallSignature(call);
+
+  if (runDisabledToolCalls.has(callSignature)) {
+    return `ERROR: tool call '${callSignature}' is temporarily disabled for this run after repeated failures.`;
+  }
 
   if (!enabledTools[tool]) {
     return `ERROR: tool '${tool}' is disabled in this environment.`;
@@ -151,6 +339,26 @@ async function generateFinalMarkdownAnswer(candidateAnswer, userMessage) {
   return finalText;
 }
 
+function isExplicitFileDisplayRequest(userMessage) {
+  return /(mostre|mostrar|show|display|conteudo|conteúdo|full|completo|inteiro).*(readme|arquivo|file)|((readme|arquivo|file).*(no chat|in chat|aqui))/i.test(String(userMessage || ''));
+}
+
+function extractReadFilePayload(result) {
+  const raw = String(result || '');
+  const hasMore = /Has more:\s*yes/i.test(raw);
+  const match = raw.match(/Next offset:[^\n]*\n\n([\s\S]*)$/i);
+  return {
+    content: (match ? match[1] : raw).trim(),
+    hasMore
+  };
+}
+
+function looksLikeMetaPromptLeak(text) {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  return /(You are a response formatter|Draft Assistant Reply|Polish this for user display|execution_steering|Return strict guidance)/i.test(value);
+}
+
 function looksLikeIntermediaryReply(text) {
   const value = String(text || '').trim();
   if (!value) return true;
@@ -173,12 +381,17 @@ async function agentLoop(userMessage) {
   const CTX_LIMIT  = getCtxLimit();
   const delay      = getDelay();
   const enrichedMessage = await skills.buildInitialContext(userMessage);
+  const preflightSteering = await buildPreflightSteering(userMessage, enrichedMessage);
+  throwIfStopRequested();
+  const userMessageWithSteering = preflightSteering
+    ? `${enrichedMessage}\n\n<execution_steering>\n${preflightSteering}\n</execution_steering>`
+    : enrichedMessage;
 
   // Init messages for this turn
   messages = [
     { role: 'system', content: await buildSystemPrompt(userMessage) },
     ...messages.filter(m => m.role !== 'system').slice(-20), // keep last 20 non-system
-    { role: 'user', content: enrichedMessage }
+    { role: 'user', content: userMessageWithSteering }
   ];
 
   let round = 0;
@@ -217,7 +430,17 @@ async function agentLoop(userMessage) {
     hideThinking();
 
     // Parse for tool call
-    const toolCall = parseToolCall(reply);
+    let toolCall = await resolveToolCallFromModelReply(reply, rawReply, userMessage);
+    throwIfStopRequested();
+
+    if (toolCall?.tool) {
+      const guard = applyFilesystemExplorationGuardrail(toolCall, userMessage);
+      if (guard.guarded) {
+        toolCall = guard.call;
+        addNotice(guard.reason);
+      }
+    }
+
     const leakedReasoning = !toolCall && orchestrator.hasReasoningLeak(reply);
 
     if (leakedReasoning) {
@@ -244,13 +467,7 @@ async function agentLoop(userMessage) {
       }
 
       let finalMarkdown = cleanReply;
-      if (!isLocalModeActive()) {
-        try {
-          finalMarkdown = await generateFinalMarkdownAnswer(cleanReply, userMessage);
-        } catch {
-          finalMarkdown = cleanReply;
-        }
-      }
+      throwIfStopRequested();
 
       addMessage('agent', finalMarkdown, round, false, false, []);
       messages.push({ role: 'assistant', content: finalMarkdown });
@@ -263,7 +480,9 @@ async function agentLoop(userMessage) {
 
     // Tool call detected
     const toolContent = reply.replace(getToolRegex(), '').trim();
-    if (toolContent) addMessage('agent', toolContent, round, false, false, parsedReply?.thinkingBlocks || []);
+    if (toolContent && !looksLikeMetaPromptLeak(toolContent)) {
+      addMessage('agent', toolContent, round, false, false, []);
+    }
 
     sessionStats.tools++;
     updateStats();
@@ -279,8 +498,36 @@ async function agentLoop(userMessage) {
     hideThinking();
     addMessage('tool', `? ${result}`, round, false, true);
 
+    if (toolCall.tool === 'fs_read_file' && !/^ERROR\b/i.test(String(result || '')) && isExplicitFileDisplayRequest(userMessage)) {
+      const payload = extractReadFilePayload(result);
+      const finalMarkdown = payload.hasMore
+      ? `Aqui está a primeira parte do arquivo:\n\n\`\`\`text\n${payload.content}\n\`\`\`\n\nO arquivo é maior que um único bloco. Posso continuar com a próxima parte.`
+        : payload.content;
+
+      addMessage('agent', finalMarkdown, round, false, false, []);
+      messages.push({ role: 'assistant', content: finalMarkdown });
+      syncSessionState();
+      setStatus('ok', `done in ${round} round${round>1?'s':''}`);
+      notifyIfHidden('File content ready.');
+      updateCtxBar();
+      return;
+    }
+
+    if (toolCall.tool === 'fs_list_dir' && !/^ERROR\b/i.test(String(result || ''))) {
+      runFsRootExplored = true;
+    }
+
+    const failureState = recordToolFailure(toolCall, result);
+
     messages.push({ role: 'assistant', content: rawReply || reply });
     messages.push({ role: 'user', content: `<tool_result tool="${toolCall.tool}">\n${result}\n</tool_result>` });
+
+    if (failureState.repeated) {
+      const recoverySteering = await buildRecoverySteering(userMessage, toolCall, result);
+      throwIfStopRequested();
+      messages.push({ role: 'user', content: `Recovery guidance: ${recoverySteering}` });
+      addNotice(`Repeated failure on ${getToolCallSignature(toolCall)}. Added recovery guidance and disabled only this failing call pattern.`);
+    }
 
     // Check context limit
     if (ctxSize(messages) > CTX_LIMIT) {
@@ -296,16 +543,15 @@ async function agentLoop(userMessage) {
 
   // Exhausted rounds — force final answer
   addNotice('max_rounds (' + MAX_ROUNDS + ') reached. Forcing final answer.');
-  messages.push({ role: 'user', content: 'Answer now with what you know so far. Return the final answer as valid HTML only.' });
+  messages.push({ role: 'user', content: 'Answer now with what you know so far. Return the final answer in Markdown only.' });
   showThinking('forcing final answer…');
   try {
     throwIfStopRequested();
     const finalReply = await callGemini(messages);
     throwIfStopRequested();
     const parsedFinalReply = splitModelReply(finalReply);
-    const finalMarkdown = isLocalModeActive()
-      ? parsedFinalReply.visible.replace(getToolRegex(), '').trim()
-      : await generateFinalMarkdownAnswer(parsedFinalReply.visible, userMessage);
+    const finalMarkdown = parsedFinalReply.visible.replace(getToolRegex(), '').trim();
+    throwIfStopRequested();
 
     hideThinking();
     addMessage('agent', finalMarkdown, MAX_ROUNDS, false, false, []);
@@ -438,6 +684,7 @@ async function sendMessage() {
   autoResize(input);
   isBusy = true;
   stopRequested = false;
+  resetRunGuards();
   broadcastBusyState(true);
   document.getElementById('btn-send').disabled = true;
   setStopButtonState(true);

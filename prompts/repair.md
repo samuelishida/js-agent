@@ -7,7 +7,7 @@ Requirements:
 - Same language as the user
 - No chain-of-thought
 - No meta commentary
-- Final answer must be valid HTML, not Markdown
+- Final answer must be Markdown only
 - If data or an operation is needed, return exactly one <tool_call>
 - Do not mention this correction
 

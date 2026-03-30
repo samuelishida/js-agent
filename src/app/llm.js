@@ -233,7 +233,13 @@ function sanitizeHtmlFragment(html) {
 }
 
 function renderAgentHtml(text) {
-  const source = looksLikeHtmlFragment(text) ? String(text || '') : renderMarkdownBlocks(text);
+  const raw = String(text || '');
+  if (looksLikeHtmlFragment(raw)) {
+    // Backward-compatible rendering for historical messages persisted as HTML.
+    return sanitizeHtmlFragment(raw);
+  }
+
+  const source = renderMarkdownBlocks(raw);
   return sanitizeHtmlFragment(source);
 }
 

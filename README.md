@@ -75,6 +75,10 @@ Probe flow:
 
 If local routing is enabled, the UI switches model execution to the local backend. Otherwise it uses the selected Gemini model.
 
+Recommended local model (current best result):
+
+- `mistralai/devstral-small-2-2512`
+
 ## Skills
 
 Skills are registered in `src/skills/shared.js` under `window.AgentSkills.registry`.
@@ -102,6 +106,11 @@ Each turn follows this pattern:
 4. Execute one tool when requested
 5. Inject `<tool_result>` into context
 6. Repeat until completion or round limit
+
+Rendering pipeline:
+
+- The model reply is treated as Markdown
+- The app renders Markdown to HTML and sanitizes output before display
 
 Configurable runtime controls in the UI:
 

@@ -342,7 +342,7 @@ async function summarizeContext(userQuery) {
   const prompt = await orchestrator.buildSummaryPrompt(hist, userQuery);
 
   const sysMsg = messages.find(m => m.role === 'system');
-  const summary = await callGemini([
+  const summary = await callLLM([
     sysMsg,
     { role: 'user', content: prompt }
   ], { maxTokens: 700, temperature: 0.2, timeoutMs: 28000, retries: 1 });
@@ -433,7 +433,7 @@ async function agentLoop(userMessage) {
     let parsedReply;
     let reply;
     try {
-      rawReply = await callGemini(messages, { timeoutMs: isLocalModeActive() ? 70000 : 35000, retries: isLocalModeActive() ? 1 : 2 });
+      rawReply = await callLLM(messages, { timeoutMs: isLocalModeActive() ? 70000 : 35000, retries: isLocalModeActive() ? 1 : 2 });
       throwIfStopRequested();
       parsedReply = splitModelReply(rawReply);
       reply = parsedReply.visible;
@@ -586,7 +586,7 @@ async function agentLoop(userMessage) {
   showThinking('forcing final answer…');
   try {
     throwIfStopRequested();
-    const finalReply = await callGemini(messages, { timeoutMs: isLocalModeActive() ? 70000 : 35000, retries: isLocalModeActive() ? 1 : 2 });
+    const finalReply = await callLLM(messages, { timeoutMs: isLocalModeActive() ? 70000 : 35000, retries: isLocalModeActive() ? 1 : 2 });
     throwIfStopRequested();
     const parsedFinalReply = splitModelReply(finalReply);
     const finalMarkdown = parsedFinalReply.visible.replace(getToolRegex(), '').trim();

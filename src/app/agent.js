@@ -70,6 +70,18 @@ function updateCtxBar() {
   document.getElementById('stat-ctx').textContent = size.toLocaleString();
 }
 
+function notifyIfHidden(summary) {
+  if (document.visibilityState === 'visible') return;
+  if (!('Notification' in window)) return;
+  if (window.Notification.permission !== 'granted') return;
+
+  new window.Notification('JS Agent', {
+    body: String(summary || 'Task complete.').slice(0, 120),
+    tag: 'agent-run-finished',
+    silent: false
+  });
+}
+
 async function summarizeContext(userQuery) {
   assertRuntimeReady();
   const { orchestrator } = getRuntimeModules();
@@ -164,6 +176,7 @@ async function agentLoop(userMessage) {
       messages.push({ role: 'assistant', content: rawReply || reply });
       syncSessionState();
       setStatus('ok', `done in ${round} round${round>1?'s':''}`);
+      notifyIfHidden(cleanReply);
       updateCtxBar();
       return;
     }
@@ -210,6 +223,7 @@ async function agentLoop(userMessage) {
     addMessage('agent', parsedFinalReply.visible, MAX_ROUNDS, false, false, parsedFinalReply.thinkingBlocks);
     messages.push({ role: 'assistant', content: finalReply });
     syncSessionState();
+    notifyIfHidden(parsedFinalReply.visible || 'Response ready. Check the latest result.');
   } catch (e) {
     hideThinking();
     addMessage('error', `Final answer failed: ${e.message}`, MAX_ROUNDS);
@@ -335,6 +349,7 @@ async function sendMessage() {
   input.value = '';
   autoResize(input);
   isBusy = true;
+  broadcastBusyState(true);
   document.getElementById('btn-send').disabled = true;
   document.getElementById('input-status').textContent = 'processing…';
 
@@ -356,6 +371,7 @@ async function sendMessage() {
   }
 
   isBusy = false;
+  broadcastBusyState(false);
   document.getElementById('btn-send').disabled = false;
   document.getElementById('input-status').textContent = `${sessionStats.msgs} message${sessionStats.msgs!==1?'s':''} sent`;
   input.focus();
@@ -406,6 +422,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   chatSessions = loadSessions();
+  initCacheSync();
+  initBusySync();
   if (!chatSessions.length) createSession();
   if (!getActiveSession()) activeSessionId = chatSessions[0]?.id || createSession().id;
   renderSessionList();

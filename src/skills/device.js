@@ -10,7 +10,11 @@
       { name: 'clipboard_write', signature: 'clipboard_write(text)' },
       { name: 'storage_list_keys', signature: 'storage_list_keys()' },
       { name: 'storage_get', signature: 'storage_get(key)' },
-      { name: 'storage_set', signature: 'storage_set(key, value)' }
+      { name: 'storage_set', signature: 'storage_set(key, value)' },
+      { name: 'notification_request_permission', signature: 'notification_request_permission()' },
+      { name: 'notification_send', signature: 'notification_send(title, body?, tag?, silent?)' },
+      { name: 'tab_broadcast', signature: 'tab_broadcast(topic, payload?)' },
+      { name: 'tab_listen', signature: 'tab_listen(topic, timeout_ms?)' }
     ]
   };
 })();

@@ -4,6 +4,10 @@
     defaultRootId: null,
     uploads: new Map()
   };
+  const instanceId = Math.random().toString(36).slice(2);
+  const AGENT_CHANNEL = 'loopagent-v1';
+  let broadcastChannel = null;
+  const broadcastListeners = new Map();
 
   const TEXT_EXTENSIONS = new Set(['txt', 'md', 'json', 'js', 'ts', 'css', 'html', 'xml', 'csv', 'log', 'yml', 'yaml']);
 
@@ -69,6 +73,10 @@
     return /(json|csv|parse|validar json|parsear csv|extract links|extrair links|metadata)/i.test(String(text || ''));
   }
 
+  function detectTabCoordinationIntent(text) {
+    return /(other tab|another tab|open tab|other window|another window|dashboard|share|send to other tab|manda pra outra aba|outra aba|outra janela|espera a outra aba|broadcast|all tabs|todas as abas)/i.test(String(text || ''));
+  }
+
   function buildPreflightPlan(userMessage) {
     const plan = [];
     const hints = [];
@@ -110,6 +118,11 @@
       hints.push('Parsing/extraction intent detected.');
     }
 
+    if (detectTabCoordinationIntent(text)) {
+      plan.push('tab_broadcast', 'tab_listen');
+      hints.push('Multi-tab coordination intent detected: use tab_broadcast to publish results and tab_listen to wait for another tab.');
+    }
+
     if (!plan.length) {
       hints.push('No strong preflight intent detected. Use the most specific tool available.');
     }
@@ -134,6 +147,29 @@
 
   function supportsFsAccess() {
     return !!window.showDirectoryPicker;
+  }
+
+  function supportsTabMessaging() {
+    return 'BroadcastChannel' in window;
+  }
+
+  function getBroadcastChannel() {
+    if (!supportsTabMessaging()) {
+      throw new Error('BroadcastChannel is not supported in this browser.');
+    }
+
+    if (!broadcastChannel) {
+      broadcastChannel = new BroadcastChannel(AGENT_CHANNEL);
+      broadcastChannel.onmessage = event => {
+        const { topic, payload, from } = event.data || {};
+        if (!topic || from === instanceId) return;
+
+        const callbacks = broadcastListeners.get(String(topic)) || new Set();
+        callbacks.forEach(callback => callback(payload, String(topic)));
+      };
+    }
+
+    return broadcastChannel;
   }
 
   function assertFsAccess() {
@@ -630,6 +666,104 @@
     return formatToolResult('storage_set', `Saved ${key}`);
   }
 
+  let notificationPermissionState = ('Notification' in window && window.Notification?.permission) || 'unsupported';
+
+  function notificationsSupported() {
+    return 'Notification' in window;
+  }
+
+  async function ensureNotificationPermission() {
+    if (!notificationsSupported()) {
+      throw new Error('Notifications are not supported in this browser.');
+    }
+
+    notificationPermissionState = window.Notification.permission;
+    if (notificationPermissionState === 'granted') return true;
+    if (notificationPermissionState === 'denied') {
+      throw new Error('Notification permission was denied. Reset it in browser settings to enable alerts.');
+    }
+
+    notificationPermissionState = await window.Notification.requestPermission();
+    if (notificationPermissionState !== 'granted') {
+      throw new Error('Notification permission was not granted.');
+    }
+
+    return true;
+  }
+
+  async function requestNotificationPermission() {
+    if (!notificationsSupported()) {
+      return formatToolResult('notification_request_permission', 'Notifications not supported in this browser.');
+    }
+
+    notificationPermissionState = await window.Notification.requestPermission();
+    return formatToolResult('notification_request_permission', `Permission: ${notificationPermissionState}`);
+  }
+
+  async function sendNotification({ title, body, tag, silent }) {
+    await ensureNotificationPermission();
+
+    const safeTitle = String(title || 'JS Agent').slice(0, 64);
+    const safeBody = String(body || '').slice(0, 200);
+    new window.Notification(safeTitle, {
+      body: safeBody,
+      tag: String(tag || 'agent-notification'),
+      silent: silent === true
+    });
+
+    return formatToolResult('notification_send', `Notification sent: "${safeTitle}"`);
+  }
+
+  async function tabBroadcast({ topic, payload }) {
+    if (!topic) {
+      throw new Error('tab_broadcast: topic is required.');
+    }
+
+    const channel = getBroadcastChannel();
+    channel.postMessage({
+      topic: String(topic),
+      payload: payload ?? null,
+      from: instanceId,
+      timestamp: new Date().toISOString()
+    });
+
+    return formatToolResult('tab_broadcast', `Broadcast sent on topic "${String(topic)}".`);
+  }
+
+  async function tabListen({ topic, timeout_ms }) {
+    if (!topic) {
+      throw new Error('tab_listen: topic is required.');
+    }
+
+    const waitMs = Math.max(1, Number(timeout_ms) || 15000);
+    const normalizedTopic = String(topic);
+    getBroadcastChannel();
+
+    if (!broadcastListeners.has(normalizedTopic)) {
+      broadcastListeners.set(normalizedTopic, new Set());
+    }
+
+    const callbacks = broadcastListeners.get(normalizedTopic);
+
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        callbacks.delete(onMessage);
+        reject(new Error(`tab_listen: no message on "${normalizedTopic}" within ${waitMs}ms.`));
+      }, waitMs);
+
+      function onMessage(payload) {
+        window.clearTimeout(timer);
+        callbacks.delete(onMessage);
+        resolve(formatToolResult(
+          'tab_listen',
+          `Topic: ${normalizedTopic}\nPayload: ${JSON.stringify(payload ?? null, null, 2).slice(0, 2000)}`
+        ));
+      }
+
+      callbacks.add(onMessage);
+    });
+  }
+
   async function buildInitialContext(userMessage) {
     const blocks = [];
     const preflight = buildPreflightPlan(userMessage);
@@ -1053,6 +1187,30 @@
       retries: 1,
       run: args => storageSet(args)
     },
+    notification_request_permission: {
+      name: 'notification_request_permission',
+      description: 'Requests native browser notification permission from the user. Use once before sending notifications if permission is still unknown.',
+      retries: 1,
+      run: () => requestNotificationPermission()
+    },
+    notification_send: {
+      name: 'notification_send',
+      description: 'Sends a native browser notification. Use when a long task finishes, when an important result needs attention, or when the user explicitly asks to be notified.',
+      retries: 1,
+      run: args => sendNotification(args)
+    },
+    tab_broadcast: {
+      name: 'tab_broadcast',
+      description: 'Publishes a message to other open tabs running this agent. Use to share results or coordinate work across multiple windows.',
+      retries: 1,
+      run: args => tabBroadcast(args)
+    },
+    tab_listen: {
+      name: 'tab_listen',
+      description: 'Waits for a broadcast message on a specific topic from another tab and returns the payload or a timeout error.',
+      retries: 1,
+      run: args => tabListen(args)
+    },
     fs_list_roots: {
       name: 'fs_list_roots',
       description: 'Lists the currently selected local directory roots.',
@@ -1177,6 +1335,7 @@
   };
 
   window.AgentSkills = {
+    instanceId,
     state,
     registry,
     extractEntities,

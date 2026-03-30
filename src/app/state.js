@@ -10,6 +10,13 @@ const TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
 const SIDEBAR_COLLAPSED_KEY = 'agent_sidebar_collapsed_v1';
 const SIDEBAR_PANELS_KEY = 'agent_sidebar_panels_v1';
 const SIDEBAR_AUTO_COLLAPSE_WIDTH = 1180;
+const CACHE_SYNC_CHANNEL = 'loopagent-cache-v1';
+const BUSY_CHANNEL = 'loopagent-busy-v1';
+let notificationPermissionRequested = false;
+const agentInstanceId = window.AgentSkills?.instanceId || Math.random().toString(36).slice(2);
+let cacheSyncChannel = null;
+let busyChannel = null;
+let otherTabBusy = false;
 let enabledTools = {
   web_search: true,
   calc: true,
@@ -27,6 +34,10 @@ let enabledTools = {
   storage_list_keys: true,
   storage_get: true,
   storage_set: true,
+  notification_request_permission: true,
+  notification_send: true,
+  tab_broadcast: true,
+  tab_listen: true,
   fs_list_roots: true,
   fs_pick_directory: true,
   fs_list_dir: true,
@@ -138,11 +149,32 @@ function handleResponsiveSidebar() {
   }
 }
 
+function supportsNotifications() {
+  return 'Notification' in window;
+}
+
+function maybeRequestNotifPermission() {
+  if (notificationPermissionRequested || !supportsNotifications()) return;
+  if (window.Notification.permission !== 'default') return;
+
+  notificationPermissionRequested = true;
+  window.Notification.requestPermission()
+    .then(permission => {
+      if (permission === 'granted') {
+        addNotice('Notifications enabled.');
+      }
+    })
+    .catch(() => {
+      notificationPermissionRequested = false;
+    });
+}
+
 // -- API KEY -------------------------------------------------------------------
 function saveKey() {
   apiKey = document.getElementById('api-key').value.trim();
   localStorage.setItem('gemini_api_key', apiKey);
   setStatus('ok', 'key saved');
+  maybeRequestNotifPermission();
 }
 
 function loadToolCache() {
@@ -176,8 +208,59 @@ function getCachedToolResult(call) {
 
 function setCachedToolResult(call, result) {
   const cache = loadToolCache();
-  cache[getToolCacheKey(call)] = { result, timestamp: Date.now() };
+  const key = getToolCacheKey(call);
+  const entry = { result, timestamp: Date.now() };
+  cache[key] = entry;
   saveToolCache(cache);
+  cacheSyncChannel?.postMessage({
+    type: 'cache-set',
+    key,
+    entry,
+    from: agentInstanceId
+  });
+}
+
+function updateBusyBadgeHint() {
+  const badge = document.getElementById('badge-status');
+  if (!badge) return;
+  badge.title = otherTabBusy ? 'Another tab is running' : '';
+}
+
+function initCacheSync() {
+  if (!('BroadcastChannel' in window) || cacheSyncChannel) return;
+
+  cacheSyncChannel = new BroadcastChannel(CACHE_SYNC_CHANNEL);
+  cacheSyncChannel.onmessage = event => {
+    const { type, key, entry, from } = event.data || {};
+    if (from === agentInstanceId || type !== 'cache-set' || !key || !entry) return;
+
+    const cache = loadToolCache();
+    if (!cache[key] || cache[key].timestamp < entry.timestamp) {
+      cache[key] = entry;
+      saveToolCache(cache);
+    }
+  };
+}
+
+function initBusySync() {
+  if (!('BroadcastChannel' in window) || busyChannel) return;
+
+  busyChannel = new BroadcastChannel(BUSY_CHANNEL);
+  busyChannel.onmessage = event => {
+    const { from, busy } = event.data || {};
+    if (from === agentInstanceId) return;
+    otherTabBusy = !!busy;
+    updateBusyBadgeHint();
+  };
+
+  updateBusyBadgeHint();
+}
+
+function broadcastBusyState(busy) {
+  busyChannel?.postMessage({
+    busy: !!busy,
+    from: agentInstanceId
+  });
 }
 
 function loadSessions() {

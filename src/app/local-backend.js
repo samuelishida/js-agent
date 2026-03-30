@@ -73,6 +73,10 @@ function extractModelsFromPayload(data) {
 }
 
 async function probeLocal() {
+  if (typeof maybeRequestNotifPermission === 'function') {
+    maybeRequestNotifPermission();
+  }
+
   const manualUrl = document.getElementById('local-url').value.trim();
   setLocalStatus('busy', 'probing…');
   document.getElementById('badge-local').textContent = 'local: probing…';

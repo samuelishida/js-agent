@@ -3,377 +3,438 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Agentic Search — Architecture</title>
+<title>JS Agent Architecture</title>
 <style>
   :root {
-    --bg:#0e0f11;--bg2:#16181c;--bg3:#1e2128;
-    --border:rgba(255,255,255,0.08);--border-hi:rgba(255,255,255,0.18);
-    --text:#e4e2db;--text2:#8a887f;--text3:#5a5852;
-    --accent:#7f77dd;--amber:#ef9f27;--mono:'JetBrains Mono','Fira Code',monospace;--sans:'Inter',system-ui,sans-serif;
+    --bg: #0c1117;
+    --panel: #121923;
+    --panel-2: #182231;
+    --line: rgba(255,255,255,0.08);
+    --line-strong: rgba(255,255,255,0.16);
+    --text: #e8eef7;
+    --muted: #9aa8bb;
+    --soft: #6e7d92;
+    --blue: #63a4ff;
+    --green: #53d3a6;
+    --amber: #ffbd59;
+    --rose: #ff8f8f;
+    --mono: "JetBrains Mono", "Fira Code", monospace;
+    --sans: "Segoe UI", "Inter", sans-serif;
   }
-  *{box-sizing:border-box;margin:0;padding:0;}
-  body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.6;padding:32px 24px 48px;}
-  header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:40px;gap:16px;flex-wrap:wrap;}
-  header h1{font-size:18px;font-weight:500;letter-spacing:-.02em;}
-  header p{font-size:12px;color:var(--text3);margin-top:4px;font-family:var(--mono);}
-  .hr{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
-  .badge{font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:4px;border:1px solid var(--border-hi);color:var(--text2);white-space:nowrap;}
-  .ls{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;color:var(--text3);cursor:pointer;user-select:none;}
-  .ll{transition:color .2s;}.ll.a{color:var(--text);}
-  .tt{position:relative;width:36px;height:20px;background:var(--bg3);border:1px solid var(--border-hi);border-radius:10px;transition:background .2s;}
-  .tt.on{background:#2a2650;border-color:#534AB7;}
-  .tb{position:absolute;top:2px;left:2px;width:14px;height:14px;background:var(--text3);border-radius:50%;transition:transform .2s,background .2s;}
-  .tt.on .tb{transform:translateX(16px);background:#7f77dd;}
-  .dw{width:100%;overflow-x:auto;}
-  svg{display:block;}
-  .nd{cursor:pointer;}.nd rect,.nd path{transition:filter .15s;}.nd:hover rect,.nd:hover path{filter:brightness(1.18);}.nd:hover .nl{fill:#fff;}
-  .panel{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px 24px;margin-top:32px;}
-  .panel h2{font-size:13px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:16px;}
-  .psub{font-size:12px;color:var(--text3);margin-bottom:20px;font-family:var(--mono);}
-  .fs{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1px;background:var(--border);border-radius:8px;overflow:hidden;}
-  .st{background:var(--bg3);padding:14px 16px;cursor:pointer;transition:background .15s;}
-  .st:hover{background:#252830;}.st.ac{background:#1e2535;border-left:2px solid var(--accent);}
-  .sn{font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:4px;}
-  .stit{font-size:13px;font-weight:500;color:var(--text);}
-  .sdesc{font-size:12px;color:var(--text2);margin-top:4px;display:none;}.st.ac .sdesc{display:block;}
-  .cg{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;}
-  .cc{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:14px 16px;}
-  .cc .k{font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:6px;}
-  .cc .v{font-family:var(--mono);font-size:13px;color:var(--amber);}
-  .cc .v span{color:var(--text2);font-size:11px;display:block;margin-top:2px;}
-  .dg{display:flex;flex-direction:column;gap:8px;}
-  .dc{background:var(--bg3);border:1px solid var(--border);border-radius:8px;overflow:hidden;cursor:pointer;transition:border-color .15s;}
-  .dc:hover{border-color:var(--border-hi);}.dc.op{border-color:rgba(127,119,221,.35);}
-  .dh{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;gap:12px;}
-  .dtag{font-family:var(--mono);font-size:9px;letter-spacing:.1em;border:1px solid;border-radius:3px;padding:2px 6px;display:inline-block;margin-bottom:5px;}
-  .dtit{font-size:14px;font-weight:500;color:var(--text);}
-  .dsub{font-size:12px;color:var(--text3);margin-top:2px;font-family:var(--mono);}
-  .dchev{font-size:14px;color:var(--text3);flex-shrink:0;transition:color .15s;}.dc:hover .dchev{color:var(--text2);}
-  .db{display:none;padding:0 18px 18px;border-top:1px solid var(--border);}.dc.op .db{display:block;}
-  .de{font-size:13px;color:var(--text2);line-height:1.7;margin:14px 0 12px;}
-  .dcode{background:#0a0b0d;border:1px solid var(--border);border-radius:6px;padding:14px 16px;font-family:var(--mono);font-size:12px;line-height:1.8;overflow-x:auto;white-space:pre;color:#c9c7be;}
-  .dn{margin-top:12px;padding:8px 12px;background:rgba(127,119,221,.07);border-left:2px solid #3C3489;border-radius:0 4px 4px 0;font-size:12px;color:var(--text2);font-family:var(--mono);}
-  .ck{color:#7f77dd;}.cs{color:#5dcaa5;}.cm{color:#4a4840;}.cf{color:#85B7EB;}.cn{color:#ef9f27;}.cr{color:#d85a30;}
-  footer{margin-top:32px;font-family:var(--mono);font-size:11px;color:var(--text3);text-align:center;}
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(circle at top, #152132 0%, var(--bg) 50%);
+    color: var(--text);
+    font: 14px/1.6 var(--sans);
+    padding: 28px;
+  }
+
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  header {
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
+    align-items: flex-start;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+  }
+  h1 { font-size: 28px; line-height: 1.1; letter-spacing: -0.03em; }
+  .sub { color: var(--muted); max-width: 720px; margin-top: 10px; }
+  .badges { display: flex; gap: 10px; flex-wrap: wrap; }
+  .badge {
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    padding: 6px 10px;
+    font: 12px var(--mono);
+    color: var(--muted);
+    background: rgba(255,255,255,0.03);
+  }
+
+  .hero {
+    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 20px;
+    margin-bottom: 22px;
+    overflow-x: auto;
+  }
+
+  svg { display: block; min-width: 980px; width: 100%; height: auto; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 20px;
+    margin-bottom: 18px;
+  }
+  .panel h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+  .panel p { color: var(--muted); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+  }
+  .card {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 16px;
+  }
+  .card .k {
+    color: var(--soft);
+    font: 11px var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .card .v {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .card .d {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  details {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+  summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 16px 18px;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+  }
+  summary::-webkit-details-marker { display: none; }
+  .summary-text strong { display: block; font-size: 15px; }
+  .summary-text span { color: var(--muted); font-size: 13px; }
+  .chev { color: var(--soft); font: 18px var(--mono); }
+  details[open] .chev { color: var(--blue); }
+  .body {
+    border-top: 1px solid var(--line);
+    padding: 16px 18px 18px;
+  }
+  .body p { margin-bottom: 12px; }
+  pre {
+    background: #0b1016;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    color: #dbe7f6;
+    font: 12px/1.75 var(--mono);
+  }
+
+  .cols {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 18px;
+  }
+  ul {
+    padding-left: 18px;
+    color: var(--muted);
+  }
+  li + li { margin-top: 8px; }
+
+  @media (max-width: 920px) {
+    body { padding: 16px; }
+    .cols { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <div><h1 data-i="h1"></h1><p data-i="sub"></p></div>
-  <div class="hr">
-    <div class="badge">max 10 rounds · 100k ctx</div>
-    <div class="ls" onclick="tl()">
-      <span class="ll a" id="le">EN</span>
-      <div class="tt" id="lt"><div class="tb"></div></div>
-      <span class="ll" id="lb">BR</span>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>JS Agent Architecture</h1>
+      <p class="sub">
+        Browser-native multi-step agent with modular app/runtime layers, hosted and local model routing,
+        browser skills, filesystem fallbacks, notifications, and multi-tab coordination.
+      </p>
     </div>
-  </div>
-</header>
+    <div class="badges">
+      <div class="badge">runtime: browser</div>
+      <div class="badge">loop: max rounds + ctx budget</div>
+      <div class="badge">skills: registry-based</div>
+      <div class="badge">multi-tab: BroadcastChannel</div>
+    </div>
+  </header>
 
-<div class="dw">
-<svg width="100%" viewBox="0 0 860 520" xmlns="http://www.w3.org/2000/svg" style="min-width:680px">
-<defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
-<text x="24" y="98"  font-family="monospace" font-size="10" fill="#3a3830" transform="rotate(-90,24,98)">INPUT</text>
-<text x="24" y="240" font-family="monospace" font-size="10" fill="#3a3830" transform="rotate(-90,24,240)">AGENT</text>
-<text x="24" y="400" font-family="monospace" font-size="10" fill="#3a3830" transform="rotate(-90,24,400)">INFRA</text>
-<line x1="44" y1="160" x2="836" y2="160" stroke="#1e2128" stroke-width="1"/>
-<line x1="44" y1="310" x2="836" y2="310" stroke="#1e2128" stroke-width="1"/>
-<g class="nd" id="nu" onclick="hl('user')"><rect x="60" y="60" width="120" height="72" rx="8" fill="#1a1c22" stroke="#534AB7" stroke-width="1"/><text class="nl" x="120" y="91" text-anchor="middle" font-size="13" font-weight="500" fill="#AFA9EC" data-si="user_l"></text><text x="120" y="112" text-anchor="middle" font-size="11" fill="#534AB7" data-si="user_s"></text></g>
-<g class="nd" id="nm" onclick="hl('mgr')"><rect x="240" y="54" width="160" height="84" rx="8" fill="#1a2030" stroke="#185FA5" stroke-width="1"/><text class="nl" x="320" y="87" text-anchor="middle" font-size="13" font-weight="500" fill="#85B7EB">Conversation</text><text x="320" y="104" text-anchor="middle" font-size="13" font-weight="500" fill="#85B7EB">Manager</text><text x="320" y="122" text-anchor="middle" font-size="11" fill="#185FA5">Node.js · HTTP server</text></g>
-<line x1="180" y1="96" x2="238" y2="96" stroke="#534AB7" stroke-width="1" stroke-opacity=".7" marker-end="url(#ar)"/>
-<g class="nd" id="na" onclick="hl('agent')"><rect x="240" y="180" width="160" height="96" rx="8" fill="#1e2230" stroke="#378add" stroke-width="1.5"/><text class="nl" x="320" y="213" text-anchor="middle" font-size="13" font-weight="500" fill="#85B7EB">Processing</text><text x="320" y="230" text-anchor="middle" font-size="13" font-weight="500" fill="#85B7EB">Agent</text><text x="320" y="248" text-anchor="middle" font-size="11" fill="#378add">loop · tool dispatch</text><text x="320" y="263" text-anchor="middle" font-size="11" fill="#185FA5">≤ 10 rounds</text></g>
-<g class="nd" id="nl" onclick="hl('llm')"><rect x="480" y="175" width="150" height="106" rx="8" fill="#201e2a" stroke="#534AB7" stroke-width="1"/><text class="nl" x="555" y="212" text-anchor="middle" font-size="13" font-weight="500" fill="#AFA9EC">LLM</text><text x="555" y="230" text-anchor="middle" font-size="13" font-weight="500" fill="#AFA9EC">Endpoint</text><text x="555" y="249" text-anchor="middle" font-size="11" fill="#534AB7">chat completions API</text><text x="555" y="266" text-anchor="middle" font-size="11" fill="#3C3489" data-si="llm_s"></text></g>
-<line x1="400" y1="228" x2="478" y2="228" stroke="#378add" stroke-width="1" marker-end="url(#ar)"/>
-<text x="438" y="220" text-anchor="middle" font-size="10" fill="#185FA5" data-si="a_prompt"></text>
-<path d="M480 248 L440 248 L440 270 L400 270" fill="none" stroke="#534AB7" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#ar)"/>
-<text x="440" y="262" text-anchor="middle" font-size="10" fill="#534AB7" data-si="a_tool"></text>
-<g class="nd" id="ns" onclick="hl('scripts')"><rect x="480" y="325" width="150" height="80" rx="8" fill="#1a2220" stroke="#0F6E56" stroke-width="1"/><text class="nl" x="555" y="355" text-anchor="middle" font-size="13" font-weight="500" fill="#5DCAA5">Scripts /</text><text x="555" y="372" text-anchor="middle" font-size="13" font-weight="500" fill="#5DCAA5">Skills</text><text x="555" y="390" text-anchor="middle" font-size="11" fill="#0F6E56" data-si="sc_s"></text></g>
-<path d="M320 276 L320 365 L478 365" fill="none" stroke="#0F6E56" stroke-width="1" marker-end="url(#ar)"/>
-<text x="370" y="358" font-size="10" fill="#0F6E56" data-si="a_exec"></text>
-<path d="M480 380 L400 380 L400 276" fill="none" stroke="#0F6E56" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#ar)"/>
-<g class="nd" id="nc" onclick="hl('cache')"><rect x="60" y="340" width="150" height="80" rx="8" fill="#1e1a18" stroke="#854F0B" stroke-width="1"/><text class="nl" x="135" y="373" text-anchor="middle" font-size="13" font-weight="500" fill="#EF9F27">Cache</text><text x="135" y="391" text-anchor="middle" font-size="11" fill="#854F0B" data-si="ca_s1"></text><text x="135" y="406" text-anchor="middle" font-size="11" fill="#633806" data-si="ca_s2"></text></g>
-<path d="M280 276 L280 295 L135 295 L135 338" fill="none" stroke="#854F0B" stroke-width="1" marker-end="url(#ar)"/>
-<path d="M115 338 L115 295 L258 295 L258 276" fill="none" stroke="#854F0B" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#ar)"/>
-<rect x="60" y="445" width="570" height="50" rx="6" fill="#17130e" stroke="#633806" stroke-width=".5" stroke-dasharray="4 3"/>
-<text x="80" y="465" font-family="monospace" font-size="11" fill="#854F0B">ctx_limit</text><text x="160" y="465" font-family="monospace" font-size="11" fill="#EF9F27">= 100_000</text><text x="265" y="465" font-family="monospace" font-size="11" fill="#3a3830" data-si="cfg_c"></text>
-<text x="80" y="482" font-family="monospace" font-size="11" fill="#854F0B">max_rounds</text><text x="178" y="482" font-family="monospace" font-size="11" fill="#EF9F27">= 10</text><text x="265" y="482" font-family="monospace" font-size="11" fill="#3a3830" data-si="cfg_r"></text>
-<line x1="320" y1="138" x2="320" y2="178" stroke="#185FA5" stroke-width="1" marker-end="url(#ar)"/>
-<path d="M240 210 L200 210 L200 135 L238 135" fill="none" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 3" marker-end="url(#ar)"/>
-<text x="165" y="173" text-anchor="middle" font-size="10" fill="#534AB7" data-si="a_fin"></text>
-<path d="M240 96 L182 96" fill="none" stroke="#534AB7" stroke-width="1" stroke-dasharray="5 3" marker-end="url(#ar)"/>
-<rect x="680" y="175" width="155" height="66" rx="6" fill="#141416" stroke="#3a3830" stroke-width=".5" stroke-dasharray="3 3"/>
-<text x="698" y="197" font-family="monospace" font-size="10" fill="#5a5852" data-si="cr1"></text>
-<text x="698" y="212" font-family="monospace" font-size="10" fill="#5a5852" data-si="cr2"></text>
-<text x="698" y="227" font-family="monospace" font-size="10" fill="#5a5852" data-si="cr3"></text>
-<line x1="680" y1="215" x2="632" y2="228" stroke="#3a3830" stroke-width=".5" stroke-dasharray="3 3"/>
-</svg>
-</div>
+  <section class="hero">
+    <svg viewBox="0 0 1080 420" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M1 1 L9 5 L1 9" fill="none" stroke="context-stroke" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </marker>
+      </defs>
 
-<div class="panel">
-  <h2 data-i="ft"></h2>
-  <div class="fs">
-    <div class="st ac" onclick="ss(0)"><div class="sn">01</div><div class="stit" data-i="s1t"></div><div class="sdesc" data-i="s1d"></div></div>
-    <div class="st" onclick="ss(1)"><div class="sn">02</div><div class="stit" data-i="s2t"></div><div class="sdesc" data-i="s2d"></div></div>
-    <div class="st" onclick="ss(2)"><div class="sn">03</div><div class="stit" data-i="s3t"></div><div class="sdesc" data-i="s3d"></div></div>
-    <div class="st" onclick="ss(3)"><div class="sn">04</div><div class="stit" data-i="s4t"></div><div class="sdesc" data-i="s4d"></div></div>
-    <div class="st" onclick="ss(4)"><div class="sn">05</div><div class="stit" data-i="s5t"></div><div class="sdesc" data-i="s5d"></div></div>
-    <div class="st" onclick="ss(5)"><div class="sn">06</div><div class="stit" data-i="s6t"></div><div class="sdesc" data-i="s6d"></div></div>
-  </div>
-</div>
+      <rect x="36" y="54" width="170" height="90" rx="14" fill="#152033" stroke="#63a4ff" stroke-width="1.3"/>
+      <text x="121" y="88" text-anchor="middle" fill="#dce9f8" font-size="16" font-family="Segoe UI" font-weight="600">User + UI</text>
+      <text x="121" y="112" text-anchor="middle" fill="#8ea5c0" font-size="12" font-family="JetBrains Mono">sidebar, chat, sessions</text>
+      <text x="121" y="130" text-anchor="middle" fill="#8ea5c0" font-size="12" font-family="JetBrains Mono">input, status, tool toggles</text>
 
-<div class="panel">
-  <h2 data-i="ct"></h2>
-  <div class="cg">
-    <div class="cc"><div class="k">ctx_limit</div><div class="v">100 000 chars<span data-i="cc1"></span></div></div>
-    <div class="cc"><div class="k">max_rounds</div><div class="v">10<span data-i="cc2"></span></div></div>
-    <div class="cc"><div class="k">auth strategy</div><div class="v">cookies Chrome<span data-i="cc3"></span></div></div>
-    <div class="cc"><div class="k">endpoint detection</div><div class="v">auto-probe<span>REST / OpenAI-compat / Kerberos</span></div></div>
-    <div class="cc"><div class="k">runtime</div><div class="v">Node.js<span data-i="cc5"></span></div></div>
-    <div class="cc"><div class="k">cache strategy</div><div class="v">LLM-summarize<span data-i="cc6"></span></div></div>
-  </div>
-</div>
+      <rect x="266" y="40" width="220" height="118" rx="14" fill="#162230" stroke="#53d3a6" stroke-width="1.3"/>
+      <text x="376" y="78" text-anchor="middle" fill="#e8f7f1" font-size="16" font-family="Segoe UI" font-weight="600">App Modules</text>
+      <text x="376" y="104" text-anchor="middle" fill="#9ccdbd" font-size="12" font-family="JetBrains Mono">state.js | tools.js | agent.js</text>
+      <text x="376" y="122" text-anchor="middle" fill="#9ccdbd" font-size="12" font-family="JetBrains Mono">llm.js | local-backend.js</text>
 
-<div class="panel">
-  <h2 data-i="ddt"></h2>
-  <p class="psub" data-i="dds"></p>
-  <div class="dg">
+      <rect x="546" y="40" width="220" height="118" rx="14" fill="#1f1d2d" stroke="#ffbd59" stroke-width="1.3"/>
+      <text x="656" y="78" text-anchor="middle" fill="#fff0cf" font-size="16" font-family="Segoe UI" font-weight="600">Orchestrator Layer</text>
+      <text x="656" y="104" text-anchor="middle" fill="#d9c08f" font-size="12" font-family="JetBrains Mono">prompt-loader.js</text>
+      <text x="656" y="122" text-anchor="middle" fill="#d9c08f" font-size="12" font-family="JetBrains Mono">regex.js + orchestrator.js</text>
 
-    <div class="dc" onclick="tc(this)">
-      <div class="dh"><div><div class="dtag" style="color:#7f77dd;border-color:#3C3489">PROMPT</div><div class="dtit" data-i="c1t"></div><div class="dsub" data-i="c1s"></div></div><span class="dchev">▸</span></div>
-      <div class="db">
-        <p class="de" data-i="c1e"></p>
-        <pre class="dcode"><span class="ck">const</span> SYSTEM_PROMPT = <span class="cs">`
-<span data-i="c1l1"></span>
-<span data-i="c1l2"></span>
-<span data-i="c1l3"></span>
+      <rect x="826" y="40" width="218" height="118" rx="14" fill="#251d22" stroke="#ff8f8f" stroke-width="1.3"/>
+      <text x="935" y="78" text-anchor="middle" fill="#ffe1e1" font-size="16" font-family="Segoe UI" font-weight="600">Model Routing</text>
+      <text x="935" y="104" text-anchor="middle" fill="#d9a5a5" font-size="12" font-family="JetBrains Mono">Gemini hosted API</text>
+      <text x="935" y="122" text-anchor="middle" fill="#d9a5a5" font-size="12" font-family="JetBrains Mono">or local OpenAI-compatible backend</text>
 
-&lt;tool_call&gt;
-{ "tool": "web_search", "args": { "query": "<span data-i="c1l4"></span>" } }
-&lt;/tool_call&gt;
+      <rect x="266" y="234" width="220" height="118" rx="14" fill="#182434" stroke="#63a4ff" stroke-width="1.3"/>
+      <text x="376" y="272" text-anchor="middle" fill="#dce9f8" font-size="16" font-family="Segoe UI" font-weight="600">Skill Registry</text>
+      <text x="376" y="298" text-anchor="middle" fill="#8ea5c0" font-size="12" font-family="JetBrains Mono">shared.js + grouped skill metadata</text>
+      <text x="376" y="316" text-anchor="middle" fill="#8ea5c0" font-size="12" font-family="JetBrains Mono">web, parse, device, filesystem</text>
 
-<span data-i="c1l5"></span>
-- web_search(query)  : <span data-i="c1t1"></span>
-- read_page(url)     : <span data-i="c1t2"></span>
-- calc(expression)   : <span data-i="c1t3"></span>
+      <rect x="546" y="234" width="220" height="118" rx="14" fill="#162a22" stroke="#53d3a6" stroke-width="1.3"/>
+      <text x="656" y="272" text-anchor="middle" fill="#e8f7f1" font-size="16" font-family="Segoe UI" font-weight="600">Browser Capabilities</text>
+      <text x="656" y="298" text-anchor="middle" fill="#9ccdbd" font-size="12" font-family="JetBrains Mono">clipboard, storage, notifications</text>
+      <text x="656" y="316" text-anchor="middle" fill="#9ccdbd" font-size="12" font-family="JetBrains Mono">BroadcastChannel, downloads, FS API</text>
 
-<span data-i="c1l6"></span>
-<span data-i="c1l7"></span>
-`</span>;</pre>
-        <div class="dn" data-i="c1n"></div>
+      <rect x="826" y="234" width="218" height="118" rx="14" fill="#2a2417" stroke="#ffbd59" stroke-width="1.3"/>
+      <text x="935" y="272" text-anchor="middle" fill="#fff0cf" font-size="16" font-family="Segoe UI" font-weight="600">Persistence + Sync</text>
+      <text x="935" y="298" text-anchor="middle" fill="#d9c08f" font-size="12" font-family="JetBrains Mono">localStorage sessions + tool cache</text>
+      <text x="935" y="316" text-anchor="middle" fill="#d9c08f" font-size="12" font-family="JetBrains Mono">cache sync + busy sync across tabs</text>
+
+      <line x1="206" y1="98" x2="264" y2="98" stroke="#63a4ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="486" y1="98" x2="544" y2="98" stroke="#53d3a6" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="766" y1="98" x2="824" y2="98" stroke="#ffbd59" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="376" y1="160" x2="376" y2="232" stroke="#63a4ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="656" y1="160" x2="656" y2="232" stroke="#53d3a6" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="935" y1="160" x2="935" y2="232" stroke="#ff8f8f" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <path d="M486 292 C520 292, 520 292, 544 292" fill="none" stroke="#63a4ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <path d="M766 292 C796 292, 796 292, 824 292" fill="none" stroke="#53d3a6" stroke-width="1.5" marker-end="url(#arrow)"/>
+    </svg>
+  </section>
+
+  <section class="panel">
+    <h2>Current Runtime Snapshot</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="k">UI shell</div>
+        <div class="v">Collapsible sidebar + retractable panels</div>
+        <div class="d">Chat, model controls, runtime toggles, sessions, capability groups, and activity live in one browser page.</div>
+      </div>
+      <div class="card">
+        <div class="k">Agent loop</div>
+        <div class="v">Round-bounded tool loop</div>
+        <div class="d">The app builds a system prompt, sends message history to a model, executes at most one tool per turn, and injects tool results back into context.</div>
+      </div>
+      <div class="card">
+        <div class="k">Routing</div>
+        <div class="v">Hosted or local model path</div>
+        <div class="d">Requests can go to Gemini or to a locally probed OpenAI-compatible backend such as LM Studio or Ollama-style endpoints.</div>
+      </div>
+      <div class="card">
+        <div class="k">Storage</div>
+        <div class="v">Browser-only persistence</div>
+        <div class="d">API key, sessions, active session id, local backend preferences, sidebar state, and tool cache are kept in localStorage.</div>
       </div>
     </div>
+  </section>
 
-    <div class="dc" onclick="tc(this)">
-      <div class="dh"><div><div class="dtag" style="color:#378add;border-color:#185FA5">AGENT LOOP</div><div class="dtit" data-i="c2t"></div><div class="dsub" data-i="c2s"></div></div><span class="dchev">▸</span></div>
-      <div class="db">
-        <p class="de" data-i="c2e"></p>
-        <pre class="dcode"><span class="ck">async function</span> <span class="cf">agentLoop</span>(userMessage) {
-  <span class="ck">const</span> messages = [
-    { role: <span class="cs">'system'</span>, content: SYSTEM_PROMPT },
-    { role: <span class="cs">'user'</span>,   content: userMessage }
-  ];
-  <span class="ck">let</span> round = <span class="cn">0</span>;
-  <span class="ck">while</span> (round &lt; MAX_ROUNDS) {
-    round++;
-    <span class="cm">// 1. <span data-i="c2a"></span></span>
-    <span class="ck">const</span> reply = <span class="ck">await</span> <span class="cf">callLLM</span>(messages);
-    <span class="cm">// 2. <span data-i="c2b"></span></span>
-    <span class="ck">const</span> toolCall = <span class="cf">parseToolCall</span>(reply);
-    <span class="ck">if</span> (!toolCall) {
-      <span class="cm">// <span data-i="c2c"></span></span>
-      <span class="ck">return</span> reply;
-    }
-    <span class="cm">// 3. <span data-i="c2d"></span></span>
-    messages.push({ role: <span class="cs">'assistant'</span>, content: reply });
-    <span class="cm">// 4. <span data-i="c2e2"></span></span>
-    <span class="ck">const</span> result = <span class="ck">await</span> <span class="cf">executeTool</span>(toolCall);
-    <span class="cm">// 5. <span data-i="c2f"></span></span>
-    messages.push({ role: <span class="cs">'user'</span>, content: <span class="cs">`&lt;tool_result tool="${toolCall.tool}"&gt;\n${result}\n&lt;/tool_result&gt;`</span> });
-    <span class="cm">// 6. <span data-i="c2g"></span></span>
-    <span class="ck">if</span> (<span class="cf">ctxSize</span>(messages) &gt; CTX_LIMIT)
-      messages = <span class="ck">await</span> <span class="cf">summarizeContext</span>(messages, userMessage);
-  }
-  <span class="cm">// <span data-i="c2h"></span></span>
-  messages.push({ role: <span class="cs">'user'</span>, content: <span class="cs" data-i="c2force"></span> });
-  <span class="ck">return</span> <span class="cf">callLLM</span>(messages);
-}</pre>
-        <div class="dn" data-i="c2n"></div>
-      </div>
-    </div>
+  <section class="cols">
+    <div class="panel">
+      <h2>Execution Flow</h2>
 
-    <div class="dc" onclick="tc(this)">
-      <div class="dh"><div><div class="dtag" style="color:#ef9f27;border-color:#854F0B">REGEX / PARSE</div><div class="dtit" data-i="c3t"></div><div class="dsub" data-i="c3s"></div></div><span class="dchev">▸</span></div>
-      <div class="db">
-        <p class="de" data-i="c3e"></p>
-        <pre class="dcode"><span class="cm">// <span data-i="c3a"></span></span>
-<span class="ck">const</span> TOOL_REGEX = <span class="cr">/&lt;tool_call&gt;\s*([\s\S]*?)\s*&lt;\/tool_call&gt;/i</span>;
+      <details open>
+        <summary>
+          <div class="summary-text">
+            <strong>1. Bootstrap and module wiring</strong>
+            <span>`index.html` loads core, skills, and app modules in order.</span>
+          </div>
+          <span class="chev">+</span>
+        </summary>
+        <div class="body">
+          <p>The page loads prompt helpers, skill modules, the orchestrator, and then the app modules. `DOMContentLoaded` restores sessions, initializes sidebar state, probes local backends, and wires tab-level sync channels.</p>
+          <pre>&lt;script src="src/core/regex.js" defer&gt;&lt;/script&gt;
+&lt;script src="src/core/prompt-loader.js" defer&gt;&lt;/script&gt;
+&lt;script src="src/skills/shared.js" defer&gt;&lt;/script&gt;
+&lt;script src="src/core/orchestrator.js" defer&gt;&lt;/script&gt;
+&lt;script src="src/app/state.js" defer&gt;&lt;/script&gt;
+&lt;script src="src/app/agent.js" defer&gt;&lt;/script&gt;</pre>
+        </div>
+      </details>
 
-<span class="ck">function</span> <span class="cf">parseToolCall</span>(text) {
-  <span class="ck">const</span> match = text.match(TOOL_REGEX);
-  <span class="ck">if</span> (!match) <span class="ck">return null</span>;
-  <span class="ck">try</span> { <span class="ck">return</span> JSON.parse(match[<span class="cn">1</span>]); }
-  <span class="ck">catch</span> {
-    <span class="cm">// <span data-i="c3b"></span></span>
-    <span class="ck">return</span> <span class="cf">parseToolCallFallback</span>(match[<span class="cn">1</span>]);
-  }
-}
+      <details>
+        <summary>
+          <div class="summary-text">
+            <strong>2. Prompt creation and policy layer</strong>
+            <span>`prompt-loader.js` + `orchestrator.js` build the final system prompt.</span>
+          </div>
+          <span class="chev">+</span>
+        </summary>
+        <div class="body">
+          <p>The orchestrator receives the list of enabled tools and composes the prompt contract. It also owns tool-call parsing, reasoning-leak repair prompts, and summary prompts when context gets too large.</p>
+          <pre>buildSystemPrompt({
+  userMessage,
+  maxRounds,
+  ctxLimit,
+  enabledTools
+})</pre>
+        </div>
+      </details>
 
-<span class="cm">// <span data-i="c3c"></span></span>
-<span class="ck">function</span> <span class="cf">parseToolCallFallback</span>(raw) {
-  <span class="ck">const</span> tm = raw.match(<span class="cr">/"tool"\s*:\s*"([^"]+)"/</span>);
-  <span class="ck">const</span> qm = raw.match(<span class="cr">/"query"\s*:\s*"([^"]+)"/</span>);
-  <span class="ck">const</span> um = raw.match(<span class="cr">/"url"\s*:\s*"([^"]+)"/</span>);
-  <span class="ck">if</span> (!tm) <span class="ck">return null</span>;
-  <span class="ck">return</span> { tool: tm[<span class="cn">1</span>], args: { ...(qm &amp;&amp; { query: qm[<span class="cn">1</span>] }), ...(um &amp;&amp; { url: um[<span class="cn">1</span>] }) } };
-}
+      <details>
+        <summary>
+          <div class="summary-text">
+            <strong>3. Agent loop</strong>
+            <span>The app keeps iterating until a final answer or max rounds.</span>
+          </div>
+          <span class="chev">+</span>
+        </summary>
+        <div class="body">
+          <p>The loop sends current history to the selected model, parses one tool call if present, executes it through the registry, appends a `tool_result` block, and continues. If the model answers directly, the loop stops and renders the HTML reply.</p>
+          <pre>while (round &lt; MAX_ROUNDS) {
+  const reply = await callModel(messages);
+  const toolCall = parseToolCall(reply);
+  if (!toolCall) return finalAnswer(reply);
 
-<span class="cm">// <span data-i="c3d"></span></span>
-<span class="ck">function</span> <span class="cf">parseAllToolCalls</span>(text) {
-  <span class="ck">const</span> re = <span class="cr">/&lt;tool_call&gt;\s*([\s\S]*?)\s*&lt;\/tool_call&gt;/gi</span>;
-  <span class="ck">const</span> calls = []; <span class="ck">let</span> m;
-  <span class="ck">while</span> ((m = re.exec(text)) !== <span class="ck">null</span>)
-    <span class="ck">try</span> { calls.push(JSON.parse(m[<span class="cn">1</span>])); } <span class="ck">catch</span> {}
-  <span class="ck">return</span> calls; <span class="cm">// <span data-i="c3e2"></span></span>
-}</pre>
-        <div class="dn" data-i="c3n"></div>
-      </div>
-    </div>
+  const result = await executeTool(toolCall);
+  messages.push({ role: "user", content: toolResultBlock(toolCall, result) });
 
-    <div class="dc" onclick="tc(this)">
-      <div class="dh"><div><div class="dtag" style="color:#5dcaa5;border-color:#0F6E56">TOOLS</div><div class="dtit" data-i="c4t"></div><div class="dsub" data-i="c4s"></div></div><span class="dchev">▸</span></div>
-      <div class="db">
-        <p class="de" data-i="c4e"></p>
-        <pre class="dcode"><span class="cm">// <span data-i="c4a"></span></span>
-<span class="ck">const</span> TOOLS = {
-  <span class="ck">async</span> <span class="cf">web_search</span>({ query }) {
-    <span class="ck">const</span> res = <span class="ck">await</span> searchEngine.query(query);
-    <span class="ck">return</span> res.slice(<span class="cn">0</span>,<span class="cn">5</span>).map(r=&gt;<span class="cs">`[${r.title}](${r.url})\n${r.snippet}`</span>).join(<span class="cs">'\n\n'</span>);
-  },
-  <span class="ck">async</span> <span class="cf">read_page</span>({ url }) {
-    <span class="ck">const</span> html = <span class="ck">await</span> fetch(url).then(r=&gt;r.text());
-    <span class="ck">return</span> <span class="cf">extractText</span>(html).slice(<span class="cn">0</span>,<span class="cn">8000</span>); <span class="cm">// <span data-i="c4trunc"></span></span>
-  },
-  <span class="ck">async</span> <span class="cf">calc</span>({ expression }) {
-    <span class="ck">try</span> { <span class="ck">return</span> String(eval(expression)); } <span class="cm">// <span data-i="c4mj"></span></span>
-    <span class="ck">catch</span>(e) { <span class="ck">return</span> <span class="cs">`error: ${e.message}`</span>; }
-  }
-};
-<span class="ck">async function</span> <span class="cf">executeTool</span>({ tool, args }) {
-  <span class="ck">const</span> fn = TOOLS[tool];
-  <span class="ck">if</span> (!fn) <span class="ck">return</span> <span class="cs">`ERROR: '${tool}' <span data-i="c4ne"></span>: ${Object.keys(TOOLS).join(', ')}`</span>;
-  <span class="ck">try</span> {
-    <span class="ck">return</span> <span class="cs">`## <span data-i="c4ro"></span> ${tool}\n\n${await fn(args)}`</span>;
-  } <span class="ck">catch</span>(e) {
-    <span class="cm">// <span data-i="c4c"></span></span>
-    <span class="ck">return</span> <span class="cs">`ERROR <span data-i="c4run"></span> ${tool}: ${e.message}`</span>;
+  if (ctxSize(messages) &gt; CTX_LIMIT) {
+    messages = await summarizeContext(userMessage);
   }
 }</pre>
-        <div class="dn" data-i="c4n"></div>
-      </div>
-    </div>
+        </div>
+      </details>
 
-    <div class="dc" onclick="tc(this)">
-      <div class="dh"><div><div class="dtag" style="color:#ef9f27;border-color:#633806">CONTEXT</div><div class="dtit" data-i="c5t"></div><div class="dsub" data-i="c5s"></div></div><span class="dchev">▸</span></div>
-      <div class="db">
-        <p class="de" data-i="c5e"></p>
-        <pre class="dcode"><span class="ck">const</span> CTX_LIMIT = <span class="cn">100_000</span>; <span class="cm">// chars</span>
-<span class="ck">function</span> <span class="cf">ctxSize</span>(msgs) { <span class="ck">return</span> msgs.reduce((n,m)=&gt;n+m.content.length,<span class="cn">0</span>); }
-
-<span class="ck">async function</span> <span class="cf">summarizeContext</span>(messages, q) {
-  <span class="cm">// <span data-i="c5a"></span></span>
-  <span class="ck">const</span> hist = messages.filter(m=&gt;m.role!==<span class="cs">'system'</span>)
-    .map(m=&gt;<span class="cs">`[${m.role}]: ${m.content}`</span>).join(<span class="cs">'\n\n'</span>);
-
-  <span class="ck">const</span> prompt = <span class="cs">`<span data-i="c5p1"></span>
-<span data-i="c5p2"></span>
-- <span data-i="c5p3"></span>: "${q}"
-- <span data-i="c5p4"></span>
-- <span data-i="c5p5"></span>
-<span data-i="c5p6"></span>:\n${hist}\n<span data-i="c5p7"></span>`</span>;
-
-  <span class="ck">const</span> summary = <span class="ck">await</span> <span class="cf">callLLM</span>([
-    { role:<span class="cs">'system'</span>, content: SYSTEM_PROMPT },
-    { role:<span class="cs">'user'</span>,   content: prompt }
-  ]);
-  <span class="cm">// <span data-i="c5b"></span></span>
-  <span class="ck">return</span> [
-    { role:<span class="cs">'system'</span>,    content: SYSTEM_PROMPT },
-    { role:<span class="cs">'assistant'</span>, content: <span class="cs">`[<span data-i="c5lab"></span>]\n${summary}`</span> },
-    { role:<span class="cs">'user'</span>,      content: q }
-  ];
+      <details>
+        <summary>
+          <div class="summary-text">
+            <strong>4. Skill execution</strong>
+            <span>Tools resolve through `window.AgentSkills.registry`.</span>
+          </div>
+          <span class="chev">+</span>
+        </summary>
+        <div class="body">
+          <p>The registry currently covers search, parsing, clipboard, storage, notifications, multi-tab messaging, and filesystem actions. The app can toggle tool availability without changing skill code.</p>
+          <pre>{
+  web_search,
+  read_page,
+  parse_json,
+  clipboard_write,
+  notification_send,
+  tab_broadcast,
+  tab_listen,
+  fs_write_file
 }</pre>
-        <div class="dn" data-i="c5n"></div>
-      </div>
+        </div>
+      </details>
     </div>
 
-    <div class="dc" onclick="tc(this)">
-      <div class="dh"><div><div class="dtag" style="color:#d85a30;border-color:#993C1D" data-i="c6tag"></div><div class="dtit" data-i="c6t"></div><div class="dsub" data-i="c6s"></div></div><span class="dchev">▸</span></div>
-      <div class="db">
-        <p class="de" data-i="c6e"></p>
-        <pre class="dcode"><span class="cm">// <span data-i="c6a"></span></span>
-<span class="ck">async function</span> <span class="cf">buildInitialContext</span>(msg) {
-  <span class="cm">// <span data-i="c6b"></span></span>
-  <span class="ck">const</span> [db, prof] = <span class="ck">await</span> Promise.all([<span class="cf">queryDB</span>(msg), <span class="cf">getProfile</span>()]);
-  <span class="ck">return</span> <span class="cs">`&lt;context&gt;\n  &lt;profile&gt;${prof}&lt;/profile&gt;\n  &lt;data&gt;${db}&lt;/data&gt;\n&lt;/context&gt;\n\n${msg}`</span>;
-}
+    <div class="panel">
+      <h2>Important Behaviors</h2>
+      <ul>
+        <li>Filesystem writes prefer direct File System Access when available and fall back to browser download when not.</li>
+        <li>Notification permission is requested from user-triggered actions such as saving the API key or probing the local backend.</li>
+        <li>When the page is hidden, the app can fire a native notification after a run finishes.</li>
+        <li>Multiple tabs share tool-cache entries over `BroadcastChannel`, reducing repeated work for identical calls.</li>
+        <li>Tabs also broadcast busy state so another window can detect that a run is already in progress.</li>
+        <li>The agent itself can publish and listen for messages across tabs through `tab_broadcast` and `tab_listen`.</li>
+      </ul>
+    </div>
+  </section>
 
-<span class="cm">// <span data-i="c6c"></span></span>
-<span class="ck">function</span> <span class="cf">extractEntities</span>(text) {
-  <span class="ck">return</span> {
-    tickers: [...text.matchAll(<span class="cr">/\b[A-Z]{2,5}\b/g</span>)].map(m=&gt;m[<span class="cn">0</span>]),
-    dates:   [...text.matchAll(<span class="cr">/\d{4}-\d{2}-\d{2}/g</span>)].map(m=&gt;m[<span class="cn">0</span>]),
-    urls:    [...text.matchAll(<span class="cr">/(https?:\/\/[^\s]+)/g</span>)].map(m=&gt;m[<span class="cn">1</span>]),
-    amounts: [...text.matchAll(<span class="cr">/\$[\d,]+(\.\d{2})?/g</span>)].map(m=&gt;m[<span class="cn">0</span>])
-  };
-}
-
-<span class="cm">// <span data-i="c6d"></span></span>
-<span class="ck">function</span> <span class="cf">buildPrompt</span>(tpl, vars) {
-  <span class="ck">return</span> tpl.replace(<span class="cr">/\{\{(\w+)\}\}/g</span>, (_,k)=&gt;vars[k]??<span class="cs">`[${k} <span data-i="c6ua"></span>]`</span>);
-}
-<span class="cm">// <span data-i="c6e2"></span></span>
-
-<span class="cm">// <span data-i="c6f"></span></span>
-<span class="ck">function</span> <span class="cf">validateResponse</span>(text) {
-  <span class="ck">const</span> issues = [];
-  <span class="ck">if</span> (TOOL_REGEX.test(text))   issues.push(<span class="cs">'<span data-i="c6i1"></span>'</span>);
-  <span class="ck">if</span> (text.length &lt; <span class="cn">50</span>)         issues.push(<span class="cs">'<span data-i="c6i2"></span>'</span>);
-  <span class="ck">if</span> (<span class="cr">/<span data-i="c6rx"></span>/i</span>.test(text)) issues.push(<span class="cs">'<span data-i="c6i3"></span>'</span>);
-  <span class="ck">return</span> { valid: !issues.length, issues };
-}</pre>
-        <div class="dn" data-i="c6n"></div>
+  <section class="panel">
+    <h2>Module Map</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="k">src/app/state.js</div>
+        <div class="v">Persistent state and shared UI/runtime flags</div>
+        <div class="d">API key, sessions, sidebar state, enabled tools, tool cache, cache sync, and busy sync live here.</div>
+      </div>
+      <div class="card">
+        <div class="k">src/app/agent.js</div>
+        <div class="v">Loop execution and chat rendering</div>
+        <div class="d">Owns `sendMessage()`, `agentLoop()`, status updates, final rendering, and completion notifications.</div>
+      </div>
+      <div class="card">
+        <div class="k">src/app/tools.js</div>
+        <div class="v">UI-facing tool controls and prompt wiring</div>
+        <div class="d">Renders tool groups, toggles enabled tools, and delegates prompt construction to the orchestrator.</div>
+      </div>
+      <div class="card">
+        <div class="k">src/app/local-backend.js</div>
+        <div class="v">Local endpoint detection</div>
+        <div class="d">Probes known localhost candidates, detects model lists, and activates local routing when available.</div>
+      </div>
+      <div class="card">
+        <div class="k">src/core/orchestrator.js</div>
+        <div class="v">Policy and parsing</div>
+        <div class="d">Builds prompts, validates skill availability, parses tool calls, and generates repair and summary prompts.</div>
+      </div>
+      <div class="card">
+        <div class="k">src/skills/shared.js</div>
+        <div class="v">Primary skill runtime</div>
+        <div class="d">Holds helper functions, preflight heuristics, device/browser skills, and the registry exposed as `window.AgentSkills`.</div>
       </div>
     </div>
+  </section>
 
-  </div>
+  <section class="panel">
+    <h2>Multi-Tab Architecture</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="k">Case A</div>
+        <div class="v">Agent-triggered tab messaging</div>
+        <div class="d">The model can call `tab_broadcast(topic, payload)` to publish a result and `tab_listen(topic, timeout_ms)` to wait for work happening in another tab.</div>
+      </div>
+      <div class="card">
+        <div class="k">Case B</div>
+        <div class="v">App-internal tab sync</div>
+        <div class="d">Without involving the model, tabs sync tool-cache entries and busy state through dedicated `BroadcastChannel` names.</div>
+      </div>
+      <div class="card">
+        <div class="k">Scope</div>
+        <div class="v">Same origin only</div>
+        <div class="d">This works only across tabs/windows using the same origin and browser profile. It does not cross devices or different browsers.</div>
+      </div>
+    </div>
+    <pre>BroadcastChannel channels
+
+loopagent-v1
+  Agent-level publish/listen tools for cross-tab coordination
+
+loopagent-cache-v1
+  Internal cache replication for tool results
+
+loopagent-busy-v1
+  Internal "another tab is running" state</pre>
+  </section>
+
+  <section class="panel">
+    <h2>Notes</h2>
+    <p>
+      This document reflects the current browser-first implementation, not the older Node server diagram.
+      If the architecture changes again, update this file alongside `README.md` so the doc stays aligned with the actual runtime.
+    </p>
+  </section>
 </div>
-<footer>agentic-search · Node.js · diag v1.0</footer>
-
-<script>
-const T={
-en:{h1:"Agentic Search — Architecture",sub:"Node.js + LLM Chat API · Agentic loop with context cache",user_l:"User",user_s:"message",llm_s:"session via Chrome",sc_s:"search · enrichment",ca_s1:"summarised ctx · 100k chars",ca_s2:"LLM compresses if exceeded",a_prompt:"prompt + ctx",a_tool:"tool call / resp",a_exec:"exec script",a_fin:"final resp.",cfg_c:"// chars · exceeded → LLM summarises cache + query",cfg_r:"// agentic loop stop condition",cr1:"// Chrome session",cr2:"// reuses cookies",cr3:"// no extra login",ft:"Execution flow",s1t:"User sends message",s1d:"Conversation Manager receives via HTTP and initialises the agentic loop context.",s2t:"Agent queries LLM",s2d:"Prompt + context cache sent to endpoint. LLM decides: reply directly or invoke a tool.",s3t:"LLM calls a tool?",s3d:"If LLM returns a tool_call, the agent runs the corresponding script (search, enrichment, etc.).",s4t:"Result injected",s4d:"Script output added to context. LLM called again with the enriched context.",s5t:"Loop or stop?",s5d:"Repeats steps 2–4 until LLM stops calling tools or max_rounds is hit. Then returns final response.",s6t:"Context management",s6d:"If context > 100k chars, LLM generates a summary (cache + current query). Summary replaces cache for the next round.",ct:"Operational parameters",cc1:"Gemini 1.5/2.0 · Claude uses 60k",cc2:"agentic loop stop condition",cc3:"Node.js standalone · PS fallback",cc5:"no Chrome extension required",cc6:"on ctx_limit exceeded",ddt:"How to build the agent — click to expand",dds:"each card covers one block of the agentic loop with pseudocode + real patterns",c1t:"System Prompt — tool use contract",c1s:"How to tell the LLM it can invoke tools",c1e:"The system prompt is the agent's contract. It defines the tool repertoire, the exact format the LLM must use to call them, and the stop condition. Without it the LLM responds in prose and you can't parse anything.",c1l1:"You are a research agent. Answer the user's questions.",c1l2:"If you need external information, invoke a tool using",c1l3:"EXACTLY this format — nothing before or after the tag:",c1l4:"your search here",c1l5:"Available tools:",c1t1:"web search",c1t2:"reads page content",c1t3:"evaluates math expression",c1l6:"When you have enough context, reply directly WITHOUT a tool_call.",c1l7:"Never invent data — use tools to look up facts.",c1n:"⚑  Format consistency is critical. The LLM sometimes leaks text before the tag — that's why the parse regex must be robust (see parsing card).",c2t:"Main agentic loop",c2s:"The while structure that orchestrates everything",c2e:"The agent's core is a simple loop: call the LLM, check if the response contains a tool call, run the tool, inject the result into context, repeat. Stop: no tool call returned, or max_rounds hit.",c2a:"1. Call LLM with full message history",c2b:"2. Check if text contains a tool_call",c2c:"LLM replied directly — end of loop",c2d:"3. Add LLM response to history",c2e2:"4. Execute the tool",c2f:"5. Inject result as a tool message",c2g:"6. Check context size limit",c2h:"Hit max_rounds — force a final answer",c2force:"'Answer now with what you know.'",c2n:"⚑  Using role user for tool_result is the most compatible across models. Some models support a native tool role — prefer it when available.",c3t:"Parsing the LLM response",c3s:"Extracting tool calls from text with robust regex",c3e:"LLMs are not deterministic about format. Even with a strict system prompt, the LLM may add text before the tag, use extra whitespace, or close the tag slightly differently. The regex must handle all of that.",c3a:"Primary regex — captures JSON inside <tool_call>",c3b:"Malformed JSON — try extracting fields individually",c3c:"Fallback: extract tool and args even from broken JSON",c3d:"Detect multiple tool calls in one response (advanced)",c3e2:"run in parallel with Promise.all",c3n:"⚑  Use the i flag to tolerate <Tool_Call>. The s flag is not needed because [\\s\\S] already captures newlines.",c4t:"Tool executor and registry",c4s:"Dispatching and running skills dynamically",c4e:"The executor is a simple dispatcher: an object mapping tool name to async function. Each tool receives parsed JSON args and returns a string that goes directly into LLM context. Errors also become strings — the LLM needs to know a tool failed.",c4a:"Tool registry — add new tools here",c4trunc:"truncate",c4mj:"use mathjs in prod",c4ne:"doesn't exist. Available",c4ro:"Result from",c4c:"Return error as string — LLM will try a different approach",c4run:"running",c4n:"⚑  Returning errors as strings keeps the loop alive. The LLM frequently tries a different search or tool after receiving an error in context.",c5t:"Context management and summarisation",c5s:"Keeping the loop alive beyond the token limit",c5e:"As the loop runs, the messages array grows. When it exceeds CTX_LIMIT, you ask the LLM to compress the history into a smaller block, preserving what is relevant to the original query. The result replaces all previous messages.",c5a:"Serialise history (except system prompt)",c5b:"Rebuild: system + summarised context + query",c5p1:"You are mid-research. Compress the history below",c5p2:"into a concise context block, preserving:",c5p3:"Facts relevant to",c5p4:"Tools already called (avoid repeating)",c5p5:"Partial information still useful",c5p6:"History",c5p7:"Reply ONLY with the compressed context block, no commentary.",c5lab:"summarised context",c5n:"⚑  Include the original query at the end when rebuilding. The LLM needs the current objective immediately visible — summarised context without the question produces rambling answers.",c6tag:"ENRICHMENT",c6t:"External context injection",c6s:"Patterns for enriching the prompt with external data",c6e:"Beyond LLM-initiated tool calls, you can pre-enrich the prompt before the first round — injecting structured data, internal API results, or environment metadata. This reduces rounds and improves initial response quality.",c6a:"Pattern 1: static enrichment before the loop",c6b:"Parallel fetch of relevant context",c6c:"Pattern 2: regex to extract entities from query and pre-fetch data",c6d:"Pattern 3: prompt template with slots",c6e2:"// usage: buildPrompt('Analyse {{ticker}} on {{date}}', { ticker:'GS', date:'2025-03' })",c6f:"Pattern 4: validate final response format with regex",c6ua:"not available",c6i1:"unprocessed tool_call present",c6i2:"response too short",c6i3:"LLM admitted uncertainty",c6rx:"don't know|not sure",c6n:"⚑  In a GS context, Pattern 2 is particularly useful: detecting tickers or dates in the query and pre-loading market data before the loop significantly reduces total latency."},
-br:{h1:"Agentic Search — Arquitetura",sub:"Node.js + LLM Chat API · Loop agêntico com cache de contexto",user_l:"Usuário",user_s:"mensagem",llm_s:"sessão via Chrome",sc_s:"busca · enriquecimento",ca_s1:"ctx resumido · 100k chars",ca_s2:"LLM resume se exceder",a_prompt:"prompt + ctx",a_tool:"tool call / resp",a_exec:"exec script",a_fin:"resp. final",cfg_c:"// chars · se exceder → LLM resume cache + query",cfg_r:"// stop condition do loop agêntico",cr1:"// Chrome session",cr2:"// reusa cookies",cr3:"// sem login extra",ft:"Fluxo de execução",s1t:"Usuário envia mensagem",s1d:"Conversation Manager recebe via HTTP e inicializa o contexto do loop agêntico.",s2t:"Agente consulta LLM",s2d:"Prompt + cache de contexto enviado ao endpoint. LLM decide: responder direto ou chamar um tool.",s3t:"LLM chama tool?",s3d:"Se LLM retornar tool_call, o agente executa o script correspondente (busca, enriquecimento, etc.).",s4t:"Resultado injetado",s4d:"Output do script é adicionado ao contexto e a LLM é chamada novamente com o contexto enriquecido.",s5t:"Loop ou stop?",s5d:"Repete passos 2-4 até LLM não chamar mais tools ou atingir 10 rounds. Então retorna resposta final.",s6t:"Gestão de contexto",s6d:"Se contexto > 100k chars, LLM gera um resumo (cache + query atual). Resumo substitui o cache para o próximo round.",ct:"Parâmetros operacionais",cc1:"Gemini 1.5/2.0 · Claude usa 60k",cc2:"stop condition do loop agêntico",cc3:"Node.js standalone · PS fallback",cc5:"sem dependência de extensão Chrome",cc6:"ao exceder ctx_limit",ddt:"Como construir o agente — clique para expandir",dds:"cada card cobre um bloco do loop agêntico com pseudocódigo + padrões reais",c1t:"System Prompt — contrato de tool use",c1s:"Como dizer à LLM que ela pode chamar ferramentas",c1e:"O system prompt é o contrato do agente. Ele define o repertório de tools, o formato exato que a LLM deve usar para chamá-las, e a condição de parada. Sem isso a LLM responde em prosa e você não consegue parsear nada.",c1l1:"Você é um agente de pesquisa. Responda perguntas do usuário.",c1l2:"Se precisar de informação externa, chame uma tool usando",c1l3:"EXATAMENTE este formato — nada antes ou depois da tag:",c1l4:"sua busca aqui",c1l5:"Tools disponíveis:",c1t1:"busca na web",c1t2:"lê conteúdo de uma URL",c1t3:"avalia expressão matemática",c1l6:"Quando tiver contexto suficiente, responda diretamente SEM tool_call.",c1l7:"Nunca invente dados — use tools para buscar fatos.",c1n:'⚑  Consistência de formato é crítica. A LLM às vezes "vaza" texto antes da tag — por isso o regex de parse precisa ser robusto (ver card de parsing).',c2t:"Loop agêntico principal",c2s:"A estrutura do while que orquestra tudo",c2e:"O coração do agente é um loop simples: chama a LLM, verifica se a resposta contém uma tool call, executa a tool, injeta o resultado no contexto, repete. Parada: LLM não chama nenhuma tool, ou max_rounds atingido.",c2a:"1. Chama a LLM com histórico completo",c2b:"2. Verifica se tem tool_call no texto",c2c:"LLM respondeu direto — fim do loop",c2d:"3. Adiciona resposta da LLM ao histórico",c2e2:"4. Executa a tool",c2f:"5. Injeta resultado como mensagem de tool",c2g:"6. Verifica limite de contexto",c2h:"Atingiu max_rounds — pede resposta final forçada",c2force:"'Responda agora com o que você sabe.'",c2n:"⚑  O role user para tool_result é o mais compatível entre modelos. Alguns modelos suportam role tool nativo — prefira se disponível.",c3t:"Parsing da resposta da LLM",c3s:"Extraindo tool calls do texto com regex robusto",c3e:"LLMs não são determinísticas no formato. Mesmo com um system prompt rígido, a LLM pode colocar texto antes da tag, usar espaços extras, ou fechar a tag de formas ligeiramente diferentes. O regex precisa lidar com tudo isso.",c3a:"Regex principal — captura o JSON dentro de <tool_call>",c3b:"JSON malformado — tenta extrair campos individualmente",c3c:"Fallback: extrai tool e args mesmo de JSON quebrado",c3d:"Detecta múltiplas tool calls numa resposta (avançado)",c3e2:"executa em paralelo com Promise.all",c3n:"⚑  Use a flag i no regex pra tolerar <Tool_Call>. Flag s não é necessária porque [\\s\\S] já captura newlines.",c4t:"Tool executor e registry",c4s:"Despachando e executando skills dinamicamente",c4e:"O executor é um dispatcher simples: um objeto que mapeia nome de tool para função async. Cada tool recebe os args do JSON parseado e retorna uma string que vai direto para o contexto da LLM. Erros também viram string — a LLM precisa saber que a tool falhou.",c4a:"Registry de tools — adicione novas tools aqui",c4trunc:"trunca",c4mj:"use mathjs em prod",c4ne:"não existe. Tools disponíveis",c4ro:"Resultado de",c4c:"Retorna erro como string — LLM vai tentar outra abordagem",c4run:"ao executar",c4n:"⚑  Retornar o erro como string mantém o loop vivo. A LLM frequentemente tenta uma busca diferente ou outro tool ao receber uma mensagem de erro no contexto.",c5t:"Gestão de contexto e sumarização",c5s:"Manter o loop vivo além do limite de tokens",c5e:"Conforme o loop avança, o array de messages cresce. Quando ultrapassa o CTX_LIMIT, você pede à própria LLM para comprimir o histórico em um bloco menor, preservando o relevante para a query original. O resultado substitui todas as mensagens anteriores.",c5a:"Serializa histórico (exceto system prompt)",c5b:"Reconstrói: system + contexto resumido + query",c5p1:"Você está no meio de uma pesquisa. Comprima o histórico abaixo",c5p2:"em um bloco de contexto conciso, preservando:",c5p3:"Fatos relevantes para",c5p4:"Tools já chamadas (para não repetir)",c5p5:"Informações parciais ainda úteis",c5p6:"Histórico",c5p7:"Responda APENAS com o bloco de contexto comprimido, sem comentários.",c5lab:"contexto resumido",c5n:"⚑  Ao reconstruir o array, inclua a query original no final. A LLM precisa do objetivo atual imediatamente visível — contexto resumido sem a pergunta gera respostas divagantes.",c6tag:"ENRIQUECIMENTO",c6t:"Injeção de contexto externo no prompt",c6s:"Padrões para enriquecer o prompt com dados externos",c6e:"Além das tool calls iniciadas pela LLM, você pode pré-enriquecer o prompt antes do primeiro round — injetando dados estruturados, resultados de APIs internas, ou metadados do ambiente. Isso reduz rounds e melhora a qualidade da resposta inicial.",c6a:"Padrão 1: enriquecimento estático antes do loop",c6b:"Busca paralela de contexto relevante",c6c:"Padrão 2: regex para extrair entidades da query e pré-buscar dados",c6d:"Padrão 3: prompt template com slots",c6e2:"// uso: buildPrompt('Analise {{ticker}} em {{date}}', { ticker:'GS', date:'2025-03' })",c6f:"Padrão 4: validar formato da resposta final com regex",c6ua:"não disponível",c6i1:"contém tool_call não processada",c6i2:"resposta muito curta",c6i3:"LLM admitiu incerteza",c6rx:"não sei|desconheço",c6n:"⚑  No contexto da firma, o Padrão 2 é particularmente útil: detectar tickers ou datas na query e pré-carregar dados de mercado antes do loop reduz latência total significativamente."}
-};
-let L='en';
-function al(l){
-  const t=T[l];
-  document.querySelectorAll('[data-i]').forEach(el=>{const k=el.dataset.i;if(t[k]!==undefined)el.textContent=t[k];});
-  document.querySelectorAll('[data-si]').forEach(el=>{const k=el.dataset.si;if(t[k]!==undefined)el.textContent=t[k];});
-  document.getElementById('le').classList.toggle('a',l==='en');
-  document.getElementById('lb').classList.toggle('a',l==='br');
-  document.getElementById('lt').classList.toggle('on',l==='br');
-  document.documentElement.lang=l==='br'?'pt-BR':'en';
-}
-function tl(){L=L==='en'?'br':'en';al(L);}
-function ss(i){document.querySelectorAll('.st').forEach((s,j)=>s.classList.toggle('ac',j===i));}
-function hl(id){
-  const m={user:'nu',mgr:'nm',agent:'na',llm:'nl',scripts:'ns',cache:'nc'};
-  const el=document.getElementById(m[id]);
-  if(!el)return;
-  [.6,1,.7,1].forEach((v,i)=>setTimeout(()=>el.style.opacity=v,i*200));
-}
-function tc(card){const op=card.classList.toggle('op');card.querySelector('.dchev').textContent=op?'▾':'▸';}
-al('en');
-</script>
 </body>
 </html>

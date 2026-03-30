@@ -394,6 +394,7 @@ function clearSession() {
 document.addEventListener('DOMContentLoaded', () => {
   applySidebarState();
   bindSidebarPanels();
+  window.addEventListener('resize', handleResponsiveSidebar);
   updateBadge();
   updateStats();
   updateCtxBar();

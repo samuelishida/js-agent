@@ -1,24 +1,10 @@
-﻿  body {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto 1fr auto;
-    grid-template-areas:
-      "header"
-      "sidebar"
-      "main"
-      "input";
+@media (max-width: 1180px) {
+  header {
+    padding: 12px 16px;
   }
 
-  aside {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    max-height: 42vh;
-    transform: none !important;
-    opacity: 1 !important;
-    pointer-events: auto !important;
-  }
-
-  body.sidebar-collapsed {
-    grid-template-columns: 1fr;
+  .header-sub {
+    display: none;
   }
 
   .tool-groups {
@@ -26,4 +12,21 @@
   }
 }
 
+@media (max-width: 720px) {
+  header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
 
+  .header-badges {
+    width: 100%;
+  }
+
+  main {
+    padding: 14px;
+  }
+
+  .input-area {
+    padding: 10px 14px 14px;
+  }
+}

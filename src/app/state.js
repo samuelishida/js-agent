@@ -9,6 +9,7 @@ const TOOL_CACHE_KEY = 'agent_tool_cache_v1';
 const TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
 const SIDEBAR_COLLAPSED_KEY = 'agent_sidebar_collapsed_v1';
 const SIDEBAR_PANELS_KEY = 'agent_sidebar_panels_v1';
+const SIDEBAR_AUTO_COLLAPSE_WIDTH = 1180;
 let enabledTools = {
   web_search: true,
   calc: true,
@@ -97,8 +98,13 @@ function loadSidebarPanels() {
   }
 }
 
+function shouldAutoCollapseSidebar() {
+  return window.innerWidth <= SIDEBAR_AUTO_COLLAPSE_WIDTH;
+}
+
 function applySidebarState() {
-  const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+  const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+  const collapsed = stored == null ? shouldAutoCollapseSidebar() : stored === 'true';
   document.body.classList.toggle('sidebar-collapsed', collapsed);
 
   const panels = loadSidebarPanels();
@@ -124,6 +130,12 @@ function toggleSidebar() {
   const next = !document.body.classList.contains('sidebar-collapsed');
   document.body.classList.toggle('sidebar-collapsed', next);
   localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
+}
+
+function handleResponsiveSidebar() {
+  if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) == null) {
+    applySidebarState();
+  }
 }
 
 // -- API KEY -------------------------------------------------------------------

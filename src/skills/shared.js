@@ -340,11 +340,14 @@
 
     for (const domain of domains) {
       for (const variant of variants) {
+        if (entries.length >= 6) break;
         try {
           await retryWithBackoff(async () => {
             const url = `https://${domain}/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(variant)}&srlimit=3&utf8=1&format=json&origin=*`;
             const data = await fetchJsonWithTimeout(url, 6000);
             const hits = Array.isArray(data?.query?.search) ? data.query.search : [];
+
+            console.debug(`Wikipedia search on ${domain} for "${variant}": ${hits.length} hits`);
 
             for (const hit of hits) {
               if (entries.length >= 6) break;
@@ -383,6 +386,33 @@
       if (entries.length >= 6) break;
     }
 
+    // Fallback: Try simple query on main variants only
+    if (!entries.length && query.length > 0) {
+      const mainKeywords = query.split(/\s+/).slice(0, 3).join(' ');
+      try {
+        console.debug(`Wikipedia fallback query: "${mainKeywords}"`);
+        await retryWithBackoff(async () => {
+          const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(mainKeywords)}&srlimit=6&format=json&origin=*`;
+          const data = await fetchJsonWithTimeout(url, 6000);
+          const hits = Array.isArray(data?.query?.search) ? data.query.search : [];
+
+          for (const hit of hits.slice(0, 6)) {
+            if (!hit.title || seen.has(hit.title.toLowerCase())) continue;
+            seen.add(hit.title.toLowerCase());
+            entries.push(formatSearchEntry(
+              entries.length + 1,
+              hit.title,
+              normalizeSearchSnippet(hit.snippet),
+              `https://en.wikipedia.org/wiki/${encodeURIComponent(hit.title.replace(/ /g, '_'))}`,
+              'wikipedia'
+            ));
+          }
+        }, 2, 150);
+      } catch (error) {
+        console.debug(`Wikipedia fallback failed:`, error.message);
+      }
+    }
+
     return entries.length ? formatToolResult('Wikipedia search', entries.join('\n\n')) : null;
   }
 
@@ -393,11 +423,14 @@
 
     for (const language of ['pt', 'en']) {
       for (const variant of variants) {
+        if (entries.length >= 6) break;
         try {
           await retryWithBackoff(async () => {
             const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(variant)}&language=${language}&limit=5&format=json&origin=*`;
             const data = await fetchJsonWithTimeout(url, 6000);
             const hits = Array.isArray(data?.search) ? data.search : [];
+
+            console.debug(`Wikidata search in ${language} for "${variant}": ${hits.length} results`);
 
             for (const hit of hits) {
               if (entries.length >= 6) break;
@@ -430,6 +463,33 @@
       if (entries.length >= 6) break;
     }
 
+    // Fallback: Try simple English query
+    if (!entries.length && query.length > 0) {
+      const mainKeywords = query.split(/\s+/).slice(0, 3).join(' ');
+      try {
+        console.debug(`Wikidata fallback query: "${mainKeywords}"`);
+        await retryWithBackoff(async () => {
+          const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(mainKeywords)}&language=en&limit=6&format=json&origin=*`;
+          const data = await fetchJsonWithTimeout(url, 6000);
+          const hits = Array.isArray(data?.search) ? data.search : [];
+
+          for (const hit of hits.slice(0, 6)) {
+            if (!hit.id || seen.has(hit.id)) continue;
+            seen.add(hit.id);
+            entries.push(formatSearchEntry(
+              entries.length + 1,
+              hit.label || hit.id,
+              normalizeSearchSnippet(hit.description || ''),
+              `https://www.wikidata.org/wiki/${encodeURIComponent(hit.id)}`,
+              'wikidata'
+            ));
+          }
+        }, 2, 150);
+      } catch (error) {
+        console.debug(`Wikidata fallback failed:`, error.message);
+      }
+    }
+
     return entries.length ? formatToolResult('Wikidata search', entries.join('\n\n')) : null;
   }
 
@@ -439,10 +499,18 @@
     const entries = [];
 
     for (const variant of variants) {
+      if (entries.length >= 6) break;
       try {
         await retryWithBackoff(async () => {
           const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(variant)}&format=json&no_html=1&no_redirect=1&skip_disambig=1`;
           const data = await fetchJsonWithTimeout(url, 8000);
+
+          // Log response for debugging
+          console.debug(`DuckDuckGo response for "${variant}":`, { 
+            hasAbstract: !!data.AbstractText,
+            topicsCount: Array.isArray(data.RelatedTopics) ? data.RelatedTopics.length : 0,
+            response: data 
+          });
 
           if (data.AbstractText) {
             const key = String(data.AbstractURL || data.Heading || variant).toLowerCase();
@@ -496,8 +564,30 @@
       } catch (error) {
         console.debug(`DuckDuckGo search for "${variant}" failed:`, error.message);
       }
+    }
 
-      if (entries.length >= 6) break;
+    // If still no results, try a simpler query with just main keywords
+    if (!entries.length && query.length > 0) {
+      try {
+        const mainKeywords = query.split(/\s+/).slice(0, 3).join(' ');
+        console.debug(`DuckDuckGo fallback query: "${mainKeywords}"`);
+        await retryWithBackoff(async () => {
+          const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(mainKeywords)}&format=json&no_html=1`;
+          const data = await fetchJsonWithTimeout(url, 8000);
+          
+          if (data.AbstractText) {
+            entries.push(formatSearchEntry(
+              1,
+              data.Heading || mainKeywords,
+              normalizeSearchSnippet(data.AbstractText),
+              data.AbstractURL || '',
+              'duckduckgo'
+            ));
+          }
+        }, 2, 150);
+      } catch (error) {
+        console.debug(`DuckDuckGo fallback failed:`, error.message);
+      }
     }
 
     return entries.length ? formatToolResult('DuckDuckGo search', entries.join('\n\n')) : null;
@@ -511,11 +601,14 @@
       return await retryWithBackoff(async () => {
         const url = `https://news.google.com/rss/search?q=${encodeURIComponent(terms)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`;
         const res = await window.fetchWithTimeout(url, { cache: 'no-store' }, 8000);
-        if (!res.ok) throw new Error(`Google News RSS HTTP ${res.status}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const xml = await res.text();
         const doc = new DOMParser().parseFromString(xml, 'text/xml');
         const items = [...doc.querySelectorAll('item')].slice(0, 6);
+        
+        console.debug(`Google News: Found ${items.length} articles`);
+        
         if (!items.length) return null;
 
         const entries = items.map((item, index) => {
@@ -571,17 +664,17 @@
       // Try to get GitHub token from config for higher rate limits
       const githubToken = window.localStorage?.getItem?.('github_token') || '';
       
-      const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(`${terms} in:name,description,readme`)}&sort=stars&order=desc&per_page=6`;
-      const headers = {
+      // First try: Advanced search with multiple fields
+      let url = `https://api.github.com/search/repositories?q=${encodeURIComponent(`${terms} in:name,description,readme`)}&sort=stars&order=desc&per_page=6`;
+      let headers = {
         Accept: 'application/vnd.github+json'
       };
       
-      // Add token auth if available (requires public_repo scope)
       if (githubToken) {
         headers['Authorization'] = `token ${githubToken}`;
       }
 
-      const res = await window.fetchWithTimeout(url, { cache: 'no-store', headers }, 8000);
+      let res = await window.fetchWithTimeout(url, { cache: 'no-store', headers }, 8000);
       
       // Handle authentication/rate limit errors gracefully
       if (res.status === 401 || res.status === 403) {
@@ -593,8 +686,24 @@
         throw new Error(`HTTP ${res.status}`);
       }
 
-      const data = await res.json();
-      const repos = Array.isArray(data?.items) ? data.items.slice(0, 6) : [];
+      let data = await res.json();
+      let repos = Array.isArray(data?.items) ? data.items.slice(0, 6) : [];
+      
+      console.debug(`GitHub search for "${terms}": ${repos.length} results (advanced)`);
+
+      // Fallback: Try simpler search if no results
+      if (!repos.length) {
+        console.debug(`GitHub fallback for "${terms}": trying simple search`);
+        const simpleUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(terms)}&sort=stars&order=desc&per_page=6`;
+        res = await window.fetchWithTimeout(simpleUrl, { cache: 'no-store', headers }, 8000);
+        
+        if (res.ok) {
+          data = await res.json();
+          repos = Array.isArray(data?.items) ? data.items.slice(0, 6) : [];
+          console.debug(`GitHub fallback: ${repos.length} results found`);
+        }
+      }
+
       if (!repos.length) return null;
 
       const entries = repos.map((repo, index) => {
@@ -630,21 +739,30 @@
     ];
     const results = [];
 
+    console.debug(`🔍 Starting web search for: "${query}"`);
+
     for (const runner of runners) {
       try {
         const result = await runner.run();
         if (hasMeaningfulToolBody(result)) {
           results.push({ source: runner.name, content: result });
-          diagnostics.push(`${runner.name}: ok`);
+          diagnostics.push(`${runner.name}: ✓ ok`);
+          console.debug(`  ✓ ${runner.name}: Got results`);
         } else if (result) {
-          diagnostics.push(`${runner.name}: empty`);
+          diagnostics.push(`${runner.name}: ⊘ empty`);
+          console.debug(`  ⊘ ${runner.name}: Empty result`);
         } else {
-          diagnostics.push(`${runner.name}: no match`);
+          diagnostics.push(`${runner.name}: ✗ no match`);
+          console.debug(`  ✗ ${runner.name}: No match`);
         }
       } catch (error) {
-        diagnostics.push(`${runner.name}: ${error.message || 'failed'}`);
+        const msg = error.message || 'unknown error';
+        diagnostics.push(`${runner.name}: ⚠ ${msg}`);
+        console.debug(`  ⚠ ${runner.name}: ${msg}`);
       }
     }
+
+    console.debug(`Search complete: ${results.length} providers returned results`);
 
     if (!results.length) {
       // FALLBACK: No providers returned results, provide helpful guidance
@@ -652,20 +770,26 @@
         `⚠️ Search Unavailable - All Providers Failed`,
         `Query: "${query}"`,
         ``,
-        `Status: Network connectivity issues preventing search results.`,
+        `Status: Check the diagnostics below to troubleshoot.`,
         ``,
-        `Search Infrastructure Status:`,
-        `  • google_news: ${diagnostics.find(d => d.includes('google_news'))?.match(/: (.+)$/)?.[1] || 'unknown'}`,
-        `  • wikipedia: ${diagnostics.find(d => d.includes('wikipedia'))?.match(/: (.+)$/)?.[1] || 'unknown'}`,
-        `  • wikidata: ${diagnostics.find(d => d.includes('wikidata'))?.match(/: (.+)$/)?.[1] || 'unknown'}`,
-        `  • duckduckgo: ${diagnostics.find(d => d.includes('duckduckgo'))?.match(/: (.+)$/)?.[1] || 'unknown'}`,
-        `  • github: ${diagnostics.find(d => d.includes('github'))?.match(/: (.+)$/)?.[1] || 'unknown'}`,
+        `Provider Status:`,
+        ...diagnostics.map(d => `  • ${d}`),
         ``,
         `Troubleshooting:`,
-        `1. Check internet connectivity`,
-        `2. Try a simpler, more specific query`,
-        `3. Wait a moment and try again`,
-        `4. If using local LLM, ensure you have internet access for web search`
+        `1. ✓ (ok) = Results found successfully`,
+        `2. ⊘ (empty) = Provider returned no data (API issue or no results)`,
+        `3. ✗ (no match) = No matching content found`,
+        `4. ⚠ (error) = Network or API error occurred`,
+        ``,
+        `If most/all providers show ⚠ errors:`,
+        `  • Check your internet connection`,
+        `  • Wait a moment and try again`,
+        `  • Try a simpler, shorter query`,
+        ``,
+        `If most providers show ✗ no match:`,
+        `  • Your query might be too specific`,
+        `  • Try searching for something more general`,
+        `  • Try different keywords`
       ];
 
       const fallbackResult = formatToolResult(

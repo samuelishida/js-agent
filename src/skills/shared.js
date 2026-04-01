@@ -807,10 +807,10 @@
     const originalQuery = String(query || '').trim();
     
     // LLM preflight: Attempt query clarification with very short timeout
-    // Only if local backend is enabled, to avoid unnecessary cloud calls
+    // Use local backend if available, otherwise fall back to Gemini
     let searchQuery = originalQuery;
     
-    if (originalQuery.length > 10 && window.localBackend?.enabled && window.localBackend?.url) {
+    if (originalQuery.length > 10) {
       try {
         const clarifyPromise = (async () => {
           const response = await window.callLLM?.(

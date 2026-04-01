@@ -802,77 +802,22 @@
     }
   }
 
-  /** Use LLM preflight to clarify and optimize search query */
-  async function clarifySearchQuery(originalQuery) {
-    const trimmedQuery = String(originalQuery || '').trim();
-    
-    // Skip clarification for very short queries or simple keywords
-    if (trimmedQuery.length < 5 || /^[a-z\s]{1,30}$/i.test(trimmedQuery)) {
-      return trimmedQuery;
-    }
-
-    try {
-      // Ask LLM to suggest a clearer, more searchable version
-      const response = await window.AgentSkills?.runTool?.('llm', {
-        messages: [
-          {
-            role: 'user',
-            content: `Given this search query, suggest a single improved version that is:
-1. Clearer and more specific
-2. Better for search engines
-3. Same meaning as original
-4. As short as possible
-
-Original query: "${trimmedQuery}"
-
-Respond with ONLY the improved query, nothing else.`
-          }
-        ],
-        model: 'auto',
-        maxTokens: 50,
-        temperature: 0.3
-      });
-
-      const clarified = response?.text?.trim() || trimmedQuery;
-      
-      if (clarified && clarified !== trimmedQuery) {
-        console.debug(`Query clarified: "${trimmedQuery}" → "${clarified}"`);
-        return clarified;
-      }
-      
-      return trimmedQuery;
-    } catch (error) {
-      console.debug(`Query clarification failed: ${error.message}, using original`);
-      return trimmedQuery;
-    }
-  }
-
   async function runSearchSkills(query) {
     const diagnostics = [];
     const originalQuery = String(query || '').trim();
     
-    // LLM preflight: Clarify query for better search results
-    console.debug(`🔍 LLM preflight: Clarifying search query...`);
-    const clarifiedQuery = await clarifySearchQuery(originalQuery);
-    
-    // Use clarified query for searches, but preserve original for diagnostics
-    const searchQuery = clarifiedQuery;
-    
     const runners = [
-      { name: 'weather_current', run: () => detectWeatherIntent(searchQuery) ? getCurrentWeather({}) : null },
-      { name: 'fx_rate', run: () => searchFxRate(searchQuery) },
-      { name: 'google_news', run: () => searchGoogleNewsRss(searchQuery) },
-      { name: 'github_repositories', run: () => searchGithubRepositories(searchQuery) },
-      { name: 'duckduckgo', run: () => searchDuckDuckGo(searchQuery) },
-      { name: 'wikipedia', run: () => searchWikipedia(searchQuery) },
-      { name: 'wikidata', run: () => searchWikidata(searchQuery) }
+      { name: 'weather_current', run: () => detectWeatherIntent(query) ? getCurrentWeather({}) : null },
+      { name: 'fx_rate', run: () => searchFxRate(query) },
+      { name: 'google_news', run: () => searchGoogleNewsRss(query) },
+      { name: 'github_repositories', run: () => searchGithubRepositories(query) },
+      { name: 'duckduckgo', run: () => searchDuckDuckGo(query) },
+      { name: 'wikipedia', run: () => searchWikipedia(query) },
+      { name: 'wikidata', run: () => searchWikidata(query) }
     ];
     const results = [];
 
     console.debug(`🔍 Starting web search for: "${originalQuery}"`);
-    if (clarifiedQuery !== originalQuery) {
-      console.debug(`   (clarified to: "${clarifiedQuery}")`);
-    }
 
     for (const runner of runners) {
       try {
@@ -987,8 +932,7 @@ Respond with ONLY the improved query, nothing else.`
       // FALLBACK: No providers returned results, provide helpful guidance
       const summaryLines = [
         `⚠️ Search Unavailable - All Providers Failed`,
-        `Original Query: "${originalQuery}"`,
-        clarifiedQuery !== originalQuery ? `Clarified to: "${clarifiedQuery}"` : '',
+        `Query: "${originalQuery}"`,
         ``,
         `Status: Check the diagnostics below to troubleshoot.`,
         ``,

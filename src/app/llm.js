@@ -236,9 +236,12 @@ async function callCloud(msgs, signal, options = {}) {
   const model = String(options.model || selected.model || '').trim();
 
   if (!localBackend.enabled) {
-    document.getElementById('badge-model').textContent = provider === 'gemini'
-      ? model
-      : `${provider}/${model}`;
+    const badgeModel = document.getElementById('badge-model');
+    if (badgeModel) {
+      badgeModel.textContent = provider === 'gemini'
+        ? model
+        : `${provider}/${model}`;
+    }
   }
 
   if (provider === 'openai') return callOpenAiCloud(msgs, signal, options, model);
@@ -527,8 +530,11 @@ async function callLLM(msgs, options = {}) {
 
 async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
   const modelSelect = document.getElementById('model-select');
-  let model = String(initialModel || modelSelect.value || 'gemini-2.5-flash-lite').trim();
-  if (!localBackend.enabled) document.getElementById('badge-model').textContent = model;
+  let model = String(initialModel || (modelSelect ? modelSelect.value : '') || 'gemini-2.5-flash-lite').trim();
+  if (!localBackend.enabled) {
+    const badgeModel = document.getElementById('badge-model');
+    if (badgeModel) badgeModel.textContent = model;
+  }
 
   const contents = msgs
     .filter(m => m.role !== 'system')
@@ -562,8 +568,11 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
   let { res, text } = await requestModel(model);
   if (!res.ok && res.status === 404 && fallbackModels[model]) {
     model = fallbackModels[model];
-    modelSelect.value = model;
-    if (!localBackend.enabled) document.getElementById('badge-model').textContent = model;
+    if (modelSelect) modelSelect.value = model;
+    if (!localBackend.enabled) {
+      const badgeModel = document.getElementById('badge-model');
+      if (badgeModel) badgeModel.textContent = model;
+    }
     ({ res, text } = await requestModel(model));
   }
 

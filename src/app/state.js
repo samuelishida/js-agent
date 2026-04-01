@@ -112,13 +112,33 @@ function assertRuntimeReady() {
 }
 
 // -- CONSTRAINTS ---------------------------------------------------------------
-function getMaxRounds() { return parseInt(document.getElementById('sl-rounds').value); }
-function getCtxLimit()  { return parseInt(document.getElementById('sl-ctx').value) * 1000; }
-function getDelay()     { return parseInt(document.getElementById('sl-delay').value); }
+function getMaxRounds() { 
+  const el = document.getElementById('sl-rounds');
+  return el ? parseInt(el.value) : 10;
+}
+
+function getCtxLimit() {
+  const el = document.getElementById('sl-ctx');
+  return el ? parseInt(el.value) * 1000 : 50000;
+}
+
+function getDelay() {
+  const el = document.getElementById('sl-delay');
+  return el ? parseInt(el.value) : 500;
+}
 
 function updateBadge() {
-  document.getElementById('badge-rounds').textContent = `rounds ${document.getElementById('sl-rounds').value}`;
-  document.getElementById('badge-ctx').textContent = `context ${document.getElementById('sl-ctx').value}k`;
+  const badgeRounds = document.getElementById('badge-rounds');
+  const slRounds = document.getElementById('sl-rounds');
+  if (badgeRounds && slRounds) {
+    badgeRounds.textContent = `rounds ${slRounds.value}`;
+  }
+  
+  const badgeCtx = document.getElementById('badge-ctx');
+  const slCtx = document.getElementById('sl-ctx');
+  if (badgeCtx && slCtx) {
+    badgeCtx.textContent = `context ${slCtx.value}k`;
+  }
 }
 
 function loadSidebarPanels() {
@@ -410,14 +430,11 @@ function renderSessionList() {
 
   host.innerHTML = chatSessions.length
     ? chatSessions.map(session => `
-      <div class="session-item ${session.id === activeSessionId ? 'active' : ''}">
-        <button class="session-main" onclick="activateSession('${session.id}')">
-          <span class="session-title">${escHtml(session.title)}</span>
-          <span class="session-meta">${new Date(session.updatedAt).toLocaleString()}</span>
-        </button>
-        <button class="session-delete" onclick="deleteSession('${session.id}')" title="Delete session">×</button>
+      <div class="session-item ${session.id === activeSessionId ? 'active' : ''}" onclick="activateSession('${session.id}')">
+        <span class="session-title">${escHtml(session.title)}</span>
+        <button class="delete-btn" onclick="event.stopPropagation();deleteSession('${session.id}')" title="Delete">×</button>
       </div>`).join('')
-    : '<div class="session-empty">no sessions yet</div>';
+    : '<div class="session-empty">No conversations yet</div>';
 }
 
 function deleteSession(sessionId) {
@@ -462,26 +479,34 @@ function deleteAllSessions() {
 }
 
 function renderChatFromMessages() {
+  const container = document.getElementById('messages');
   const chat = document.getElementById('chat');
-  chat.innerHTML = '';
 
+  // Clear messages container
+  if (container) container.innerHTML = '';
+
+  // Show/hide empty state
+  const existingEmpty = document.getElementById('empty');
   if (!messages.length) {
-    chat.innerHTML = `
-      <div class="empty-state" id="empty">
-        <div class="empty-logo">?</div>
-        <div class="empty-title">Ready to help</div>
-        <div class="empty-sub">
-          Search the web, work with files, use local models, and complete multi-step tasks from one workspace.
-        </div>
+    if (!existingEmpty && chat) {
+      const emptyEl = document.createElement('div');
+      emptyEl.className = 'empty-state';
+      emptyEl.id = 'empty';
+      emptyEl.innerHTML = `
+        <div class="empty-logo">⬡</div>
+        <div class="empty-title">What can I help you with?</div>
         <div class="empty-examples">
           <button class="example-chip" onclick="useExample(this)">What's the current BRL/USD exchange rate?</button>
           <button class="example-chip" onclick="useExample(this)">Calculate compound interest: $10k at 5.5% for 7 years</button>
           <button class="example-chip" onclick="useExample(this)">Search for the latest Fed rate decision and summarize</button>
           <button class="example-chip" onclick="useExample(this)">What's today's date and what day of the week is it?</button>
-        </div>
-      </div>`;
+        </div>`;
+      chat.insertBefore(emptyEl, container || null);
+    }
     return;
   }
+
+  if (existingEmpty) existingEmpty.remove();
 
   for (const message of messages.filter(m => m.role !== 'system')) {
     if (message.role === 'assistant') {

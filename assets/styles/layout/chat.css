@@ -1,0 +1,335 @@
+/* CHAT CONTAINER */
+.chat-container {
+  grid-area: chat;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  padding: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* EMPTY STATE */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-2xl);
+  text-align: center;
+}
+
+.empty-logo {
+  width: 56px;
+  height: 56px;
+  background: linear-gradient(135deg, var(--accent-primary), var(--green));
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+
+.empty-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.empty-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  max-width: 500px;
+  line-height: 1.6;
+}
+
+.empty-examples {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  width: 100%;
+  max-width: 500px;
+  margin-top: var(--spacing-md);
+}
+
+.example-chip {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: var(--font-main);
+  font-weight: 500;
+}
+
+.example-chip:hover {
+  background: var(--bg-button);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+/* MESSAGES CONTAINER */
+.messages-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg) var(--spacing-xl);
+}
+
+/* MESSAGE */
+.msg {
+  display: flex;
+  gap: var(--spacing-md);
+  animation: msgSlideIn 0.3s ease;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+@keyframes msgSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.msg.user {
+  justify-content: flex-end;
+}
+
+.msg.assistant {
+  justify-content: flex-start;
+}
+
+.msg-content {
+  max-width: 65%;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-radius: var(--radius-lg);
+  font-size: 14px;
+  line-height: 1.6;
+  word-wrap: break-word;
+}
+
+.msg.user .msg-content {
+  background: var(--accent-primary);
+  color: white;
+  border-radius: var(--radius-lg);
+}
+
+.msg.assistant .msg-content {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+}
+
+/* CODE BLOCKS */
+.msg-content code {
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--blue);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.msg-content pre {
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  overflow-x: auto;
+  margin: var(--spacing-sm) 0;
+}
+
+.msg-content pre code {
+  background: transparent;
+  color: var(--blue);
+  padding: 0;
+}
+
+/* LINKS */
+.msg-content a {
+  color: var(--blue);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(91, 155, 253, 0.3);
+}
+
+.msg-content a:hover {
+  border-bottom-color: var(--blue);
+}
+
+.msg.user .msg-content a {
+  color: rgba(255, 255, 255, 0.8);
+  border-bottom-color: rgba(255, 255, 255, 0.3);
+}
+
+/* LISTS */
+.msg-content ul,
+.msg-content ol {
+  margin: var(--spacing-md) 0;
+  margin-left: var(--spacing-xl);
+}
+
+.msg-content li {
+  margin-bottom: var(--spacing-xs);
+}
+
+/* BLOCKQUOTES */
+.msg-content blockquote {
+  border-left: 3px solid var(--accent-primary);
+  padding-left: var(--spacing-md);
+  margin: var(--spacing-md) 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* LOADING INDICATOR */
+.msg.loading {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* TOOL / ERROR / SYSTEM messages */
+.msg-tool .msg-content,
+.msg-system .msg-content {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+}
+.msg-error .msg-content {
+  background: rgba(239, 83, 80, 0.08);
+  border: 1px solid rgba(239, 83, 80, 0.25);
+  color: var(--red);
+}
+.msg-content-mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 80%;
+}
+.msg-meta-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* THINKING INDICATOR */
+.thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.thinking-dots {
+  display: flex;
+  gap: 4px;
+}
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  animation: dotPulse 1.2s ease infinite;
+}
+.dot:nth-child(2) { animation-delay: 0.2s; }
+.dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes dotPulse {
+  0%, 100% { opacity: 0.2; transform: scale(0.8); }
+  50%       { opacity: 1;   transform: scale(1.1); }
+}
+.thinking-label {
+  opacity: 0.6;
+}
+
+/* CONTEXT NOTICE */
+.ctx-notice {
+  margin: 4px 16px;
+  padding: 8px 12px;
+  background: rgba(240, 173, 78, 0.08);
+  border-left: 2px solid var(--amber);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 12px;
+  color: var(--amber);
+  font-family: var(--font-mono);
+}
+
+/* THINKING DETAILS */
+.thinking-details {
+  margin-top: 6px;
+  font-size: 11px;
+}
+.thinking-details summary {
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  padding: 2px 0;
+}
+.thinking-pre {
+  margin-top: 6px;
+  background: rgba(0,0,0,0.3);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+/* html-body markdown rendering */
+.html-body h1, .html-body h2, .html-body h3, .html-body h4 {
+  font-weight: 600;
+  margin: 12px 0 6px;
+  line-height: 1.3;
+}
+.html-body h1 { font-size: 18px; }
+.html-body h2 { font-size: 16px; }
+.html-body h3 { font-size: 14px; }
+.html-body p  { margin-bottom: 8px; }
+.html-body ul, .html-body ol { padding-left: 20px; margin-bottom: 8px; }
+.html-body li { margin-bottom: 4px; }
+.html-body code {
+  background: rgba(0,0,0,0.3);
+  color: var(--blue);
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.html-body pre {
+  background: rgba(0,0,0,0.4);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.html-body pre code { background: transparent; padding: 0; }
+.html-body table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
+.html-body th, .html-body td { border: 1px solid var(--border-default); padding: 6px 10px; text-align: left; }
+.html-body th { background: var(--bg-secondary); font-weight: 600; }

@@ -1,5 +1,16 @@
-@import url('./styles/base.css');
-@import url('./styles/sidebar.css');
-@import url('./styles/chat.css');
-@import url('./styles/input.css');
-@import url('./styles/responsive.css');
+/* Base Styles */
+@import url('./styles/base/variables.css');
+@import url('./styles/base/typography.css');
+@import url('./styles/base/forms.css');
+
+/* Layout Components */
+@import url('./styles/layout/sidebar.css');
+@import url('./styles/layout/topbar.css');
+@import url('./styles/layout/chat.css');
+@import url('./styles/layout/input.css');
+
+/* UI Components */
+@import url('./styles/components/modal.css');
+
+/* Responsive & Utilities */
+@import url('./styles/utilities/responsive.css');

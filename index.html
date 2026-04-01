@@ -1,257 +1,269 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>JS Agent</title>
+<title>Agent</title>
 <link rel="stylesheet" href="assets/styles.css">
 </head>
 <body>
-<!-- HEADER -->
-<header>
-  <div class="header-left">
-    <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
-    <div class="logo">⬡</div>
-    <div>
-      <div class="header-title">JS Agent</div>
-      <div class="header-sub">Multi-model workspace for search, files, and local automation</div>
+<!-- SIDEBAR (Left Navigation) -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" onclick="toggleSidebar()" title="Collapse sidebar" aria-label="Collapse sidebar">
+      ✕
+    </button>
+  </div>
+
+  <div class="new-chat-btn-wrap">
+    <button class="new-chat-btn" onclick="clearSession()">
+      <span class="plus-icon">+</span>
+      New chat
+    </button>
+  </div>
+
+  <div class="sidebar-divider"></div>
+
+  <!-- SESSIONS -->
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Conversations</div>
+    <div id="session-list" class="session-list"></div>
+  </div>
+
+  <div class="sidebar-spacer"></div>
+
+  <!-- FOOTER -->
+  <div class="sidebar-footer">
+    <button class="sidebar-btn-sm" id="settings-btn" onclick="openSettings()" title="Settings">⚙️</button>
+  </div>
+</aside>
+
+<!-- TOP BAR -->
+<header class="topbar">
+  <div class="topbar-left">
+    <button class="sidebar-open-btn" id="sidebar-open-btn" onclick="toggleSidebar()" style="display:none" title="Show sidebar">☰</button>
+    <div class="topbar-title">
+      <span id="topbar-model" class="topbar-badge">—</span>
+      <span id="topbar-status" class="topbar-status">idle</span>
     </div>
   </div>
-  <div class="header-badges">
-    <div class="badge badge-purple" id="badge-rounds">rounds 10</div>
-    <div class="badge badge-amber"  id="badge-ctx">context 50k</div>
-    <div class="badge badge-green"  id="badge-model">gemini-2.5-flash-lite</div>
-    <div class="badge badge-red"    id="badge-local" style="cursor:pointer" onclick="probeLocal()" title="Click to re-probe">local: —</div>
-    <div class="badge badge-blue"   id="badge-status">
-      <span class="status-dot" id="status-dot"></span>&nbsp;idle
+
+  <div class="topbar-right">
+    <div class="topbar-badges">
+      <span class="badge badge-sm" id="badge-rounds">10 rounds</span>
+      <span class="badge badge-sm" id="badge-ctx">50k</span>
+      <span class="badge badge-sm" id="badge-status">idle</span>
     </div>
   </div>
 </header>
 
-<!-- SIDEBAR -->
-<aside>
-  <div class="sidebar-topbar">
-    <div class="sidebar-topbar-title">Workspace</div>
-    <button class="sidebar-topbar-btn" onclick="toggleSidebar()" title="Collapse sidebar">Hide</button>
-  </div>
-
-  <!-- API KEY -->
-  <details class="sidebar-section sidebar-panel" data-panel="cloud" open>
-    <summary class="sidebar-summary">
-      <span class="sidebar-label">Cloud Model</span>
-      <span class="sidebar-chevron">⌄</span>
-    </summary>
-    <div class="sidebar-panel-body">
-      <div class="sidebar-copy">Connect a hosted cloud model for browser-based runs (Gemini, OpenAI, Claude, Azure OpenAI).</div>
-      <div class="api-row">
-        <input class="api-input" id="api-key" type="password" placeholder="Cloud API key" autocomplete="off" />
-        <button class="btn-sm" onclick="saveKey()">Save</button>
-      </div>
-      <div style="margin-top:8px">
-        <div class="sidebar-label" style="margin-bottom:4px">Hosted Model</div>
-        <select id="model-select">
-          <option value="gemini/gemini-2.5-flash">gemini/gemini-2.5-flash</option>
-          <option value="gemini/gemini-2.5-pro">gemini/gemini-2.5-pro</option>
-          <option value="gemini/gemini-2.5-flash-lite">gemini/gemini-2.5-flash-lite</option>
-          <option value="openai/gpt-4.1">openai/gpt-4.1</option>
-          <option value="openai/gpt-4.1-mini">openai/gpt-4.1-mini</option>
-          <option value="openai/o4-mini">openai/o4-mini</option>
-          <option value="claude/claude-3-7-sonnet-latest">claude/claude-3-7-sonnet-latest</option>
-          <option value="claude/claude-3-5-haiku-latest">claude/claude-3-5-haiku-latest</option>
-          <option value="azure/gpt-4.1-mini">azure/gpt-4.1-mini</option>
-        </select>
-      </div>
-    </div>
-  </details>
-
-  <!-- LOCAL BACKEND -->
-  <details class="sidebar-section sidebar-panel" data-panel="local" open>
-    <summary class="sidebar-summary">
-      <span class="sidebar-label">Local Model</span>
-      <span class="sidebar-chevron">⌄</span>
-    </summary>
-    <div class="sidebar-panel-body">
-      <div class="sidebar-copy">Run through LM Studio or Ollama when you want local inference.</div>
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
-        <div class="status-dot" id="local-dot"></div>
-        <span style="font-size:10px;color:var(--text2)" id="local-status-label">not probed</span>
-        <button class="btn-sm" style="margin-left:auto" onclick="probeLocal()">Probe</button>
-      </div>
-      <div class="api-row" style="margin-bottom:6px">
-        <input class="api-input" id="local-url" type="text" placeholder="http://localhost:1234" value="http://localhost:1234" />
-      </div>
-      <div style="font-size:9px;color:var(--text3);margin-bottom:8px">LM Studio :1234 · Ollama :11434</div>
-      <div class="constraint-row">
-        <span class="constraint-key">Enable local routing</span>
-        <div class="tool-toggle" id="toggle-local" onclick="toggleLocalBackend()" style="padding:4px 8px;margin:0">
-          <span class="tool-name" id="local-toggle-label">off</span>
-          <span class="tool-dot" id="local-toggle-dot"></span>
-        </div>
-      </div>
-      <div id="local-model-row" style="display:none;margin-top:6px">
-        <div class="sidebar-label" style="margin-bottom:4px">Local Model</div>
-        <select id="local-model-select" style="font-size:10px">
-          <option value="">— probe to detect —</option>
-        </select>
-      </div>
-    </div>
-  </details>
-
-  <!-- RUNTIME -->
-  <details class="sidebar-section sidebar-panel" data-panel="runtime" open>
-    <summary class="sidebar-summary">
-      <span class="sidebar-label">Runtime</span>
-      <span class="sidebar-chevron">⌄</span>
-    </summary>
-    <div class="sidebar-panel-body">
-      <div class="sidebar-copy">Tune response depth, context budget, and pacing for the session.</div>
-      <div class="constraint-row">
-        <span class="constraint-key">Planning depth</span>
-        <span class="constraint-val" id="val-rounds">10</span>
-      </div>
-      <input type="range" id="sl-rounds" min="1" max="20" value="10"
-             oninput="document.getElementById('val-rounds').textContent=this.value;updateBadge()">
-
-      <div class="constraint-row">
-        <span class="constraint-key">Context budget (k chars)</span>
-        <span class="constraint-val" id="val-ctx">50</span>
-      </div>
-      <input type="range" id="sl-ctx" min="10" max="200" value="50"
-             oninput="document.getElementById('val-ctx').textContent=this.value;updateBadge()">
-
-      <div class="constraint-row">
-        <span class="constraint-key">Response pacing (ms)</span>
-        <span class="constraint-val" id="val-delay">500</span>
-      </div>
-      <input type="range" id="sl-delay" min="0" max="3000" step="100" value="500"
-             oninput="document.getElementById('val-delay').textContent=this.value">
-
-      <div class="ctx-bar-wrap">
-        <div class="ctx-bar-label">
-          <span>Context usage</span>
-          <span id="ctx-pct">0%</span>
-        </div>
-        <div class="ctx-bar-track">
-          <div class="ctx-bar-fill" id="ctx-bar"></div>
-        </div>
-      </div>
-    </div>
-  </details>
-
-  <!-- SESSIONS -->
-  <details class="sidebar-section sidebar-panel" data-panel="conversations" open>
-    <summary class="sidebar-summary">
-      <span class="sidebar-label">Conversations</span>
-      <span class="sidebar-chevron">⌄</span>
-    </summary>
-    <div class="sidebar-panel-body">
-      <div class="session-actions">
-        <button class="btn-sm" onclick="clearSession()">New</button>
-        <button class="btn-sm" onclick="deleteAllSessions()">Delete all</button>
-      </div>
-      <div id="session-list" class="session-list"></div>
-    </div>
-  </details>
-
-  <!-- FILE ACCESS -->
-  <details class="sidebar-section sidebar-panel" data-panel="files" open>
-    <summary class="sidebar-summary">
-      <span class="sidebar-label">Files</span>
-      <span class="sidebar-chevron">⌄</span>
-    </summary>
-    <div class="sidebar-panel-body">
-      <div class="sidebar-copy">Authorize a local folder before asking the agent to read or edit project files.</div>
-      <div class="session-actions" style="justify-content:flex-start;margin-bottom:10px">
-        <button class="btn-sm" onclick="requestDirectoryAccess()">Authorize Folder</button>
-      </div>
-      <div class="tool-group" style="padding:10px">
-        <div class="tool-group-label">Access status</div>
-        <div id="file-access-status" class="session-empty">no folder authorized</div>
-      </div>
-    </div>
-  </details>
-
-  <!-- TOOLS -->
-  <details class="sidebar-section sidebar-panel tools-section" data-panel="capabilities" open>
-    <summary class="sidebar-summary">
-      <span class="sidebar-label">Capabilities</span>
-      <span class="sidebar-chevron">⌄</span>
-    </summary>
-    <div class="sidebar-panel-body">
-      <div class="tool-groups" id="tool-groups"></div>
-    </div>
-  </details>
-
-  <!-- STATS -->
-  <details class="sidebar-section sidebar-panel" data-panel="activity" open style="flex:1">
-    <summary class="sidebar-summary">
-      <span class="sidebar-label">Activity</span>
-      <span class="sidebar-chevron">⌄</span>
-    </summary>
-    <div class="sidebar-panel-body">
-      <div class="stats-grid">
-        <div class="stat-box">
-          <div class="stat-key">ROUNDS</div>
-          <div class="stat-val" id="stat-rounds">0</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-key">TOOL CALLS</div>
-          <div class="stat-val" id="stat-tools">0</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-key">CTX RESETS</div>
-          <div class="stat-val" id="stat-resets">0</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-key">MESSAGES</div>
-          <div class="stat-val" id="stat-msgs">0</div>
-        </div>
-        <div class="stat-box stat-full">
-          <div class="stat-key">CTX SIZE (chars)</div>
-          <div class="stat-val" id="stat-ctx">0</div>
-        </div>
-      </div>
-    </div>
-  </details>
-
-  <!-- CLEAR -->
-  <div class="sidebar-footer">
-    <button class="btn-clear" onclick="clearSession()" style="width:100%">Reset current conversation</button>
-  </div>
-</aside>
-
 <!-- MAIN CHAT -->
-<main id="chat">
+<main class="chat-container" id="chat">
   <div class="empty-state" id="empty">
     <div class="empty-logo">⬡</div>
-    <div class="empty-title">Ready to help</div>
-    <div class="empty-sub">
-      Search the web, work with files, use local models, and complete multi-step tasks from one workspace.
-    </div>
+    <div class="empty-title">What can I help you with?</div>
     <div class="empty-examples">
-      <button class="example-chip" onclick="useExample(this)">What's the current BRL/USD exchange rate?</button>
-      <button class="example-chip" onclick="useExample(this)">Calculate compound interest: $10k at 5.5% for 7 years</button>
-      <button class="example-chip" onclick="useExample(this)">Search for the latest Fed rate decision and summarize</button>
-      <button class="example-chip" onclick="useExample(this)">What's today's date and what day of the week is it?</button>
+      <button class="example-chip" onclick="useExample(this)">Search web for latest news</button>
+      <button class="example-chip" onclick="useExample(this)">Calculate interest on $10k savings</button>
+      <button class="example-chip" onclick="useExample(this)">Tell me today's date & time</button>
+      <button class="example-chip" onclick="useExample(this)">Help with file operations</button>
     </div>
   </div>
+  <div id="messages" class="messages-container"></div>
 </main>
 
-<!-- INPUT -->
+<!-- INPUT AREA -->
 <div class="input-area">
-  <div class="input-row">
-    <div class="input-wrap">
-      <textarea id="msg-input" rows="1" placeholder="Type a message… (Shift+Enter for newline)"
-                onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
-    </div>
-    <button class="btn-stop" id="btn-stop" onclick="requestStop()" title="Stop" disabled>■</button>
-    <button class="btn-send" id="btn-send" onclick="sendMessage()" title="Send">▶</button>
+  <div class="input-wrapper">
+    <textarea id="msg-input" 
+              placeholder="Ask me anything…"
+              rows="1"
+              onkeydown="handleKey(event)"
+              oninput="autoResize(this)"></textarea>
+    <button class="btn-send" id="btn-send" onclick="sendMessage()" title="Send Message">
+      <span class="send-icon">▶</span>
+    </button>
+    <button class="btn-stop" id="btn-stop" onclick="requestStop()" title="Stop" disabled style="display:none">
+      <span>■</span>
+    </button>
   </div>
-  <div class="input-meta">
-    <span class="input-hint"><kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> newline</span>
-    <span id="input-status" style="color:var(--text3)">enter gemini api key to start</span>
+  <div class="input-help">
+    <span><kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line</span>
   </div>
 </div>
+
+<!-- SETTINGS MODAL -->
+<div class="modal" id="settings-modal" style="display:none">
+  <div class="modal-overlay" onclick="closeSettings()"></div>
+  <div class="modal-content modal-lg">
+    <div class="modal-header">
+      <h2>Settings</h2>
+      <button class="modal-close" onclick="closeSettings()">✕</button>
+    </div>
+    
+    <div class="modal-body">
+      <!-- Cloud Model Section -->
+      <div class="settings-section">
+        <h3 class="settings-title">Cloud Model</h3>
+        <p class="settings-desc">Connect a hosted LLM for browser-based inference</p>
+        
+        <div class="settings-group">
+          <label class="settings-label">API Key</label>
+          <div class="settings-row">
+            <input class="settings-input" id="api-key" type="password" placeholder="Enter your API key" autocomplete="off" />
+            <button class="btn-primary btn-sm" onclick="saveKey()">Save</button>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <label class="settings-label">Model Provider & Version</label>
+          <select id="model-select" class="settings-select">
+            <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
+            <option value="gemini/gemini-2.5-pro">Gemini 2.5 Pro</option>
+            <option value="gemini/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+            <option value="openai/gpt-4.1">OpenAI GPT-4.1</option>
+            <option value="openai/gpt-4.1-mini">OpenAI GPT-4.1 Mini</option>
+            <option value="openai/o4-mini">OpenAI o4 Mini</option>
+            <option value="claude/claude-3-7-sonnet-latest">Claude 3.7 Sonnet</option>
+            <option value="claude/claude-3-5-haiku-latest">Claude 3.5 Haiku</option>
+            <option value="azure/gpt-4.1-mini">Azure GPT-4.1 Mini</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- Local Model Section -->
+      <div class="settings-section">
+        <h3 class="settings-title">Local Model</h3>
+        <p class="settings-desc">Use LM Studio or Ollama for private inference</p>
+        
+        <div class="settings-group">
+          <label class="settings-label">Local Server URL</label>
+          <div class="settings-row">
+            <input class="settings-input" id="local-url" type="text" placeholder="http://localhost:1234" value="http://localhost:1234" />
+            <button class="btn-primary btn-sm" onclick="probeLocal()">Probe</button>
+          </div>
+          <div class="settings-hint">LM Studio: 1234 · Ollama: 11434</div>
+        </div>
+
+        <div class="settings-group">
+          <label class="settings-checkbox">
+            <input type="checkbox" id="toggle-local" onchange="toggleLocalBackend()" />
+            <span>Use local model when available</span>
+          </label>
+        </div>
+
+        <div id="local-model-row" style="display:none">
+          <label class="settings-label">Local Model</label>
+          <select id="local-model-select" class="settings-select">
+            <option value="">— detect automatically —</option>
+          </select>
+        </div>
+
+        <div class="settings-status">
+          <span>Status: </span>
+          <span id="local-status-label" class="status-indicator">not probed</span>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- Runtime Settings -->
+      <div class="settings-section">
+        <h3 class="settings-title">Runtime</h3>
+        <p class="settings-desc">Control response depth and context usage</p>
+        
+        <div class="settings-group">
+          <label class="settings-label">
+            Planning Depth
+            <span class="settings-value" id="val-rounds">10</span>
+          </label>
+          <input class="settings-slider" type="range" id="sl-rounds" min="1" max="20" value="10"
+                 oninput="document.getElementById('val-rounds').textContent=this.value;updateBadge()">
+        </div>
+
+        <div class="settings-group">
+          <label class="settings-label">
+            Context Budget
+            <span class="settings-value" id="val-ctx">50</span>k chars
+          </label>
+          <input class="settings-slider" type="range" id="sl-ctx" min="10" max="200" value="50"
+                 oninput="document.getElementById('val-ctx').textContent=this.value;updateBadge()">
+        </div>
+
+        <div class="settings-group">
+          <label class="settings-label">
+            Response Pacing
+            <span class="settings-value" id="val-delay">500</span>ms
+          </label>
+          <input class="settings-slider" type="range" id="sl-delay" min="0" max="3000" step="100" value="500"
+                 oninput="document.getElementById('val-delay').textContent=this.value">
+        </div>
+
+        <div class="ctx-bar">
+          <div class="ctx-bar-label">
+            <span>Context Used</span>
+            <span id="ctx-pct">0%</span>
+          </div>
+          <div class="ctx-bar-track">
+            <div class="ctx-bar-fill" id="ctx-bar"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- File Access -->
+      <div class="settings-section">
+        <h3 class="settings-title">File Access</h3>
+        <p class="settings-desc">Authorize a folder for file operations</p>
+        
+        <button class="btn-primary" onclick="requestDirectoryAccess()" style="width:100%;margin-bottom:8px">Authorize Folder</button>
+        <div id="file-access-status" class="settings-status">No folder authorized</div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- Capabilities -->
+      <div class="settings-section">
+        <h3 class="settings-title">Capabilities</h3>
+        <div id="tool-groups" class="tool-groups"></div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- Activity Stats -->
+      <div class="settings-section">
+        <h3 class="settings-title">Session Activity</h3>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-label">Rounds</div>
+            <div class="stat-number" id="stat-rounds">0</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Tool Calls</div>
+            <div class="stat-number" id="stat-tools">0</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Messages</div>
+            <div class="stat-number" id="stat-msgs">0</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Context Resets</div>
+            <div class="stat-number" id="stat-resets">0</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeSettings()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- SCRIPTS -->
 <script src="src/core/regex.js" defer></script>
 <script src="src/core/prompt-loader.js" defer></script>
 <script src="src/skills/shared.js" defer></script>
@@ -266,5 +278,6 @@
 <script src="src/app/tools.js" defer></script>
 <script src="src/app/llm.js" defer></script>
 <script src="src/app/agent.js" defer></script>
+<script src="src/app/ui-modern.js" defer></script>
 </body>
 </html>

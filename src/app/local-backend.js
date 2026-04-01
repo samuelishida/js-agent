@@ -1,4 +1,4 @@
-﻿const LOCAL_CANDIDATES = [
+const LOCAL_CANDIDATES = [
   { port: 1234,  paths: ['/v1/models'], name: 'LM Studio', chatPath: '/v1/chat/completions' },
   { port: 11434, paths: ['/api/tags'],  name: 'Ollama',    chatPath: '/api/chat' },
   { port: 8080,  paths: ['/v1/models'], name: 'llama.cpp', chatPath: '/v1/chat/completions' },
@@ -10,6 +10,14 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
     fetch(url, options),
     new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs))
   ]);
+}
+
+function setLocalBadge(text, color = '', borderColor = '') {
+  const badge = document.getElementById('badge-local');
+  if (!badge) return;
+  badge.textContent = text;
+  if (color) badge.style.color = color;
+  if (borderColor) badge.style.borderColor = borderColor;
 }
 
 window.fetchWithTimeout = fetchWithTimeout;
@@ -79,9 +87,7 @@ async function probeLocal() {
 
   const manualUrl = document.getElementById('local-url').value.trim();
   setLocalStatus('busy', 'probing…');
-  document.getElementById('badge-local').textContent = 'local: probing…';
-  document.getElementById('badge-local').style.color = '';
-  document.getElementById('badge-local').style.borderColor = '';
+  setLocalBadge('local: probing…', '', '');
 
   // If user typed a custom URL, probe that first
   const targets = getProbeTargets(manualUrl);
@@ -121,9 +127,7 @@ async function probeLocal() {
 
           const label = `${target.name} @ ${baseUrl.replace('http://localhost:',':')}`;
           setLocalStatus('ok', label);
-          document.getElementById('badge-local').textContent = `local: ${target.name}`;
-          document.getElementById('badge-local').style.color = 'var(--green)';
-          document.getElementById('badge-local').style.borderColor = 'var(--green2)';
+          setLocalBadge(`local: ${target.name}`, 'var(--green)', 'var(--green2)');
           if (localStorage.getItem('agent_prefer_local_backend') !== 'false') {
             _activateLocal(true);
           }
@@ -152,14 +156,14 @@ async function probeLocal() {
         localStorage.setItem('agent_local_backend_name', localBackend.name);
 
         const sel = document.getElementById('local-model-select');
-        sel.innerHTML = `<option value="">CORS blocked - enable CORS in server</option>`;
-        document.getElementById('local-model-row').style.display = 'block';
-        document.getElementById('local-url').value = baseUrl;
+        if (sel) sel.innerHTML = `<option value="">CORS blocked - enable CORS in server</option>`;
+        const row = document.getElementById('local-model-row');
+        if (row) row.style.display = 'block';
+        const url = document.getElementById('local-url');
+        if (url) url.value = baseUrl;
 
         setLocalStatus('busy', `${target.name} reachable (CORS blocked)`);
-        document.getElementById('badge-local').textContent = 'local: CORS?';
-        document.getElementById('badge-local').style.color = 'var(--amber)';
-        document.getElementById('badge-local').style.borderColor = 'var(--amber2)';
+        setLocalBadge('local: CORS?', 'var(--amber)', 'var(--amber2)');
         return;
       }
     } catch {}
@@ -184,14 +188,14 @@ async function probeLocal() {
         localStorage.setItem('agent_local_backend_name', localBackend.name);
 
         const sel = document.getElementById('local-model-select');
-        sel.innerHTML = `<option value="">detected - probe model list</option>`;
-        document.getElementById('local-model-row').style.display = 'block';
-        document.getElementById('local-url').value = baseUrl;
+        if (sel) sel.innerHTML = `<option value="">detected - probe model list</option>`;
+        const row = document.getElementById('local-model-row');
+        if (row) row.style.display = 'block';
+        const url = document.getElementById('local-url');
+        if (url) url.value = baseUrl;
 
         setLocalStatus('ok', `${target.name} reachable`);
-        document.getElementById('badge-local').textContent = `local: ${target.name}`;
-        document.getElementById('badge-local').style.color = 'var(--green)';
-        document.getElementById('badge-local').style.borderColor = 'var(--green2)';
+        setLocalBadge(`local: ${target.name}`, 'var(--green)', 'var(--green2)');
         if (localStorage.getItem('agent_prefer_local_backend') !== 'false') {
           _activateLocal(true);
         }
@@ -213,16 +217,14 @@ async function probeLocal() {
   localStorage.removeItem('agent_local_backend_chat_path');
   localStorage.removeItem('agent_local_backend_name');
   setLocalStatus('error', 'nothing found on :1234 / :11434 / :8080');
-  document.getElementById('badge-local').textContent = 'local: offline';
-  document.getElementById('badge-local').style.color = 'var(--red)';
-  document.getElementById('badge-local').style.borderColor = '#993C1D';
+  setLocalBadge('local: offline', 'var(--red)', '#993C1D');
 }
 
 function setLocalStatus(state, label) {
   const dot = document.getElementById('local-dot');
+  if (dot) dot.className = `status-dot ${state}`;
   const lbl = document.getElementById('local-status-label');
-  dot.className = `status-dot ${state}`;
-  lbl.textContent = label;
+  if (lbl) lbl.textContent = label;
 }
 
 function toggleLocalBackend() {
@@ -252,12 +254,11 @@ function _activateLocal(isSilent=false) {
   }
 
   const tog = document.getElementById('toggle-local');
-  tog.classList.add('active');
-  document.getElementById('local-toggle-label').textContent = 'on';
-  document.getElementById('local-toggle-dot').style.background = 'var(--green)';
-  document.getElementById('local-toggle-dot').style.borderColor = 'var(--green)';
-  document.getElementById('badge-model').textContent = 'local/' + (localBackend.model || 'unknown');
-  document.getElementById('badge-model').style.color = 'var(--green)';
+  if (tog) { tog.checked = true; tog.classList.add('active'); }
+
+  const topbarModel = document.getElementById('topbar-model');
+  if (topbarModel) topbarModel.textContent = 'local/' + (localBackend.model || 'unknown');
+  
   if (!isSilent) addNotice('Local backend activated. Routing LLM calls to ' + localBackend.url);
 }
 
@@ -265,13 +266,11 @@ function _deactivateLocal() {
   localBackend.enabled = false;
   localStorage.setItem('agent_prefer_local_backend', 'false');
   const tog = document.getElementById('toggle-local');
-  tog.classList.remove('active');
-  document.getElementById('local-toggle-label').textContent = 'off';
-  document.getElementById('local-toggle-dot').style.background = '';
-  document.getElementById('local-toggle-dot').style.borderColor = '';
-  const m = document.getElementById('model-select').value;
-  document.getElementById('badge-model').textContent = m;
-  document.getElementById('badge-model').style.color = '';
+  if (tog) { tog.checked = false; tog.classList.remove('active'); }
+
+  const topbarModel = document.getElementById('topbar-model');
+  const m = document.getElementById('model-select');
+  if (topbarModel && m) topbarModel.textContent = m.value.split('/').pop() || m.value;
   addNotice('Local backend deactivated. Back to cloud model.');
 }
 

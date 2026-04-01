@@ -1,0 +1,212 @@
+/* SIDEBAR LAYOUT */
+.sidebar {
+  grid-area: sidebar;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  transition: transform 0.3s ease;
+}
+
+.sidebar-header {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-lg);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.sidebar-collapse-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-collapse-btn:hover {
+  color: var(--text-primary);
+}
+
+/* NEW CHAT BUTTON */
+.new-chat-btn-wrap {
+  padding: var(--spacing-md) var(--spacing-md);
+}
+
+.new-chat-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  background: var(--bg-button);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  padding: 10px;
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  font-size: 14px;
+  transition: all var(--transition-fast);
+}
+
+.new-chat-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--accent-primary);
+}
+
+.plus-icon {
+  font-size: 16px;
+  font-weight: bold;
+}
+
+/* DIVIDER */
+.sidebar-divider {
+  height: 1px;
+  background: var(--border-light);
+  margin: var(--spacing-xs) 0;
+}
+
+/* SECTIONS */
+.sidebar-section {
+  padding: var(--spacing-md);
+  min-height: 0;
+}
+
+.sidebar-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: var(--spacing-md);
+  padding: 0 var(--spacing-xs);
+}
+
+/* SESSIONS LIST */
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.session-item {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 8px var(--spacing-sm);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  position: relative;
+  min-width: 0;
+}
+.session-item .session-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.session-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-default);
+}
+
+.session-item.active {
+  background: var(--accent-light);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.session-item .delete-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  padding: 2px 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.session-item:hover .delete-btn {
+  opacity: 1;
+}
+
+.session-item .delete-btn:hover {
+  color: var(--red);
+}
+
+.session-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: var(--spacing-md) var(--spacing-sm);
+  text-align: center;
+}
+
+/* SPACER */
+.sidebar-spacer {
+  flex: 1;
+  min-height: 0;
+}
+
+/* FOOTER */
+.sidebar-footer {
+  padding: var(--spacing-lg) var(--spacing-md) var(--spacing-md);
+  border-top: 1px solid var(--border-light);
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.sidebar-btn-sm {
+  width: 36px;
+  height: 36px;
+  background: var(--bg-button);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.sidebar-btn-sm:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+/* Mobile Sidebar Toggle */
+.sidebar-open-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 18px;
+  padding: 0 8px;
+  cursor: pointer;
+  margin-right: 8px;
+}
+
+.sidebar-open-btn:hover {
+  color: var(--accent-primary);
+}

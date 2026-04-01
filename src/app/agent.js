@@ -17,13 +17,17 @@ function setStopButtonState(running) {
   const stopBtn = document.getElementById('btn-stop');
   if (!stopBtn) return;
   stopBtn.disabled = !running;
+  stopBtn.style.display = running ? 'flex' : 'none';
+  const sendBtn = document.getElementById('btn-send');
+  if (sendBtn) sendBtn.style.display = running ? 'none' : 'flex';
 }
 
 function requestStop() {
   if (!isBusy) return;
   stopRequested = true;
   setStatus('busy', 'stopping…');
-  document.getElementById('input-status').textContent = 'stopping…';
+  const inputStatus = document.getElementById('input-status');
+  if (inputStatus) inputStatus.textContent = 'stopping…';
   window.AgentLLMControl?.abortActiveLlmRequest?.();
   // Abort any pending tab_listen Promises so they reject immediately.
   window.AgentSkills?.abortAllTabListeners?.('Run stopped by user.');
@@ -308,11 +312,14 @@ function updateCtxBar() {
   const pct = Math.min(100, (size / limit) * 100);
   const bar = document.getElementById('ctx-bar');
   const label = document.getElementById('ctx-pct');
-  bar.style.width = pct + '%';
-  bar.classList.toggle('warn', pct > 60 && pct <= 85);
-  bar.classList.toggle('danger', pct > 85);
-  label.textContent = pct.toFixed(1) + '%';
-  document.getElementById('stat-ctx').textContent = size.toLocaleString();
+  if (bar) {
+    bar.style.width = pct + '%';
+    bar.classList.toggle('warn', pct > 60 && pct <= 85);
+    bar.classList.toggle('danger', pct > 85);
+  }
+  if (label) label.textContent = pct.toFixed(1) + '%';
+  const statCtx = document.getElementById('stat-ctx');
+  if (statCtx) statCtx.textContent = size.toLocaleString();
 }
 
 function notifyIfHidden(summary) {
@@ -618,7 +625,8 @@ function showThinking(label) {
       <div class="dot"></div><div class="dot"></div><div class="dot"></div>
     </div>
     <span class="thinking-label">${label}</span>`;
-  document.getElementById('chat').appendChild(el);
+  const container = document.getElementById('messages') || document.getElementById('chat');
+  container.appendChild(el);
   scrollBottom();
 }
 
@@ -631,44 +639,55 @@ function addMessage(role, content, round, isCall=false, isResult=false, hiddenTh
   document.getElementById('empty')?.remove();
 
   const wrap = document.createElement('div');
-  wrap.className = 'msg';
 
-  const roleLabels = { user:'USER', agent:'AGENT', tool:'TOOL', system:'SYSTEM', error:'ERROR' };
-  const roleCls    = { user:'role-user', agent:'role-agent', tool:'role-tool', system:'role-system', error:'role-error' };
-
-  wrap.innerHTML = `
-    <div class="msg-header">
-      <span class="msg-role ${roleCls[role]}">${roleLabels[role]}</span>
-      ${round ? `<span class="msg-round">R${round}</span>` : ''}
-      ${isCall   ? `<span class="msg-round" style="color:var(--green)">call</span>` : ''}
-      ${isResult ? `<span class="msg-round" style="color:var(--green)">result</span>` : ''}
-    </div>`;
-
-  const body = document.createElement('div');
-  body.className = `msg-body ${role==='tool'?'dim':''} ${role==='agent'?'html-body':''}`.trim();
-  if (role === 'agent') {
-    body.innerHTML = renderAgentHtml(content);
+  if (role === 'user') {
+    wrap.className = 'msg user';
+    const bubble = document.createElement('div');
+    bubble.className = 'msg-content';
+    bubble.textContent = String(content || '');
+    wrap.appendChild(bubble);
+  } else if (role === 'agent') {
+    wrap.className = 'msg assistant';
+    const bubble = document.createElement('div');
+    bubble.className = 'msg-content html-body';
+    bubble.innerHTML = renderAgentHtml(content);
+    wrap.appendChild(bubble);
+    if (hiddenThinking.length) {
+      const details = document.createElement('details');
+      details.className = 'thinking-details';
+      const summary = document.createElement('summary');
+      summary.textContent = `Thinking (${hiddenThinking.length})`;
+      details.appendChild(summary);
+      const pre = document.createElement('pre');
+      pre.className = 'thinking-pre';
+      pre.textContent = hiddenThinking.join('\n\n---\n\n');
+      details.appendChild(pre);
+      wrap.appendChild(details);
+    }
   } else {
-    body.textContent = String(content || '');
+    // tool, error, system — monospace pill style
+    const cssRole = role === 'error' ? 'msg-error' : role === 'tool' ? 'msg-tool' : 'msg-system';
+    wrap.className = `msg assistant ${cssRole}`;
+    const bubble = document.createElement('div');
+    bubble.className = 'msg-content msg-content-mono';
+    const meta = [];
+    if (round) meta.push(`R${round}`);
+    if (isCall) meta.push('call');
+    if (isResult) meta.push('result');
+    if (meta.length) {
+      const badge = document.createElement('span');
+      badge.className = 'msg-meta-badge';
+      badge.textContent = meta.join(' · ');
+      bubble.appendChild(badge);
+    }
+    const text = document.createElement('span');
+    text.textContent = String(content || '');
+    bubble.appendChild(text);
+    wrap.appendChild(bubble);
   }
-  wrap.appendChild(body);
 
-  if (role === 'agent' && hiddenThinking.length) {
-    const details = document.createElement('details');
-    details.className = 'thinking-details';
-
-    const summary = document.createElement('summary');
-    summary.textContent = `Hidden thinking (${hiddenThinking.length})`;
-    details.appendChild(summary);
-
-    const pre = document.createElement('pre');
-    pre.className = 'thinking-pre';
-    pre.textContent = hiddenThinking.join('\n\n---\n\n');
-    details.appendChild(pre);
-    wrap.appendChild(details);
-  }
-
-  document.getElementById('chat').appendChild(wrap);
+  const container = document.getElementById('messages') || document.getElementById('chat');
+  container.appendChild(wrap);
   scrollBottom();
 }
 
@@ -676,25 +695,37 @@ function addNotice(text) {
   const el = document.createElement('div');
   el.className = 'ctx-notice';
   el.textContent = text;
-  document.getElementById('chat').appendChild(el);
+  const container = document.getElementById('messages') || document.getElementById('chat');
+  container.appendChild(el);
   scrollBottom();
 }
 
 function setStatus(state, label) {
+  // topbar inline status
+  const topbarStatus = document.getElementById('topbar-status');
+  if (topbarStatus) topbarStatus.textContent = label;
+  // topbar badge
   const badge = document.getElementById('badge-status');
-  badge.innerHTML = `<span class="status-dot ${state}"></span>&nbsp;${label}`;
+  if (badge) badge.textContent = label;
+  // legacy badge-status-dot (no-op if gone)
+  const dot = document.getElementById('badge-status-dot');
+  if (dot) dot.innerHTML = `<span class="status-dot ${state}"></span>&nbsp;${label}`;
 }
 
 function updateStats() {
-  document.getElementById('stat-rounds').textContent = sessionStats.rounds;
-  document.getElementById('stat-tools').textContent  = sessionStats.tools;
-  document.getElementById('stat-resets').textContent = sessionStats.resets;
-  document.getElementById('stat-msgs').textContent   = sessionStats.msgs;
+  const rounds = document.getElementById('stat-rounds');
+  if (rounds) rounds.textContent = sessionStats.rounds;
+  const tools = document.getElementById('stat-tools');
+  if (tools) tools.textContent = sessionStats.tools;
+  const resets = document.getElementById('stat-resets');
+  if (resets) resets.textContent = sessionStats.resets;
+  const msgs = document.getElementById('stat-msgs');
+  if (msgs) msgs.textContent = sessionStats.msgs;
 }
 
 function scrollBottom() {
   const chat = document.getElementById('chat');
-  chat.scrollTop = chat.scrollHeight;
+  if (chat) chat.scrollTop = chat.scrollHeight;
 }
 
 function escHtml(s) {
@@ -725,9 +756,11 @@ async function sendMessage() {
   stopRequested = false;
   resetRunGuards();
   broadcastBusyState(true);
-  document.getElementById('btn-send').disabled = true;
+  const sendBtn = document.getElementById('btn-send');
+  if (sendBtn) sendBtn.disabled = true;
   setStopButtonState(true);
-  document.getElementById('input-status').textContent = 'processing…';
+  const inputStatus = document.getElementById('input-status');
+  if (inputStatus) inputStatus.textContent = 'processing…';
 
   addMessage('user', text, null);
   if (!getActiveSession() || !getActiveSession().messages.length) {
@@ -753,9 +786,11 @@ async function sendMessage() {
 
   isBusy = false;
   broadcastBusyState(false);
-  document.getElementById('btn-send').disabled = false;
+  const sendBtn2 = document.getElementById('btn-send');
+  if (sendBtn2) sendBtn2.disabled = false;
   setStopButtonState(false);
-  document.getElementById('input-status').textContent = `${sessionStats.msgs} message${sessionStats.msgs!==1?'s':''} sent`;
+  const inputStatus2 = document.getElementById('input-status');
+  if (inputStatus2) inputStatus2.textContent = `${sessionStats.msgs} message${sessionStats.msgs!==1?'s':''} sent`;
   input.focus();
 }
 

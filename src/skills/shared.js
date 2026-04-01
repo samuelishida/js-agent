@@ -807,23 +807,25 @@
     const originalQuery = String(query || '').trim();
     
     // LLM preflight: Attempt query clarification with very short timeout
-    // If it takes more than 300ms, we skip it and search immediately with original query
+    // Only if local backend is enabled, to avoid unnecessary cloud calls
     let searchQuery = originalQuery;
     
-    if (originalQuery.length > 10) {  // Only try for longer queries
+    if (originalQuery.length > 10 && window.localBackend?.enabled && window.localBackend?.url) {
       try {
         const clarifyPromise = (async () => {
-          const response = await window.AgentSkills?.runTool?.('llm', {
-            messages: [
+          const response = await window.callLLM?.(
+            [
               {
                 role: 'user',
                 content: `Optimize this search query. Make it shorter, clearer. Respond with ONLY the improved query:\n\n"${originalQuery}"`
               }
             ],
-            model: 'auto',
-            maxTokens: 30,
-            temperature: 0.2
-          });
+            {
+              maxTokens: 30,
+              temperature: 0.2,
+              timeoutMs: 300
+            }
+          );
           
           const clarified = response?.text?.trim() || originalQuery;
           return (clarified && clarified.length > 2) ? clarified : originalQuery;

@@ -240,7 +240,73 @@
       .trim();
   }
 
+  /** Check if request will trigger CORS preflight (OPTIONS request) */
+  function willTriggerPreflight(init = {}) {
+    // Preflight is triggered by:
+    // 1. Custom headers (except simple headers)
+    // 2. Non-simple methods (anything other than GET, HEAD, POST)
+    // 3. Content-Type other than application/x-www-form-urlencoded, multipart/form-data, text/plain
+
+    const method = (init.method || 'GET').toUpperCase();
+    const isSimpleMethod = ['GET', 'HEAD', 'POST'].includes(method);
+    
+    if (!isSimpleMethod) return true;
+
+    const headers = init.headers || {};
+    const simpleHeaders = ['accept', 'accept-language', 'content-language', 'content-type'];
+    
+    for (const header of Object.keys(headers)) {
+      const lower = header.toLowerCase();
+      if (!simpleHeaders.includes(lower)) return true;
+    }
+
+    const contentType = headers['Content-Type'] || headers['content-type'] || '';
+    if (contentType && ![
+      'application/x-www-form-urlencoded',
+      'multipart/form-data',
+      'text/plain'
+    ].includes(contentType)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /** Create preflight-safe headers for simple requests */
+  function makePreflightSafeHeaders(headers = {}) {
+    // Remove custom headers that trigger preflight
+    // Keep only simple headers
+    const safe = {};
+    const simpleHeaders = ['accept', 'accept-language', 'content-language', 'content-type'];
+    
+    for (const [key, value] of Object.entries(headers)) {
+      if (simpleHeaders.includes(key.toLowerCase())) {
+        safe[key] = value;
+      }
+    }
+    
+    return safe;
+  }
+
   async function fetchJsonWithTimeout(url, timeoutMs = 6000, init = {}) {
+    // Try without preflight-triggering headers first
+    let headers = init.headers || {};
+    let hasCustomHeaders = willTriggerPreflight(init);
+    
+    if (hasCustomHeaders) {
+      // First attempt: Use preflight-safe headers
+      const safeHeaders = makePreflightSafeHeaders(headers);
+      console.debug(`Preflight detected: Retrying with safe headers`);
+      try {
+        const res = await window.fetchWithTimeout(url, { cache: 'no-store', ...init, headers: safeHeaders }, timeoutMs);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      } catch (e) {
+        console.debug(`Safe headers attempt failed: ${e.message}, retrying with original headers`);
+      }
+    }
+
+    // Fallback: Use original headers
     const res = await window.fetchWithTimeout(url, { cache: 'no-store', ...init }, timeoutMs);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
@@ -670,11 +736,21 @@
         Accept: 'application/vnd.github+json'
       };
       
-      if (githubToken) {
+      // Authorization header triggers CORS preflight
+      // Try with token first, fallback to no token if preflight fails
+      const hasToken = !!githubToken;
+      if (hasToken) {
         headers['Authorization'] = `token ${githubToken}`;
       }
 
       let res = await window.fetchWithTimeout(url, { cache: 'no-store', headers }, 8000);
+      
+      // If preflight might have failed (0 status or timeout type error), retry without auth header
+      if (hasToken && (!res.ok || res.status === 0)) {
+        console.debug('GitHub with token failed, retrying without auth header');
+        headers = { Accept: 'application/vnd.github+json' };
+        res = await window.fetchWithTimeout(url, { cache: 'no-store', headers }, 8000);
+      }
       
       // Handle authentication/rate limit errors gracefully
       if (res.status === 401 || res.status === 403) {

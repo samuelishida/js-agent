@@ -842,6 +842,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initCacheSync();
   initBusySync();
   updateFileAccessStatus();
+  loadGithubTokenStatus();
   if (!chatSessions.length) createSession();
   if (!getActiveSession()) activeSessionId = chatSessions[0]?.id || createSession().id;
   renderSessionList();

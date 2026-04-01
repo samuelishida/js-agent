@@ -524,29 +524,54 @@
     const terms = String(query || '').replace(/[+]/g, ' ').trim();
     if (!terms) return null;
 
-    const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(`${terms} in:name,description,readme`)}&sort=stars&order=desc&per_page=6`;
-    const data = await fetchJsonWithTimeout(url, 8000, {
-      headers: {
+    try {
+      // Try to get GitHub token from config for higher rate limits
+      const githubToken = window.localStorage?.getItem?.('github_token') || '';
+      
+      const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(`${terms} in:name,description,readme`)}&sort=stars&order=desc&per_page=6`;
+      const headers = {
         Accept: 'application/vnd.github+json'
+      };
+      
+      // Add token auth if available (requires public_repo scope)
+      if (githubToken) {
+        headers['Authorization'] = `token ${githubToken}`;
       }
-    });
 
-    const repos = Array.isArray(data?.items) ? data.items.slice(0, 6) : [];
-    if (!repos.length) return null;
+      const res = await window.fetchWithTimeout(url, { cache: 'no-store', headers }, 8000);
+      
+      // Handle authentication/rate limit errors gracefully
+      if (res.status === 401 || res.status === 403) {
+        console.debug('GitHub API auth/rate limit: ', res.status, '- skipping');
+        return null;
+      }
+      
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
 
-    const entries = repos.map((repo, index) => {
-      const title = normalizeSearchSnippet(repo.full_name || repo.name || 'Unknown repository');
-      const snippet = [
-        normalizeSearchSnippet(repo.description || ''),
-        `Stars: ${Number(repo.stargazers_count || 0).toLocaleString('en-US')}`,
-        repo.language ? `Language: ${repo.language}` : '',
-        repo.updated_at ? `Updated: ${new Date(repo.updated_at).toISOString().slice(0, 10)}` : ''
-      ].filter(Boolean).join(' | ');
+      const data = await res.json();
+      const repos = Array.isArray(data?.items) ? data.items.slice(0, 6) : [];
+      if (!repos.length) return null;
 
-      return formatSearchEntry(index + 1, title, snippet || 'No description available.', repo.html_url || '', 'github');
-    });
+      const entries = repos.map((repo, index) => {
+        const title = normalizeSearchSnippet(repo.full_name || repo.name || 'Unknown repository');
+        const snippet = [
+          normalizeSearchSnippet(repo.description || ''),
+          `Stars: ${Number(repo.stargazers_count || 0).toLocaleString('en-US')}`,
+          repo.language ? `Language: ${repo.language}` : '',
+          repo.updated_at ? `Updated: ${new Date(repo.updated_at).toISOString().slice(0, 10)}` : ''
+        ].filter(Boolean).join(' | ');
 
-    return formatToolResult('GitHub repositories', entries.join('\n\n'));
+        return formatSearchEntry(index + 1, title, snippet || 'No description available.', repo.html_url || '', 'github');
+      });
+
+      return formatToolResult('GitHub repositories', entries.join('\n\n'));
+    } catch (error) {
+      console.debug('GitHub search error:', error.message);
+      // Return null to let other providers try
+      return null;
+    }
   }
 
   async function runSearchSkills(query) {
@@ -774,15 +799,27 @@
       throw new Error('Invalid URL. Use a full http:// or https:// address.');
     }
 
-    const res = await window.fetchWithTimeout(normalizedUrl, { method, cache: 'no-store' }, 10000);
-    const contentType = res.headers.get('content-type') || 'unknown';
-    const raw = await res.text();
-    const body = contentType.includes('html') ? stripHtmlToText(raw).slice(0, 8000) : raw.slice(0, 8000);
+    try {
+      const res = await window.fetchWithTimeout(normalizedUrl, { method, cache: 'no-store' }, 10000);
+      const contentType = res.headers.get('content-type') || 'unknown';
+      
+      // If not OK status, still try to get body for debugging
+      let raw = '';
+      try {
+        raw = await res.text();
+      } catch {
+        raw = `[Unable to read response body - Status: ${res.status}]`;
+      }
+      
+      const body = contentType.includes('html') ? stripHtmlToText(raw).slice(0, 8000) : raw.slice(0, 8000);
 
-    return formatToolResult(
-      'http_fetch',
-      `URL: ${normalizedUrl}\nStatus: ${res.status}\nContent-Type: ${contentType}\n\n${body}`
-    );
+      return formatToolResult(
+        'http_fetch',
+        `URL: ${normalizedUrl}\nStatus: ${res.status}\nContent-Type: ${contentType}\n\n${body}`
+      );
+    } catch (error) {
+      throw new Error(`Failed to fetch ${normalizedUrl}: ${error.message || 'Network error'}`);
+    }
   }
 
   async function extractLinks({ url, text = '' }) {

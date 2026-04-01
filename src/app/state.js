@@ -244,6 +244,46 @@ function saveKey() {
   maybeRequestNotifPermission();
 }
 
+function saveGithubToken() {
+  const token = document.getElementById('github-token').value.trim();
+  if (token) {
+    localStorage.setItem('github_token', token);
+    const status = document.getElementById('github-token-status');
+    if (status) {
+      status.textContent = 'Token set (5000 req/hr limit)';
+      status.style.color = 'var(--green)';
+    }
+    addNotice('GitHub token saved. Search quota increased to 5000 requests/hour.');
+  } else {
+    localStorage.removeItem('github_token');
+    const status = document.getElementById('github-token-status');
+    if (status) {
+      status.textContent = 'No token set (60 req/hr limit)';
+      status.style.color = 'var(--text-tertiary)';
+    }
+  }
+}
+
+function loadGithubTokenStatus() {
+  const token = localStorage.getItem('github_token');
+  const input = document.getElementById('github-token');
+  const status = document.getElementById('github-token-status');
+  
+  if (input && token) {
+    input.value = token.substring(0, 10) + '...' + token.substring(token.length - 4);
+  }
+  
+  if (status) {
+    if (token) {
+      status.textContent = 'Token set (5000 req/hr limit)';
+      status.style.color = 'var(--green)';
+    } else {
+      status.textContent = 'No token set (60 req/hr limit)';
+      status.style.color = 'var(--text-tertiary)';
+    }
+  }
+}
+
 function loadToolCache() {
   try {
     return JSON.parse(localStorage.getItem(TOOL_CACHE_KEY) || '{}');

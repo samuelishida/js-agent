@@ -225,6 +225,26 @@
 
       <div class="settings-divider"></div>
 
+      <!-- Web Search Settings -->
+      <div class="settings-section">
+        <h3 class="settings-title">Web Search</h3>
+        <p class="settings-desc">Optional GitHub token for higher API rate limits</p>
+        
+        <div class="settings-group">
+          <label class="settings-label">GitHub Token (Optional)</label>
+          <div class="settings-row">
+            <input class="settings-input" id="github-token" type="password" placeholder="ghp_... (Personal Access Token)" autocomplete="off" />
+            <button class="btn-primary btn-sm" onclick="saveGithubToken()">Save</button>
+          </div>
+          <div class="settings-hint">Create token at github.com/settings/tokens with public_repo scope</div>
+        </div>
+        <div class="settings-status">
+          <span id="github-token-status">No token set (60 req/hr limit)</span>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
       <!-- Capabilities -->
       <div class="settings-section">
         <h3 class="settings-title">Capabilities</h3>

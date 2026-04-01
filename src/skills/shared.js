@@ -340,35 +340,41 @@
 
     for (const domain of domains) {
       for (const variant of variants) {
-        const url = `https://${domain}/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(variant)}&srlimit=3&utf8=1&format=json&origin=*`;
-        const data = await fetchJsonWithTimeout(url, 6000);
-        const hits = Array.isArray(data?.query?.search) ? data.query.search : [];
+        try {
+          await retryWithBackoff(async () => {
+            const url = `https://${domain}/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(variant)}&srlimit=3&utf8=1&format=json&origin=*`;
+            const data = await fetchJsonWithTimeout(url, 6000);
+            const hits = Array.isArray(data?.query?.search) ? data.query.search : [];
 
-        for (const hit of hits) {
-          if (entries.length >= 6) break;
-          const title = String(hit.title || '').trim();
-          const key = `${domain}:${title.toLowerCase()}`;
-          if (!title || seen.has(key)) continue;
-          seen.add(key);
+            for (const hit of hits) {
+              if (entries.length >= 6) break;
+              const title = String(hit.title || '').trim();
+              const key = `${domain}:${title.toLowerCase()}`;
+              if (!title || seen.has(key)) continue;
+              seen.add(key);
 
-          let summary = null;
-          try {
-            summary = await fetchWikipediaSummary(domain, title);
-          } catch {}
+              let summary = null;
+              try {
+                summary = await fetchWikipediaSummary(domain, title);
+              } catch {}
 
-          const snippet = [
-            summary?.description,
-            summary?.extract,
-            normalizeSearchSnippet(hit.snippet || '')
-          ].filter(Boolean).join(' - ');
+              const snippet = [
+                summary?.description,
+                summary?.extract,
+                normalizeSearchSnippet(hit.snippet || '')
+              ].filter(Boolean).join(' - ');
 
-          entries.push(formatSearchEntry(
-            entries.length + 1,
-            summary?.title || title,
-            snippet || 'No description available.',
-            summary?.url || `https://${domain}/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`,
-            domain
-          ));
+              entries.push(formatSearchEntry(
+                entries.length + 1,
+                summary?.title || title,
+                snippet || 'No description available.',
+                summary?.url || `https://${domain}/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`,
+                domain
+              ));
+            }
+          }, 2, 150);
+        } catch (error) {
+          console.debug(`Wikipedia search on ${domain} failed:`, error.message);
         }
 
         if (entries.length >= 6) break;
@@ -387,29 +393,35 @@
 
     for (const language of ['pt', 'en']) {
       for (const variant of variants) {
-        const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(variant)}&language=${language}&limit=5&format=json&origin=*`;
-        const data = await fetchJsonWithTimeout(url, 6000);
-        const hits = Array.isArray(data?.search) ? data.search : [];
+        try {
+          await retryWithBackoff(async () => {
+            const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(variant)}&language=${language}&limit=5&format=json&origin=*`;
+            const data = await fetchJsonWithTimeout(url, 6000);
+            const hits = Array.isArray(data?.search) ? data.search : [];
 
-        for (const hit of hits) {
-          if (entries.length >= 6) break;
-          const id = String(hit.id || '').trim();
-          if (!id || seen.has(id)) continue;
-          seen.add(id);
+            for (const hit of hits) {
+              if (entries.length >= 6) break;
+              const id = String(hit.id || '').trim();
+              if (!id || seen.has(id)) continue;
+              seen.add(id);
 
-          const title = String(hit.label || id).trim();
-          const snippet = [
-            normalizeSearchSnippet(hit.description || ''),
-            normalizeSearchSnippet(hit.match?.text || '')
-          ].filter(Boolean).join(' - ');
+              const title = String(hit.label || id).trim();
+              const snippet = [
+                normalizeSearchSnippet(hit.description || ''),
+                normalizeSearchSnippet(hit.match?.text || '')
+              ].filter(Boolean).join(' - ');
 
-          entries.push(formatSearchEntry(
-            entries.length + 1,
-            title,
-            snippet || 'No description available.',
-            `https://www.wikidata.org/wiki/${encodeURIComponent(id)}`,
-            `wikidata:${language}`
-          ));
+              entries.push(formatSearchEntry(
+                entries.length + 1,
+                title,
+                snippet || 'No description available.',
+                `https://www.wikidata.org/wiki/${encodeURIComponent(id)}`,
+                `wikidata:${language}`
+              ));
+            }
+          }, 2, 150);
+        } catch (error) {
+          console.debug(`Wikidata search in ${language} failed:`, error.message);
         }
 
         if (entries.length >= 6) break;
@@ -427,57 +439,65 @@
     const entries = [];
 
     for (const variant of variants) {
-      const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(variant)}&format=json&no_html=1&no_redirect=1&skip_disambig=1`;
-      const data = await fetchJsonWithTimeout(url, 6000);
+      try {
+        await retryWithBackoff(async () => {
+          const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(variant)}&format=json&no_html=1&no_redirect=1&skip_disambig=1`;
+          const data = await fetchJsonWithTimeout(url, 8000);
 
-      if (data.AbstractText) {
-        const key = String(data.AbstractURL || data.Heading || variant).toLowerCase();
-        if (!seen.has(key)) {
-          seen.add(key);
-          entries.push(formatSearchEntry(
-            entries.length + 1,
-            data.Heading || variant,
-            normalizeSearchSnippet(data.AbstractText),
-            data.AbstractURL || '',
-            'duckduckgo'
-          ));
-        }
-      }
-
-      for (const topic of Array.isArray(data.RelatedTopics) ? data.RelatedTopics : []) {
-        if (entries.length >= 6) break;
-
-        if (topic.Text && topic.FirstURL) {
-          const key = String(topic.FirstURL).toLowerCase();
-          if (seen.has(key)) continue;
-          seen.add(key);
-          entries.push(formatSearchEntry(
-            entries.length + 1,
-            normalizeSearchSnippet(topic.Text).split(' - ')[0] || topic.FirstURL,
-            normalizeSearchSnippet(topic.Text),
-            topic.FirstURL,
-            'duckduckgo'
-          ));
-          continue;
-        }
-
-        if (Array.isArray(topic.Topics)) {
-          for (const nested of topic.Topics) {
-            if (entries.length >= 6) break;
-            if (!nested.Text || !nested.FirstURL) continue;
-            const key = String(nested.FirstURL).toLowerCase();
-            if (seen.has(key)) continue;
-            seen.add(key);
-            entries.push(formatSearchEntry(
-              entries.length + 1,
-              normalizeSearchSnippet(nested.Text).split(' - ')[0] || nested.FirstURL,
-              normalizeSearchSnippet(nested.Text),
-              nested.FirstURL,
-              'duckduckgo'
-            ));
+          if (data.AbstractText) {
+            const key = String(data.AbstractURL || data.Heading || variant).toLowerCase();
+            if (!seen.has(key)) {
+              seen.add(key);
+              entries.push(formatSearchEntry(
+                entries.length + 1,
+                data.Heading || variant,
+                normalizeSearchSnippet(data.AbstractText),
+                data.AbstractURL || '',
+                'duckduckgo'
+              ));
+            }
           }
-        }
+
+          for (const topic of Array.isArray(data.RelatedTopics) ? data.RelatedTopics : []) {
+            if (entries.length >= 6) break;
+
+            if (topic.Text && topic.FirstURL) {
+              const key = String(topic.FirstURL).toLowerCase();
+              if (seen.has(key)) continue;
+              seen.add(key);
+              entries.push(formatSearchEntry(
+                entries.length + 1,
+                normalizeSearchSnippet(topic.Text).split(' - ')[0] || topic.FirstURL,
+                normalizeSearchSnippet(topic.Text),
+                topic.FirstURL,
+                'duckduckgo'
+              ));
+              continue;
+            }
+
+            if (Array.isArray(topic.Topics)) {
+              for (const nested of topic.Topics) {
+                if (entries.length >= 6) break;
+                if (!nested.Text || !nested.FirstURL) continue;
+                const key = String(nested.FirstURL).toLowerCase();
+                if (seen.has(key)) continue;
+                seen.add(key);
+                entries.push(formatSearchEntry(
+                  entries.length + 1,
+                  normalizeSearchSnippet(nested.Text).split(' - ')[0] || nested.FirstURL,
+                  normalizeSearchSnippet(nested.Text),
+                  nested.FirstURL,
+                  'duckduckgo'
+                ));
+              }
+            }
+          }
+        }, 2, 200);
+      } catch (error) {
+        console.debug(`DuckDuckGo search for "${variant}" failed:`, error.message);
       }
+
+      if (entries.length >= 6) break;
     }
 
     return entries.length ? formatToolResult('DuckDuckGo search', entries.join('\n\n')) : null;
@@ -487,26 +507,33 @@
     const terms = String(query || '').trim();
     if (!terms) return null;
 
-    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(terms)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`;
-    const res = await window.fetchWithTimeout(url, { cache: 'no-store' }, 8000);
-    if (!res.ok) throw new Error(`Google News RSS HTTP ${res.status}`);
+    try {
+      return await retryWithBackoff(async () => {
+        const url = `https://news.google.com/rss/search?q=${encodeURIComponent(terms)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`;
+        const res = await window.fetchWithTimeout(url, { cache: 'no-store' }, 8000);
+        if (!res.ok) throw new Error(`Google News RSS HTTP ${res.status}`);
 
-    const xml = await res.text();
-    const doc = new DOMParser().parseFromString(xml, 'text/xml');
-    const items = [...doc.querySelectorAll('item')].slice(0, 6);
-    if (!items.length) return null;
+        const xml = await res.text();
+        const doc = new DOMParser().parseFromString(xml, 'text/xml');
+        const items = [...doc.querySelectorAll('item')].slice(0, 6);
+        if (!items.length) return null;
 
-    const entries = items.map((item, index) => {
-      const title = normalizeSearchSnippet(item.querySelector('title')?.textContent || 'Untitled');
-      const link = normalizeSearchSnippet(item.querySelector('link')?.textContent || '');
-      const pubDate = normalizeSearchSnippet(item.querySelector('pubDate')?.textContent || '');
-      const source = normalizeSearchSnippet(item.querySelector('source')?.textContent || 'Google News');
+        const entries = items.map((item, index) => {
+          const title = normalizeSearchSnippet(item.querySelector('title')?.textContent || 'Untitled');
+          const link = normalizeSearchSnippet(item.querySelector('link')?.textContent || '');
+          const pubDate = normalizeSearchSnippet(item.querySelector('pubDate')?.textContent || '');
+          const source = normalizeSearchSnippet(item.querySelector('source')?.textContent || 'Google News');
 
-      const snippet = pubDate ? `Published: ${pubDate}` : 'Published date unavailable';
-      return formatSearchEntry(index + 1, title, snippet, link, source);
-    });
+          const snippet = pubDate ? `Published: ${pubDate}` : 'Published date unavailable';
+          return formatSearchEntry(index + 1, title, snippet, link, source);
+        });
 
-    return formatToolResult('Google News RSS', entries.join('\n\n'));
+        return formatToolResult('Google News RSS', entries.join('\n\n'));
+      }, 2, 150);
+    } catch (error) {
+      console.debug('Google News search failed:', error.message);
+      return null;
+    }
   }
 
   function hasMeaningfulToolBody(result) {
@@ -518,6 +545,22 @@
 
     const contentLines = lines.filter(line => line && !line.startsWith('## '));
     return contentLines.length > 0;
+  }
+
+  async function retryWithBackoff(fn, maxAttempts = 3, baseDelayMs = 100) {
+    let lastError;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxAttempts - 1) {
+          const delayMs = baseDelayMs * Math.pow(2, attempt) + Math.random() * 100;
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+    throw lastError;
   }
 
   async function searchGithubRepositories(query) {
@@ -604,7 +647,33 @@
     }
 
     if (!results.length) {
-      throw new Error(`No search providers returned usable results. Diagnostics: ${diagnostics.join('; ')}`);
+      // FALLBACK: No providers returned results, provide helpful guidance
+      const summaryLines = [
+        `⚠️ Search Unavailable - All Providers Failed`,
+        `Query: "${query}"`,
+        ``,
+        `Status: Network connectivity issues preventing search results.`,
+        ``,
+        `Search Infrastructure Status:`,
+        `  • google_news: ${diagnostics.find(d => d.includes('google_news'))?.match(/: (.+)$/)?.[1] || 'unknown'}`,
+        `  • wikipedia: ${diagnostics.find(d => d.includes('wikipedia'))?.match(/: (.+)$/)?.[1] || 'unknown'}`,
+        `  • wikidata: ${diagnostics.find(d => d.includes('wikidata'))?.match(/: (.+)$/)?.[1] || 'unknown'}`,
+        `  • duckduckgo: ${diagnostics.find(d => d.includes('duckduckgo'))?.match(/: (.+)$/)?.[1] || 'unknown'}`,
+        `  • github: ${diagnostics.find(d => d.includes('github'))?.match(/: (.+)$/)?.[1] || 'unknown'}`,
+        ``,
+        `Troubleshooting:`,
+        `1. Check internet connectivity`,
+        `2. Try a simpler, more specific query`,
+        `3. Wait a moment and try again`,
+        `4. If using local LLM, ensure you have internet access for web search`
+      ];
+
+      const fallbackResult = formatToolResult(
+        'Search Diagnostics - All Providers Failed',
+        summaryLines.join('\n')
+      );
+
+      return fallbackResult;
     }
 
     const recencyRequested = detectRecencyIntent(query);

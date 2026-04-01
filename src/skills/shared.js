@@ -728,6 +728,8 @@
 
   async function runSearchSkills(query) {
     const diagnostics = [];
+    const originalQuery = String(query || '').trim();
+    
     const runners = [
       { name: 'weather_current', run: () => detectWeatherIntent(query) ? getCurrentWeather({}) : null },
       { name: 'fx_rate', run: () => searchFxRate(query) },
@@ -739,7 +741,7 @@
     ];
     const results = [];
 
-    console.debug(`🔍 Starting web search for: "${query}"`);
+    console.debug(`🔍 Starting web search for: "${originalQuery}"`);
 
     for (const runner of runners) {
       try {
@@ -764,11 +766,97 @@
 
     console.debug(`Search complete: ${results.length} providers returned results`);
 
+    // ULTIMATE FALLBACK: If ALL providers returned nothing, retry with ORIGINAL query unchanged
+    if (!results.length && originalQuery.length > 0) {
+      console.debug(`⚠️ No results found. Trying ultimate fallback with original query: "${originalQuery}"`);
+      
+      for (const runner of runners) {
+        // Skip non-applicable runners for fallback
+        if (['weather_current', 'fx_rate'].includes(runner.name)) continue;
+        
+        try {
+          console.debug(`  🔄 Fallback retry: ${runner.name}`);
+          
+          // Direct API calls with original query, skip variant building
+          let result = null;
+          
+          if (runner.name === 'google_news') {
+            result = await searchGoogleNewsRss(originalQuery);
+          } else if (runner.name === 'github_repositories') {
+            result = await searchGithubRepositories(originalQuery);
+          } else if (runner.name === 'duckduckgo') {
+            // Direct DuckDuckGo call with original query
+            try {
+              const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(originalQuery)}&format=json&no_html=1`;
+              const data = await fetchJsonWithTimeout(url, 8000);
+              if (data.AbstractText) {
+                result = formatToolResult('DuckDuckGo search (fallback)', formatSearchEntry(
+                  1,
+                  data.Heading || originalQuery,
+                  normalizeSearchSnippet(data.AbstractText),
+                  data.AbstractURL || '',
+                  'duckduckgo'
+                ));
+              }
+            } catch (e) {
+              console.debug(`    Fallback failed: ${e.message}`);
+            }
+          } else if (runner.name === 'wikipedia') {
+            // Direct Wikipedia call with original query
+            try {
+              const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(originalQuery)}&srlimit=6&format=json&origin=*`;
+              const data = await fetchJsonWithTimeout(url, 6000);
+              const hits = Array.isArray(data?.query?.search) ? data.query.search : [];
+              const entries = hits.slice(0, 3).map((hit, i) => formatSearchEntry(
+                i + 1,
+                hit.title,
+                normalizeSearchSnippet(hit.snippet),
+                `https://en.wikipedia.org/wiki/${encodeURIComponent(hit.title.replace(/ /g, '_'))}`,
+                'wikipedia'
+              ));
+              if (entries.length) {
+                result = formatToolResult('Wikipedia search (fallback)', entries.join('\n\n'));
+              }
+            } catch (e) {
+              console.debug(`    Fallback failed: ${e.message}`);
+            }
+          } else if (runner.name === 'wikidata') {
+            // Direct Wikidata call with original query
+            try {
+              const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(originalQuery)}&language=en&limit=6&format=json&origin=*`;
+              const data = await fetchJsonWithTimeout(url, 6000);
+              const hits = Array.isArray(data?.search) ? data.search : [];
+              const entries = hits.slice(0, 3).map((hit, i) => formatSearchEntry(
+                i + 1,
+                hit.label || hit.id,
+                normalizeSearchSnippet(hit.description || ''),
+                `https://www.wikidata.org/wiki/${encodeURIComponent(hit.id)}`,
+                'wikidata'
+              ));
+              if (entries.length) {
+                result = formatToolResult('Wikidata search (fallback)', entries.join('\n\n'));
+              }
+            } catch (e) {
+              console.debug(`    Fallback failed: ${e.message}`);
+            }
+          }
+          
+          if (result) {
+            results.push({ source: `${runner.name} (fallback)`, content: result });
+            diagnostics.push(`${runner.name}: ✓ ok (fallback)`);
+            console.debug(`    ✓ Got fallback results!`);
+          }
+        } catch (error) {
+          console.debug(`    Fallback error: ${error.message}`);
+        }
+      }
+    }
+
     if (!results.length) {
       // FALLBACK: No providers returned results, provide helpful guidance
       const summaryLines = [
         `⚠️ Search Unavailable - All Providers Failed`,
-        `Query: "${query}"`,
+        `Query: "${originalQuery}"`,
         ``,
         `Status: Check the diagnostics below to troubleshoot.`,
         ``,

@@ -8,6 +8,11 @@
   overflow-y: auto;
   overflow-x: hidden;
   transition: transform 0.3s ease;
+  min-width: 260px;
+  max-width: 260px;
+  width: 260px;
+  z-index: 10;
+  position: relative;
 }
 
 .sidebar-header {

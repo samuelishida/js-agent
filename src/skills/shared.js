@@ -806,18 +806,60 @@
     const diagnostics = [];
     const originalQuery = String(query || '').trim();
     
+    // LLM preflight: Attempt query clarification with very short timeout
+    // If it takes more than 300ms, we skip it and search immediately with original query
+    let searchQuery = originalQuery;
+    
+    if (originalQuery.length > 10) {  // Only try for longer queries
+      try {
+        const clarifyPromise = (async () => {
+          const response = await window.AgentSkills?.runTool?.('llm', {
+            messages: [
+              {
+                role: 'user',
+                content: `Optimize this search query. Make it shorter, clearer. Respond with ONLY the improved query:\n\n"${originalQuery}"`
+              }
+            ],
+            model: 'auto',
+            maxTokens: 30,
+            temperature: 0.2
+          });
+          
+          const clarified = response?.text?.trim() || originalQuery;
+          return (clarified && clarified.length > 2) ? clarified : originalQuery;
+        })();
+        
+        // 300ms timeout - fast enough to not block search
+        const clarified = await Promise.race([
+          clarifyPromise,
+          new Promise(resolve => setTimeout(() => resolve(originalQuery), 300))
+        ]);
+        
+        if (clarified && clarified !== originalQuery) {
+          searchQuery = clarified;
+          console.debug(`Query clarified: "${originalQuery}" → "${searchQuery}"`);
+        }
+      } catch (error) {
+        console.debug(`LLM preflight skipped: ${error.message}`);
+        // Continue with original query
+      }
+    }
+    
     const runners = [
-      { name: 'weather_current', run: () => detectWeatherIntent(query) ? getCurrentWeather({}) : null },
-      { name: 'fx_rate', run: () => searchFxRate(query) },
-      { name: 'google_news', run: () => searchGoogleNewsRss(query) },
-      { name: 'github_repositories', run: () => searchGithubRepositories(query) },
-      { name: 'duckduckgo', run: () => searchDuckDuckGo(query) },
-      { name: 'wikipedia', run: () => searchWikipedia(query) },
-      { name: 'wikidata', run: () => searchWikidata(query) }
+      { name: 'weather_current', run: () => detectWeatherIntent(searchQuery) ? getCurrentWeather({}) : null },
+      { name: 'fx_rate', run: () => searchFxRate(searchQuery) },
+      { name: 'google_news', run: () => searchGoogleNewsRss(searchQuery) },
+      { name: 'github_repositories', run: () => searchGithubRepositories(searchQuery) },
+      { name: 'duckduckgo', run: () => searchDuckDuckGo(searchQuery) },
+      { name: 'wikipedia', run: () => searchWikipedia(searchQuery) },
+      { name: 'wikidata', run: () => searchWikidata(searchQuery) }
     ];
     const results = [];
 
     console.debug(`🔍 Starting web search for: "${originalQuery}"`);
+    if (searchQuery !== originalQuery) {
+      console.debug(`   (as: "${searchQuery}")`);
+    }
 
     for (const runner of runners) {
       try {

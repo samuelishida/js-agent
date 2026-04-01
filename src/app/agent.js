@@ -120,10 +120,10 @@ async function buildPreflightSteering(userMessage, enrichedContext) {
   const userInstruction = `User request:\n${userMessage}\n\nHeuristic preflight context:\n${enrichedContext}\n\nReturn strict guidance with this structure:\n1) Primary tools\n2) Tools to avoid unless explicitly requested\n3) Fallback sequence`;
 
   try {
-    const response = await callCloud([
+    const response = await callLLM([
       { role: 'system', content: systemInstruction },
       { role: 'user', content: userInstruction }
-    ], null, { maxTokens: 220, temperature: 0.1, timeoutMs: 15000, retries: 1 });
+    ], { maxTokens: 220, temperature: 0.1, timeoutMs: 15000, retries: 1 });
 
     const steering = splitModelReply(response).visible.replace(getToolRegex(), '').trim();
     if (!steering || parseToolCall(steering)) return '';
@@ -137,7 +137,7 @@ async function buildRecoverySteering(userMessage, call, toolError) {
   const fallback = `Do not repeat the exact failing call for ${call.tool}. Pick a different valid next step using available tools.`;
 
   try {
-    const response = await callCloud([
+    const response = await callLLM([
       {
         role: 'system',
         content: 'You produce one concise recovery instruction for a tool-using agent. No tool_call blocks, no analysis.'
@@ -146,7 +146,7 @@ async function buildRecoverySteering(userMessage, call, toolError) {
         role: 'user',
         content: `User request: ${userMessage}\nFailed tool: ${call.tool}\nError: ${toolError}\nReturn one short recovery instruction.`
       }
-    ], null, { maxTokens: 180, temperature: 0.1, timeoutMs: 15000, retries: 1 });
+    ], { maxTokens: 180, temperature: 0.1, timeoutMs: 15000, retries: 1 });
 
     const steering = splitModelReply(response).visible.replace(getToolRegex(), '').trim();
     if (!steering || parseToolCall(steering)) return fallback;
@@ -163,14 +163,13 @@ async function maybeFinalizeFromToolEvidenceWithLlm(userMessage, toolCall, toolR
     'If evidence is insufficient, set finalize=false.'
   ].join(' ');
   // Cap tool result to 4k — this is a control call and must stay within control timeout budget.
-  // Always route to cloud even in local mode to avoid blocking the loop on a slow local model.
   const userInstruction = `User request: ${userMessage}\nTool call: ${JSON.stringify(toolCall)}\nTool result:\n${String(toolResult || '').slice(0, 4000)}`;
 
   try {
-    const raw = await callCloud([
+    const raw = await callLLM([
       { role: 'system', content: systemInstruction },
       { role: 'user', content: userInstruction }
-    ], null, { maxTokens: 260, temperature: 0.1, timeoutMs: 18000, retries: 1 });
+    ], { maxTokens: 260, temperature: 0.1, timeoutMs: 18000, retries: 1 });
     const parsed = parseJsonObjectFromText(splitModelReply(raw).visible);
     if (parsed?.finalize && String(parsed.answer || '').trim()) {
       return String(parsed.answer).trim();
@@ -195,10 +194,10 @@ async function evaluateTurnGuardrailsWithLlm({ userMessage, replyText, proposedT
   const userInstruction = `User request: ${userMessage}\nRound: ${round}/${maxRounds}\nDraft reply: ${replyText}\nProposed call: ${proposedToolCall ? JSON.stringify(proposedToolCall) : 'NONE'}`;
 
   try {
-    const raw = await callCloud([
+    const raw = await callLLM([
       { role: 'system', content: systemInstruction },
       { role: 'user', content: userInstruction }
-    ], null, { maxTokens: 260, temperature: 0.1, timeoutMs: 18000, retries: 1 });
+    ], { maxTokens: 260, temperature: 0.1, timeoutMs: 18000, retries: 1 });
     const parsed = parseJsonObjectFromText(splitModelReply(raw).visible);
     if (!parsed || typeof parsed !== 'object') return null;
     return parsed;
@@ -226,10 +225,10 @@ async function normalizeToolCallWithLlm(replyText, userMessage) {
   const userInstruction = `Allowed tools: ${allowedTools}\nUser request: ${compactUser}\nDraft reply: ${compactReply}\nReturn JSON or NONE.`;
 
   try {
-    const raw = await callCloud([
+    const raw = await callLLM([
       { role: 'system', content: systemInstruction },
       { role: 'user', content: userInstruction }
-    ], null, { maxTokens: 140, temperature: 0.05, timeoutMs: 15000, retries: 1 });
+    ], { maxTokens: 140, temperature: 0.05, timeoutMs: 15000, retries: 1 });
 
     const text = splitModelReply(raw).visible.trim();
     if (!text || /^NONE$/i.test(text)) return null;
@@ -385,10 +384,10 @@ async function generateFinalMarkdownAnswer(candidateAnswer, userMessage) {
   const systemInstruction = `You are a concise, final-answer-only assistant. Return exactly one answer formatted in Markdown. Do not include analysis, tool call syntax, or surrounding words like 'final answer'. Never output <think> tags.`;
   const userInstruction = `Context-based finalization request.\n\nOriginal assistant output:\n${candidateAnswer}\n\nProvide a single cleaned final response in Markdown format, without HTML wrapper.`;
 
-  const finalReply = await callCloud([
+  const finalReply = await callLLM([
     { role: 'system', content: systemInstruction },
     { role: 'user', content: userInstruction }
-  ], null, { maxTokens: 700, temperature: 0.2, timeoutMs: 22000, retries: 1 });
+  ], { maxTokens: 700, temperature: 0.2, timeoutMs: 22000, retries: 1 });
 
   const finalText = splitModelReply(finalReply).visible.replace(getToolRegex(), '').trim();
   if (!finalText) {

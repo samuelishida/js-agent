@@ -88,6 +88,7 @@ let localBackend = {
   detected: false,
   corsBlocked: false
 };
+console.debug(`[State Init] localBackend: enabled=${localBackend.enabled}, url='${localBackend.url}', model='${localBackend.model}'`);
 let chatSessions = [];
 let activeSessionId = localStorage.getItem(ACTIVE_SESSION_KEY) || null;
 

@@ -90,7 +90,9 @@ async function retryWithBackoff(fn, { retries = 2, baseDelayMs = 700, signal } =
 }
 
 function getLaneForRequest() {
-  return (localBackend.enabled && localBackend.url) ? 'local' : 'cloud';
+  const lane = (localBackend.enabled && localBackend.url) ? 'local' : 'cloud';
+  console.debug(`[LLM Route] localBackend.enabled=${localBackend.enabled}, url=${localBackend.url ? '✓' : '✗'} → lane='${lane}'`);
+  return lane;
 }
 
 function getRateLimitMs(lane, options = {}) {
@@ -506,6 +508,8 @@ async function callLLM(msgs, options = {}) {
   activeLlmController = new AbortController();
   const { signal: outerSignal } = activeLlmController;
   const lane = getLaneForRequest();
+  console.debug(`[callLLM] Selected lane: ${lane}`);
+  
   const timeoutMs = getTimeoutMs(lane, options);
   const minIntervalMs = getRateLimitMs(lane, options);
   const retries = Number.isInteger(options.retries) ? Math.max(0, options.retries) : (lane === 'local' ? 1 : 2);
@@ -515,8 +519,10 @@ async function callLLM(msgs, options = {}) {
       return retryWithBackoff(async () => {
         return runWithTimeout(async signal => {
           if (lane === 'local') {
+            console.debug(`[callLLM] Executing on LOCAL lane at ${localBackend.url}`);
             return callLocal(msgs, signal, options);
           }
+          console.debug(`[callLLM] Executing on CLOUD lane`);
           return callCloud(msgs, signal, options);
         }, { timeoutMs, parentSignal: outerSignal, laneLabel: lane });
       }, { retries, signal: outerSignal });

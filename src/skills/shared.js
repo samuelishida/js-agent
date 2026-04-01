@@ -812,6 +812,7 @@
     
     if (originalQuery.length > 10) {
       try {
+        console.debug(`[Preflight] Starting for: "${originalQuery}"`);
         const clarifyPromise = (async () => {
           const response = await window.callLLM?.(
             [
@@ -828,6 +829,7 @@
           );
           
           const clarified = response?.text?.trim() || originalQuery;
+          console.debug(`[Preflight] LLM responded: "${clarified}"`);
           return (clarified && clarified.length > 2) ? clarified : originalQuery;
         })();
         
@@ -839,10 +841,10 @@
         
         if (clarified && clarified !== originalQuery) {
           searchQuery = clarified;
-          console.debug(`Query clarified: "${originalQuery}" → "${searchQuery}"`);
+          console.debug(`[Preflight] Using clarified: "${searchQuery}"`);
         }
       } catch (error) {
-        console.debug(`LLM preflight skipped: ${error.message}`);
+        console.debug(`[Preflight] Error: ${error.message}`);
         // Continue with original query
       }
     }

@@ -1049,7 +1049,9 @@
     try {
       const githubSnapshot = await fetchGithubRepositorySnapshot(normalizedUrl);
       if (githubSnapshot) return githubSnapshot.slice(0, 8000);
-    } catch {}
+    } catch (e) {
+      console.debug(`GitHub snapshot failed: ${e.message}`);
+    }
 
     try {
       const res = await window.fetchWithTimeout(normalizedUrl, { cache: 'no-store' }, 7000);
@@ -1059,10 +1061,14 @@
         const text = type.includes('html') ? stripHtmlToText(raw) : raw.trim();
         if (text) return text.slice(0, 8000);
       }
-    } catch {}
+    } catch (e) {
+      console.debug(`Direct fetch failed: ${e.message}`);
+    }
 
+    // Try alternative reader proxies
     const bareUrl = normalizedUrl.replace(/^https?:\/\//i, '');
     const readerUrls = [
+      `https://r.jina.ai/${normalizedUrl}`,
       `https://r.jina.ai/http://${bareUrl}`,
       `https://r.jina.ai/https://${bareUrl}`
     ];
@@ -1070,14 +1076,21 @@
     let lastError = null;
     for (const readerUrl of readerUrls) {
       try {
+        console.debug(`Trying reader proxy: ${readerUrl}`);
         const proxyRes = await window.fetchWithTimeout(readerUrl, { cache: 'no-store' }, 15000);
-        if (!proxyRes.ok) throw new Error(`Reader proxy failed with HTTP ${proxyRes.status}`);
-
-        const text = (await proxyRes.text()).trim();
-        if (!text) throw new Error('No readable content returned.');
-        return text.slice(0, 8000);
+        
+        if (proxyRes.ok) {
+          const text = (await proxyRes.text()).trim();
+          if (text && text.length > 10) {
+            console.debug(`Reader proxy succeeded: ${readerUrl}`);
+            return text.slice(0, 8000);
+          }
+        } else {
+          console.debug(`Reader proxy ${readerUrl} returned HTTP ${proxyRes.status}`);
+        }
       } catch (error) {
         lastError = error;
+        console.debug(`Reader proxy failed: ${error.message}`);
       }
     }
 
@@ -1157,23 +1170,42 @@
     }
 
     try {
-      const res = await window.fetchWithTimeout(normalizedUrl, { method, cache: 'no-store' }, 10000);
-      const contentType = res.headers.get('content-type') || 'unknown';
-      
-      // If not OK status, still try to get body for debugging
-      let raw = '';
+      // First try direct fetch
       try {
-        raw = await res.text();
-      } catch {
-        raw = `[Unable to read response body - Status: ${res.status}]`;
-      }
-      
-      const body = contentType.includes('html') ? stripHtmlToText(raw).slice(0, 8000) : raw.slice(0, 8000);
+        const res = await window.fetchWithTimeout(normalizedUrl, { method, cache: 'no-store' }, 10000);
+        const contentType = res.headers.get('content-type') || 'unknown';
+        
+        // If not OK status, still try to get body for debugging
+        let raw = '';
+        try {
+          raw = await res.text();
+        } catch {
+          raw = `[Unable to read response body - Status: ${res.status}]`;
+        }
+        
+        const body = contentType.includes('html') ? stripHtmlToText(raw).slice(0, 8000) : raw.slice(0, 8000);
 
-      return formatToolResult(
-        'http_fetch',
-        `URL: ${normalizedUrl}\nStatus: ${res.status}\nContent-Type: ${contentType}\n\n${body}`
-      );
+        return formatToolResult(
+          'http_fetch',
+          `URL: ${normalizedUrl}\nStatus: ${res.status}\nContent-Type: ${contentType}\n\n${body}`
+        );
+      } catch (directError) {
+        console.debug(`Direct fetch failed: ${directError.message}, trying reader proxy`);
+        
+        // Fallback to reader proxy for better HTML parsing
+        const readerUrl = `https://r.jina.ai/${normalizedUrl}`;
+        const proxyRes = await window.fetchWithTimeout(readerUrl, { cache: 'no-store' }, 15000);
+        
+        if (proxyRes.ok) {
+          const text = (await proxyRes.text()).trim();
+          return formatToolResult(
+            'http_fetch (via reader proxy)',
+            `URL: ${normalizedUrl}\nStatus: 200 (proxied)\nContent-Type: text/plain\n\n${text.slice(0, 8000)}`
+          );
+        } else {
+          throw new Error(`Direct fetch and reader proxy both failed`);
+        }
+      }
     } catch (error) {
       throw new Error(`Failed to fetch ${normalizedUrl}: ${error.message || 'Network error'}`);
     }

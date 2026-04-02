@@ -1,149 +1,154 @@
 # JS Agent
 
-Browser-based multi-step agent with hosted and local model routing, modular skills, persistent sessions, and optional filesystem access.
+Browser-first multi-step agent with hosted/local model routing, transition-based orchestration, modular skills, persistent sessions, and optional filesystem access.
 
 ## Overview
 
-JS Agent runs entirely in the browser. It sends chat history to a model, detects `<tool_call>` blocks in the reply, executes the requested skill, injects the result back into context, and repeats until the model answers directly or the round limit is reached.
+JS Agent runs fully in the browser.
 
-Key capabilities:
+For each user request it:
 
-- Hosted Gemini model support
-- Local model routing through LM Studio, Ollama, and llama.cpp style endpoints
-- Web, clipboard, weather, parsing, and filesystem skills
-- Persistent conversations and cached tool results in `localStorage`
-- Context summarization when the session grows too large
-- Collapsible workspace UI with modular app and style architecture
+1. Builds system + contextual prompt state
+2. Calls the active model (cloud or local)
+3. Parses one or more `<tool_call>` blocks
+4. Executes tool batches (parallel only when safe/read-only)
+5. Injects `<tool_result>` blocks into context
+6. Repeats until final answer or round limit
+
+## Current Highlights
+
+- Hosted and local model lanes with fail-fast local URL validation
+- Transition-driven loop with deterministic anti-repeat controls
+- Tool batching with concurrency-safe execution for read-only calls
+- Source-compatible skill aliases (file/glob/grep/task/todo/tool-search families)
+- Search pipeline with multi-provider fanout + readable web fallback
+- Persistent sessions/tool cache + cross-tab cache and busy sync channels
 
 ## Project Structure
 
 ```text
 Agent/
-|- index.html                     # App shell
+|- index.html
 |- assets/
-|  |- styles.css                 # CSS entrypoint
+|  |- styles.css
 |  `- styles/
-|     |- base.css                # tokens, layout, header
-|     |- sidebar.css             # sidebar, controls, stats
-|     |- chat.css                # chat stream, messages, notices
-|     |- input.css               # composer and footer controls
-|     `- responsive.css          # responsive layout rules
+|     |- base/
+|     |  |- variables.css
+|     |  |- typography.css
+|     |  `- forms.css
+|     |- components/
+|     |  `- modal.css
+|     |- layout/
+|     |  |- topbar.css
+|     |  |- sidebar.css
+|     |  |- chat.css
+|     |  `- input.css
+|     `- utilities/
+|        `- responsive.css
 |- prompts/
 |  |- system.md
 |  |- repair.md
 |  |- summarize.md
 |  `- orchestrator.md
 |- src/
-|  |- app.js                     # compatibility stub
 |  |- app/
-|  |  |- state.js               # shared state, sessions, sidebar state
-|  |  |- local-backend.js       # local backend probing and activation
-|  |  |- tools.js               # tool panel rendering and prompt helpers
-|  |  |- llm.js                 # hosted/local model routing and sanitization
-|  |  `- agent.js               # loop orchestration, UI events, init
+|  |  |- state.js
+|  |  |- local-backend.js
+|  |  |- tools.js
+|  |  |- llm.js
+|  |  `- agent.js
 |  |- core/
-|  |  |- orchestrator.js        # prompt composition and skill dispatch
-|  |  |- prompt-loader.js       # prompt loading with built-in fallback content
-|  |  `- regex.js               # tool-call extraction and validation
+|  |  |- orchestrator.js
+|  |  |- prompt-loader.js
+|  |  `- regex.js
 |  `- skills/
-|     |- shared.js              # skill implementations and registry
+|     |- shared.js
 |     |- web.js
 |     |- device.js
 |     |- data.js
 |     |- filesystem.js
 |     `- index.js
 `- docs/
-   `- agentic-search-arch.html  # architecture reference
+   `- agentic-search-arch.html
 ```
 
-## Backends
+## Model Routing
 
-The app can route requests to either hosted Gemini models or local OpenAI-compatible endpoints.
+The runtime can route to:
 
-Default local probes:
+- Cloud providers configured in UI (`gemini/*`, `openai/*`, `claude/*`, `azure/*`)
+- Local OpenAI-compatible endpoints (LM Studio/Ollama-style)
 
-- LM Studio: `http://localhost:1234`
-- Ollama: `http://localhost:11434`
-- llama.cpp: `http://localhost:8080`
-- Generic local server: `http://localhost:5000`
+Local routing behavior:
 
-Probe flow:
-
-1. Try model-list endpoints such as `/v1/models` or `/api/tags`
-2. Fall back to opaque `no-cors` detection
-3. Fall back to a minimal chat request for reachability
-
-If local routing is enabled, the UI switches model execution to the local backend. Otherwise it uses the selected Gemini model.
-
-Recommended local model (current best result):
-
-- `mistralai/ministral-3-14b-reasoning`
+- URL is normalized and validated before use
+- Invalid local URL fails fast with explicit configuration error
+- Endpoint probing tries compatible paths and schemas
+- Aborted requests are surfaced as abort/timeout, not endpoint incompatibility
 
 ## Skills
 
-Skills are registered in `src/skills/shared.js` under `window.AgentSkills.registry`.
+Skills are registered in `window.AgentSkills.registry` (implemented in `src/skills/shared.js`).
 
-Main groups:
+Primary capability families:
 
-- Web and context: search, page reading, metadata, HTTP fetch, link extraction
-- Device and browser: datetime, geolocation, weather, clipboard, localStorage helpers
-- Filesystem: directory picking, file read/write, upload, download, preview, search
-- Data: calculator, JSON parsing, CSV parsing
+- Web/context: `web_search`, `web_fetch`, `read_page`, `http_fetch`, `extract_links`, `page_metadata`
+- Device/browser: datetime, geolocation, weather, clipboard, storage, notifications, tab messaging
+- Filesystem: root auth/list/read/write/copy/move/delete/rename/tree/stat/exists/search/upload/download
+- Search utilities: `fs_glob`, `fs_grep`, and aliases `glob`, `grep`
+- File aliases: `file_read`, `read_file`, `file_write`, `write_file`, `file_edit`, `edit_file`
+- Planning/tasking: `todo_write`, `task_create`, `task_get`, `task_list`, `task_update`, `tool_search`, `ask_user_question`
 
-Notable behavior:
+### Search Reliability
 
-- `fs_write_file` falls back to browser download when direct filesystem access is unavailable
-- `web_search` combines multiple sources and reports diagnostics when providers fail
-- malformed tool-call JSON is parsed with a resilient fallback extractor
+`web_search` uses a multi-provider strategy and now includes:
 
-## Runtime Behavior
+- Better query variants for names/entities
+- Intent-aware provider gating and diagnostics
+- Readable fallback via `r.jina.ai` when APIs are blocked/empty
+- Explicit verification warning for sensitive biographical claims with weak source diversity
 
-Each turn follows this pattern:
+## Runtime Controls
 
-1. Build system prompt and initial context
-2. Call the active model
-3. Parse tool call or final answer
-4. Execute one tool when requested
-5. Inject `<tool_result>` into context
-6. Repeat until completion or round limit
+The settings modal exposes:
 
-Rendering pipeline:
-
-- The model reply is treated as Markdown
-- The app renders Markdown to HTML and sanitizes output before display
-
-Configurable runtime controls in the UI:
-
-- Planning depth
+- Planning depth (max rounds)
 - Context budget
 - Response pacing
+- Model/provider selection
+- Local backend probing and enablement
+- Tool enable/disable toggles
 
-When the accumulated context exceeds the limit, the app summarizes the conversation and rebuilds the message array with compact context.
+When context exceeds budget, the app compacts context with summarization and fallback compression.
 
-## Sessions and Cache
+## Persistence
 
-Conversation state is stored in `localStorage`.
+Stored in `localStorage`:
 
-Persisted data includes:
+- Conversation sessions and stats
+- Tool cache (bucketed, versioned, TTL-aware)
+- Active session and sidebar UI state
+- Local backend preferences
+- Task/todo stores for relevant skills
 
-- sessions and message history
-- per-session stats
-- selected local backend preferences
-- sidebar collapsed/open state
-- cached tool results with a short TTL
+Cross-tab channels:
 
-## Running the App
+- Cache synchronization
+- Busy-state synchronization
+- Agent messaging topics (`tab_broadcast`/`tab_listen`)
+
+## Running
 
 Open `index.html` in a Chromium-based browser.
 
-There is no build step and no package manager requirement.
+No build step is required.
 
-Notes:
+Recommended:
 
-- Chrome or Edge is recommended for filesystem features
-- LM Studio or Ollama should have CORS enabled for browser access
-- Gemini API keys are stored in browser `localStorage`
+- Chrome or Edge for full File System Access API support
+- Local model server with browser-accessible CORS config
+- API key configured in Settings for cloud lane
 
-## Architecture Reference
+## Docs
 
-Open `docs/agentic-search-arch.html` for the interactive architecture diagram and flow reference.
+Architecture and flow reference lives in `docs/agentic-search-arch.html`.

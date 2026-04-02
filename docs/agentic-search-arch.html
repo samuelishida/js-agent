@@ -166,12 +166,12 @@
       <h1>JS Agent Architecture</h1>
       <p class="sub">
         Browser-native multi-step agent with modular app/runtime layers, hosted and local model routing,
-        browser skills, filesystem fallbacks, notifications, and multi-tab coordination.
+        alias-compatible browser skills, batched tool execution, filesystem fallbacks, and multi-tab coordination.
       </p>
     </div>
     <div class="badges">
       <div class="badge">runtime: browser</div>
-      <div class="badge">loop: max rounds + ctx budget</div>
+      <div class="badge">loop: transition + batched tools</div>
       <div class="badge">skills: registry-based</div>
       <div class="badge">multi-tab: BroadcastChannel</div>
     </div>
@@ -241,8 +241,8 @@
       </div>
       <div class="card">
         <div class="k">Agent loop</div>
-        <div class="v">Round-bounded tool loop</div>
-        <div class="d">The app builds a system prompt, sends message history to a model, executes at most one tool per turn, and injects tool results back into context.</div>
+        <div class="v">Round-bounded transition loop</div>
+        <div class="d">The app builds a system prompt, parses one or more tool calls, executes safe batches, injects tool results, and exits on final answer or deterministic stop conditions.</div>
       </div>
       <div class="card">
         <div class="k">Routing</div>
@@ -289,7 +289,7 @@
           <span class="chev">+</span>
         </summary>
         <div class="body">
-          <p>The orchestrator receives the list of enabled tools and composes the prompt contract. It also owns tool-call parsing, reasoning-leak repair prompts, and summary prompts when context gets too large.</p>
+          <p>The orchestrator receives enabled tools, normalizes source-compatible aliases, composes the prompt contract, and handles tool-call parsing plus summarization prompts when context gets too large.</p>
           <pre>buildSystemPrompt({
   userMessage,
   maxRounds,
@@ -308,14 +308,14 @@
           <span class="chev">+</span>
         </summary>
         <div class="body">
-          <p>The loop sends current history to the selected model, parses one tool call if present, executes it through the registry, appends a `tool_result` block, and continues. If the model answers directly, the loop stops and renders a Markdown-first response through the sanitizer pipeline.</p>
+          <p>The loop sends current history to the selected model, parses one or more tool calls, executes a concurrency-safe batch through the registry, appends `tool_result` blocks, and continues. If the model answers directly, the loop stops and renders a Markdown-first response through the sanitizer pipeline.</p>
           <pre>while (round &lt; MAX_ROUNDS) {
   const reply = await callModel(messages);
-  const toolCall = parseToolCall(reply);
-  if (!toolCall) return finalAnswer(reply);
+  const toolCalls = parseToolCalls(reply);
+  if (!toolCalls.length) return finalAnswer(reply);
 
-  const result = await executeTool(toolCall);
-  messages.push({ role: "user", content: toolResultBlock(toolCall, result) });
+  const results = await executeToolBatch(toolCalls);
+  messages.push({ role: "user", content: toolResultsBlock(results) });
 
   if (ctxSize(messages) &gt; CTX_LIMIT) {
     messages = await summarizeContext(userMessage);
@@ -333,9 +333,16 @@
           <span class="chev">+</span>
         </summary>
         <div class="body">
-          <p>The registry currently covers search, parsing, clipboard, storage, notifications, multi-tab messaging, and filesystem actions. The app can toggle tool availability without changing skill code.</p>
+          <p>The registry covers search, parsing, clipboard, storage, notifications, multi-tab messaging, task/todo helpers, and filesystem actions. Source-style aliases are normalized before execution, and the app can toggle tool availability without changing skill code.</p>
           <pre>{
   web_search,
+  web_fetch,
+  fs_glob,
+  fs_grep,
+  file_edit,
+  todo_write,
+  task_create,
+  tool_search,
   read_page,
   parse_json,
   clipboard_write,
@@ -357,7 +364,8 @@
         <li>Multiple tabs share tool-cache entries over `BroadcastChannel`, reducing repeated work for identical calls.</li>
         <li>Tabs also broadcast busy state so another window can detect that a run is already in progress.</li>
         <li>The agent itself can publish and listen for messages across tabs through `tab_broadcast` and `tab_listen`.</li>
-        <li>For file-oriented tasks, guardrails force root exploration (`fs_list_dir('/')`) before direct file reads to reduce invalid-path loops.</li>
+        <li>Deterministic repeated-call suppression and bounded rounds prevent low-value loops when tools fail or return empty signals.</li>
+        <li>Search diagnostics distinguish true provider errors from intentional intent-based provider skips.</li>
       </ul>
     </div>
   </section>
@@ -387,8 +395,8 @@
       </div>
       <div class="card">
         <div class="k">src/core/orchestrator.js</div>
-        <div class="v">Policy and parsing</div>
-        <div class="d">Builds prompts, validates skill availability, parses tool calls, and generates repair and summary prompts.</div>
+        <div class="v">Policy, aliases, and parsing</div>
+        <div class="d">Builds prompts, normalizes tool aliases, validates skill availability, parses tool calls, and generates summary prompts.</div>
       </div>
       <div class="card">
         <div class="k">src/skills/shared.js</div>

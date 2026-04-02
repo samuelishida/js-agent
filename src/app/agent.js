@@ -12,6 +12,17 @@ let stopRequested = false;
 let runDisabledToolCalls = new Set();
 const runToolFailureCounts = new Map();
 let runFsRootExplored = false;
+let runSuccessfulToolCount = 0;
+let runLocalTimeoutStreak = 0;
+let runLastToolCallSignature = '';
+let runRepeatedToolCallCount = 0;
+let runCompactionState = {
+  count: 0,
+  consecutiveFailures: 0,
+  lastCompactionRound: 0,
+  lastBeforeSize: 0,
+  lastAfterSize: 0
+};
 
 function setStopButtonState(running) {
   const stopBtn = document.getElementById('btn-stop');
@@ -44,51 +55,25 @@ function resetRunGuards() {
   runDisabledToolCalls = new Set();
   runToolFailureCounts.clear();
   runFsRootExplored = false;
+  runSuccessfulToolCount = 0;
+  runLocalTimeoutStreak = 0;
+  runLastToolCallSignature = '';
+  runRepeatedToolCallCount = 0;
+  runCompactionState = {
+    count: 0,
+    consecutiveFailures: 0,
+    lastCompactionRound: 0,
+    lastBeforeSize: 0,
+    lastAfterSize: 0
+  };
 }
 
 function getToolCallSignature(call) {
   return `${call?.tool || 'unknown'}:${JSON.stringify(call?.args || {})}`;
 }
 
-function parseJsonObjectFromText(text) {
-  const raw = String(text || '').trim();
-  if (!raw) return null;
-  const unfenced = raw.replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, '$1').trim();
-
-  try {
-    return JSON.parse(unfenced);
-  } catch {
-    const match = unfenced.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    try {
-      return JSON.parse(match[0]);
-    } catch {
-      return null;
-    }
-  }
-}
-
-function normalizeComparableText(text) {
-  return String(text || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-
-function looksLikeFinalAnswerText(text) {
-  const value = String(text || '').trim();
-  if (!value) return false;
-
-  if (parseToolCall(value)) return false;
-  if (/^\s*<tool_call>/i.test(value)) return false;
-
-  const progressCue = /(verificando|checking|let me check|vou verificar|analisando|aguarde|one moment|um momento|investigando|working on it|processing|continuando|continuing)/i;
-  const asksMoreWork = /(continue a tarefa|continue the task|chame uma ferramenta|call exactly one tool|preciso verificar|i need to check)/i;
-  if (progressCue.test(value) || asksMoreWork.test(value)) return false;
-
-  const hasSentenceShape = /[.!?]\s*$/.test(value) || value.includes('\n');
-  const minLength = value.length >= 90;
-  return minLength && hasSentenceShape;
+function normalizeToolArgs(args) {
+  return args && typeof args === 'object' && !Array.isArray(args) ? { ...args } : {};
 }
 
 
@@ -114,140 +99,148 @@ function recordToolFailure(call, result) {
   return { repeated: false, count };
 }
 
-async function buildPreflightSteering(userMessage, enrichedContext) {
-  assertRuntimeReady();
-  const systemInstruction = 'You generate compact execution steering for an LLM tool-using agent. Return 3 short lines only. No tool_call, no XML, no markdown tables.';
-  const userInstruction = `User request:\n${userMessage}\n\nHeuristic preflight context:\n${enrichedContext}\n\nReturn strict guidance with this structure:\n1) Primary tools\n2) Tools to avoid unless explicitly requested\n3) Fallback sequence`;
-
-  try {
-    const response = await callLLM([
-      { role: 'system', content: systemInstruction },
-      { role: 'user', content: userInstruction }
-    ], { maxTokens: 220, temperature: 0.1, timeoutMs: 15000, retries: 1 });
-
-    const steering = splitModelReply(response).visible.replace(getToolRegex(), '').trim();
-    if (!steering || parseToolCall(steering)) return '';
-    return steering.slice(0, 900);
-  } catch {
-    return '';
-  }
+function canAttemptCompaction(round, currentSize, ctxLimit) {
+  if (runCompactionState.consecutiveFailures >= 2) return false;
+  if (round - runCompactionState.lastCompactionRound < 2) return false;
+  if (currentSize < (ctxLimit * 0.8)) return false;
+  return true;
 }
 
-async function buildRecoverySteering(userMessage, call, toolError) {
-  const fallback = `Do not repeat the exact failing call for ${call.tool}. Pick a different valid next step using available tools.`;
+function registerCompactionSuccess(round, beforeSize, afterSize) {
+  runCompactionState.count += 1;
+  runCompactionState.consecutiveFailures = 0;
+  runCompactionState.lastCompactionRound = round;
+  runCompactionState.lastBeforeSize = beforeSize;
+  runCompactionState.lastAfterSize = afterSize;
 
-  try {
-    const response = await callLLM([
-      {
-        role: 'system',
-        content: 'You produce one concise recovery instruction for a tool-using agent. No tool_call blocks, no analysis.'
-      },
-      {
-        role: 'user',
-        content: `User request: ${userMessage}\nFailed tool: ${call.tool}\nError: ${toolError}\nReturn one short recovery instruction.`
+  if (typeof getActiveSession === 'function') {
+    const session = getActiveSession();
+    if (session) {
+      if (!session.context || typeof session.context !== 'object') {
+        session.context = { compactions: 0, lastCompactedAt: null };
       }
-    ], { maxTokens: 180, temperature: 0.1, timeoutMs: 15000, retries: 1 });
-
-    const steering = splitModelReply(response).visible.replace(getToolRegex(), '').trim();
-    if (!steering || parseToolCall(steering)) return fallback;
-    return steering;
-  } catch {
-    return fallback;
-  }
-}
-
-async function maybeFinalizeFromToolEvidenceWithLlm(userMessage, toolCall, toolResult) {
-  const systemInstruction = [
-    'You decide whether a single tool result already contains enough evidence to answer the user now.',
-    'Return JSON only with schema: {"finalize":true|false,"answer":"markdown answer when finalize=true"}.',
-    'If evidence is insufficient, set finalize=false.'
-  ].join(' ');
-  // Cap tool result to 4k — this is a control call and must stay within control timeout budget.
-  const userInstruction = `User request: ${userMessage}\nTool call: ${JSON.stringify(toolCall)}\nTool result:\n${String(toolResult || '').slice(0, 4000)}`;
-
-  try {
-    const raw = await callLLM([
-      { role: 'system', content: systemInstruction },
-      { role: 'user', content: userInstruction }
-    ], { maxTokens: 260, temperature: 0.1, timeoutMs: 18000, retries: 1 });
-    const parsed = parseJsonObjectFromText(splitModelReply(raw).visible);
-    if (parsed?.finalize && String(parsed.answer || '').trim()) {
-      return String(parsed.answer).trim();
+      session.context.compactions = Number(session.context.compactions || 0) + 1;
+      session.context.lastCompactedAt = new Date().toISOString();
+      if (typeof saveSessions === 'function') {
+        saveSessions();
+      }
     }
-  } catch {
-    // Continue loop on decision errors.
-  }
-
-  return '';
-}
-
-async function evaluateTurnGuardrailsWithLlm({ userMessage, replyText, proposedToolCall, round, maxRounds }) {
-  const systemInstruction = [
-    'You are a turn guardrail controller for a tool-using agent.',
-    'Return strict JSON only with schema:',
-    '{"request_continuation":boolean,"show_intermediate":boolean,"action":"keep|replace","reason":"...","call":{"tool":"...","args":{...}}|null}',
-    'If there is no tool call and text is intermediary, set request_continuation=true.',
-    'If action is keep, return the original call in call.',
-    'Never output markdown or prose.'
-  ].join(' ');
-
-  const userInstruction = `User request: ${userMessage}\nRound: ${round}/${maxRounds}\nDraft reply: ${replyText}\nProposed call: ${proposedToolCall ? JSON.stringify(proposedToolCall) : 'NONE'}`;
-
-  try {
-    const raw = await callLLM([
-      { role: 'system', content: systemInstruction },
-      { role: 'user', content: userInstruction }
-    ], { maxTokens: 260, temperature: 0.1, timeoutMs: 18000, retries: 1 });
-    const parsed = parseJsonObjectFromText(splitModelReply(raw).visible);
-    if (!parsed || typeof parsed !== 'object') return null;
-    return parsed;
-  } catch {
-    return null;
   }
 }
 
-async function normalizeToolCallWithLlm(replyText, userMessage) {
-  const allowedTools = Object.entries(enabledTools)
-    .filter(([, enabled]) => enabled)
-    .map(([name]) => name)
-    .join(', ');
-
-  const systemInstruction = [
-    'You are a tool-call normalizer.',
-    'Extract at most one tool call from the draft reply.',
-    'Return exactly one JSON object: {"tool":"name","args":{...}} or NONE.',
-    'Use only tools from the allowed list.',
-    'No prose, no markdown fences, no XML.'
-  ].join(' ');
-
-  const compactReply = String(replyText || '').slice(0, 2600);
-  const compactUser = String(userMessage || '').slice(0, 600);
-  const userInstruction = `Allowed tools: ${allowedTools}\nUser request: ${compactUser}\nDraft reply: ${compactReply}\nReturn JSON or NONE.`;
-
-  try {
-    const raw = await callLLM([
-      { role: 'system', content: systemInstruction },
-      { role: 'user', content: userInstruction }
-    ], { maxTokens: 140, temperature: 0.05, timeoutMs: 15000, retries: 1 });
-
-    const text = splitModelReply(raw).visible.trim();
-    if (!text || /^NONE$/i.test(text)) return null;
-    const parsed = parseToolCall(text);
-    if (!parsed) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+function registerCompactionFailure(round) {
+  runCompactionState.consecutiveFailures += 1;
+  runCompactionState.lastCompactionRound = round;
 }
 
-async function resolveToolCallFromModelReply(reply, rawReply, userMessage) {
+function recordRepeatedToolCall(call) {
+  const signature = getToolCallSignature(call);
+
+  if (signature === runLastToolCallSignature) {
+    runRepeatedToolCallCount += 1;
+  } else {
+    runLastToolCallSignature = signature;
+    runRepeatedToolCallCount = 1;
+  }
+
+  if (runRepeatedToolCallCount >= 2) {
+    runDisabledToolCalls.add(signature);
+    return { repeated: true, count: runRepeatedToolCallCount, signature };
+  }
+
+  return { repeated: false, count: runRepeatedToolCallCount, signature };
+}
+
+function getTurnLlmCallOptions() {
+  if (isLocalModeActive()) {
+    return { timeoutMs: 45000, retries: 0 };
+  }
+  return { timeoutMs: 35000, retries: 2 };
+}
+
+function resolveToolCallFromModelReply(reply, rawReply) {
   const direct = parseToolCall(reply);
   if (direct?.tool) return direct;
 
   const fromRaw = parseToolCall(rawReply);
   if (fromRaw?.tool) return fromRaw;
 
-  return normalizeToolCallWithLlm(rawReply || reply, userMessage);
+  return null;
+}
+
+function normalizeToolCallObject(call) {
+  if (!call?.tool) return null;
+  const tool = String(call.tool || '').trim();
+  if (!tool) return null;
+  return { tool, args: normalizeToolArgs(call.args) };
+}
+
+function dedupeToolCalls(calls, maxCalls = 3) {
+  const deduped = [];
+  const seen = new Set();
+
+  for (const call of calls) {
+    const normalized = normalizeToolCallObject(call);
+    if (!normalized) continue;
+    const signature = getToolCallSignature(normalized);
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    deduped.push(normalized);
+    if (deduped.length >= maxCalls) break;
+  }
+
+  return deduped;
+}
+
+function resolveToolCallsFromModelReply(reply, rawReply) {
+  const blockMatches = String(rawReply || '')
+    .match(/<tool_call>\s*[\s\S]*?<\/tool_call>/gi) || [];
+
+  const parsedBlockCalls = blockMatches
+    .map(block => parseToolCall(block))
+    .filter(call => !!call?.tool);
+
+  if (parsedBlockCalls.length) {
+    return dedupeToolCalls(parsedBlockCalls);
+  }
+
+  const fallbackCall = resolveToolCallFromModelReply(reply, rawReply);
+  return fallbackCall ? [fallbackCall] : [];
+}
+
+function getToolExecutionMeta(toolName) {
+  const metaFromSkills = window.AgentSkills?.getToolExecutionMeta?.(toolName);
+  if (metaFromSkills) return metaFromSkills;
+
+  const name = String(toolName || '').trim();
+  if (name === 'calc' || name === 'datetime') {
+    return { readOnly: true, concurrencySafe: true, destructive: false, riskLevel: 'normal' };
+  }
+
+  return { readOnly: false, concurrencySafe: false, destructive: false, riskLevel: 'normal' };
+}
+
+function canRunToolConcurrently(call) {
+  const meta = getToolExecutionMeta(call?.tool);
+  return !!meta.concurrencySafe;
+}
+
+function partitionToolCallBatches(calls) {
+  const batches = [];
+
+  for (const call of calls) {
+    const concurrencySafe = canRunToolConcurrently(call);
+    const lastBatch = batches[batches.length - 1];
+
+    if (concurrencySafe && lastBatch?.concurrencySafe) {
+      lastBatch.calls.push(call);
+      continue;
+    }
+
+    batches.push({ concurrencySafe, calls: [call] });
+  }
+
+  return batches;
 }
 
 async function executeTool(call) {
@@ -360,8 +353,11 @@ async function summarizeContext(userQuery) {
     throw new Error('Summarization returned an invalid backend payload.');
   }
 
+  const compactBoundary = `[COMPACT_BOUNDARY]\n${new Date().toISOString()}`;
+
   return [
     sysMsg,
+    { role: 'assistant', content: compactBoundary },
     { role: 'assistant', content: `[SUMMARISED CONTEXT]\n${summaryText}` },
     { role: 'user', content: userQuery }
   ];
@@ -378,45 +374,22 @@ function fallbackCompressContext(userQuery) {
   return [sysMsg, ...tail];
 }
 
-async function generateFinalMarkdownAnswer(candidateAnswer, userMessage) {
-  assertRuntimeReady();
-
-  const systemInstruction = `You are a concise, final-answer-only assistant. Return exactly one answer formatted in Markdown. Do not include analysis, tool call syntax, or surrounding words like 'final answer'. Never output <think> tags.`;
-  const userInstruction = `Context-based finalization request.\n\nOriginal assistant output:\n${candidateAnswer}\n\nProvide a single cleaned final response in Markdown format, without HTML wrapper.`;
-
-  const finalReply = await callLLM([
-    { role: 'system', content: systemInstruction },
-    { role: 'user', content: userInstruction }
-  ], { maxTokens: 700, temperature: 0.2, timeoutMs: 22000, retries: 1 });
-
-  const finalText = splitModelReply(finalReply).visible.replace(getToolRegex(), '').trim();
-  if (!finalText) {
-    return candidateAnswer.trim();
-  }
-
-  return finalText;
-}
-
 // -- AGENTIC LOOP --------------------------------------------------------------
 async function agentLoop(userMessage) {
   assertRuntimeReady();
   throwIfStopRequested();
-  const { skills, orchestrator } = getRuntimeModules();
+  const { skills } = getRuntimeModules();
   const MAX_ROUNDS = getMaxRounds();
   const CTX_LIMIT  = getCtxLimit();
   const delay      = getDelay();
   const enrichedMessage = await skills.buildInitialContext(userMessage);
-  const preflightSteering = await buildPreflightSteering(userMessage, enrichedMessage);
   throwIfStopRequested();
-  const userMessageWithSteering = preflightSteering
-    ? `${enrichedMessage}\n\n<execution_steering>\n${preflightSteering}\n</execution_steering>`
-    : enrichedMessage;
 
   // Init messages for this turn
   messages = [
     { role: 'system', content: await buildSystemPrompt(userMessage) },
     ...messages.filter(m => m.role !== 'system').slice(-20), // keep last 20 non-system
-    { role: 'user', content: userMessageWithSteering }
+    { role: 'user', content: enrichedMessage }
   ];
 
   let round = 0;
@@ -439,14 +412,27 @@ async function agentLoop(userMessage) {
     let parsedReply;
     let reply;
     try {
-      rawReply = await callLLM(messages, { timeoutMs: isLocalModeActive() ? 70000 : 35000, retries: isLocalModeActive() ? 1 : 2 });
+      rawReply = await callLLM(messages, getTurnLlmCallOptions());
       throwIfStopRequested();
       parsedReply = splitModelReply(rawReply);
       reply = parsedReply.visible;
+      runLocalTimeoutStreak = 0;
       if (parsedReply.thinkingBlocks.length) {
       }
     } catch (e) {
       hideThinking();
+      if (isLocalModeActive() && /timeout/i.test(String(e?.message || '')) && round < MAX_ROUNDS) {
+        runLocalTimeoutStreak += 1;
+        if (runLocalTimeoutStreak <= 2) {
+          addNotice(`Local model timed out on round ${round}. Retrying with concise continuation guidance.`);
+          messages.push({
+            role: 'user',
+            content: 'Previous attempt timed out. Continue from the current context with a concise response: either call exactly one tool with complete args or provide the final answer.'
+          });
+          updateCtxBar();
+          continue;
+        }
+      }
       addMessage('error', `LLM error: ${e.message}`, round);
       setStatus('error', 'api error');
       return;
@@ -454,53 +440,20 @@ async function agentLoop(userMessage) {
 
     hideThinking();
 
-    // Parse for tool call
-    let toolCall = await resolveToolCallFromModelReply(reply, rawReply, userMessage);
+    // Parse for tool call(s)
+    const toolCalls = resolveToolCallsFromModelReply(reply, rawReply);
     throwIfStopRequested();
 
-    const turnGuard = await evaluateTurnGuardrailsWithLlm({
-      userMessage,
-      replyText: reply,
-      proposedToolCall: toolCall,
-      round,
-      maxRounds: MAX_ROUNDS
-    });
-    throwIfStopRequested();
-
-    if (toolCall?.tool && turnGuard?.action === 'replace' && turnGuard?.call?.tool) {
-      toolCall = { tool: String(turnGuard.call.tool), args: turnGuard.call.args && typeof turnGuard.call.args === 'object' ? turnGuard.call.args : {} };
-      addNotice(String(turnGuard.reason || 'Guardrail replaced tool call.'));
-    }
-
-    const leakedReasoning = !toolCall && orchestrator.hasReasoningLeak(reply);
-
-    if (leakedReasoning) {
-      messages.push({ role: 'assistant', content: rawReply || reply });
-      messages.push({ role: 'user', content: await buildDirectAnswerRepairPrompt(userMessage) });
-      addNotice('Model exposed internal reasoning. Requesting a direct answer.');
-      updateCtxBar();
-      continue;
-    }
-
-    if (!toolCall) {
+    if (!toolCalls.length) {
       const cleanReply = reply.replace(getToolRegex(), '').trim();
 
-      const likelyFinalAnswer = looksLikeFinalAnswerText(cleanReply);
-      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
-      const repeatedAssistantAnswer = normalizeComparableText(lastAssistant?.content) === normalizeComparableText(cleanReply) && !!cleanReply;
-      const intermediary = !!turnGuard?.request_continuation && !likelyFinalAnswer && !repeatedAssistantAnswer;
-
-      if (!!turnGuard?.request_continuation && !intermediary) {
-        addNotice('Guardrail requested continuation, but answer looks final. Accepting final response.');
-      }
-
-      if (intermediary) {
+      if (!cleanReply) {
         messages.push({ role: 'assistant', content: rawReply || reply });
         messages.push({
           role: 'user',
-          content: 'Your previous answer looked like an intermediary status update. Continue the task now: either call exactly one tool, or provide a complete final answer.'
+          content: 'No valid tool call or final answer was returned. Continue now: either call exactly one tool with complete args, or provide a complete final answer.'
         });
-        addNotice('Model returned an intermediary status update. Requesting continuation.');
+        addNotice('Model returned empty output. Requesting continuation.');
         updateCtxBar();
         continue;
       }
@@ -517,82 +470,148 @@ async function agentLoop(userMessage) {
       return;
     }
 
-    // Tool call detected
-    const toolContent = reply.replace(getToolRegex(), '').trim();
+    const validToolCalls = [];
+    const blockedToolReasons = [];
+
+    for (const candidateCall of toolCalls) {
+      const normalizedCandidate = normalizeToolCallObject(candidateCall);
+      if (!normalizedCandidate) continue;
+
+      const repeatState = recordRepeatedToolCall(normalizedCandidate);
+      if (repeatState.repeated) {
+        blockedToolReasons.push(`repeated loop detected for ${repeatState.signature}`);
+        addNotice(`Blocked repeated tool-call loop: ${repeatState.signature}`);
+        continue;
+      }
+
+      validToolCalls.push(normalizedCandidate);
+    }
+
+    if (!validToolCalls.length) {
+      messages.push({ role: 'assistant', content: rawReply || reply });
+      messages.push({
+        role: 'user',
+        content: `All proposed tool calls were blocked or invalid (${blockedToolReasons.join('; ') || 'no valid call'}). Do not repeat them. Choose different valid tools with complete args or provide a final answer.`
+      });
+      updateCtxBar();
+      continue;
+    }
+
+    // Tool call(s) detected
+    const toolContent = String(reply || '').replace(/<tool_call>\s*[\s\S]*?<\/tool_call>/gi, '').trim();
     if (toolContent) {
-      const shouldShowIntermediate = turnGuard?.show_intermediate !== undefined
-        ? !!turnGuard.show_intermediate
-        : true;
-      if (shouldShowIntermediate) {
-        addMessage('agent', toolContent, round, false, false, []);
-      }
+      addMessage('agent', toolContent, round, false, false, []);
     }
-
-    sessionStats.tools++;
-    updateStats();
-
-    addMessage('tool', `? ${toolCall.tool}(${JSON.stringify(toolCall.args)})`, round, true);
-    showThinking(`executing ${toolCall.tool}…`);
-
-    if (delay > 0) await sleep(delay * 0.5);
-    throwIfStopRequested();
-
-    const result = await executeTool(toolCall);
-    throwIfStopRequested();
-    hideThinking();
-    addMessage('tool', `? ${result}`, round, false, true);
-
-    if (!/^ERROR\b/i.test(String(result || ''))) {
-      const evidenceFinal = await maybeFinalizeFromToolEvidenceWithLlm(userMessage, toolCall, result);
-      throwIfStopRequested();
-      if (evidenceFinal) {
-        addMessage('agent', evidenceFinal, round, false, false, []);
-        messages.push({ role: 'assistant', content: evidenceFinal });
-        syncSessionState();
-        setStatus('ok', `done in ${round} round${round>1?'s':''}`);
-        notifyIfHidden(evidenceFinal);
-        updateCtxBar();
-        return;
-      }
-    }
-
-    if (toolCall.tool === 'fs_list_dir' && !/^ERROR\b/i.test(String(result || ''))) {
-      runFsRootExplored = true;
-    }
-
-    const failureState = recordToolFailure(toolCall, result);
 
     messages.push({ role: 'assistant', content: rawReply || reply });
-    messages.push({ role: 'user', content: `<tool_result tool="${toolCall.tool}">\n${result}\n</tool_result>` });
 
-    if (failureState.repeated) {
-      const recoverySteering = await buildRecoverySteering(userMessage, toolCall, result);
+    for (const toolCall of validToolCalls) {
+      sessionStats.tools++;
+      updateStats();
+      addMessage('tool', `? ${toolCall.tool}(${JSON.stringify(toolCall.args)})`, round, true);
+    }
+
+    const batches = partitionToolCallBatches(validToolCalls);
+    for (const batch of batches) {
       throwIfStopRequested();
-      messages.push({ role: 'user', content: `Recovery guidance: ${recoverySteering}` });
-      addNotice(`Repeated failure on ${getToolCallSignature(toolCall)}. Added recovery guidance and disabled only this failing call pattern.`);
+
+      let batchResults = [];
+      if (batch.concurrencySafe && batch.calls.length > 1) {
+        showThinking(`executing ${batch.calls.length} read-only tools…`);
+        if (delay > 0) await sleep(Math.min(250, delay));
+        batchResults = await Promise.all(batch.calls.map(async call => {
+          try {
+            const result = await executeTool(call);
+            return { call, result };
+          } catch (error) {
+            return { call, result: `ERROR executing ${call.tool}: ${error?.message || 'unknown failure'}` };
+          }
+        }));
+        hideThinking();
+      } else {
+        for (const call of batch.calls) {
+          showThinking(`executing ${call.tool}…`);
+          if (delay > 0) await sleep(delay * 0.5);
+          let result;
+          try {
+            result = await executeTool(call);
+          } catch (error) {
+            result = `ERROR executing ${call.tool}: ${error?.message || 'unknown failure'}`;
+          }
+          hideThinking();
+          batchResults.push({ call, result });
+        }
+      }
+
+      for (const { call: toolCall, result } of batchResults) {
+        throwIfStopRequested();
+        addMessage('tool', `? ${result}`, round, false, true);
+
+        if (!/^ERROR\b/i.test(String(result || ''))) {
+          runSuccessfulToolCount += 1;
+        }
+
+        if (toolCall.tool === 'fs_list_dir' && !/^ERROR\b/i.test(String(result || ''))) {
+          runFsRootExplored = true;
+        }
+
+        const failureState = recordToolFailure(toolCall, result);
+        messages.push({ role: 'user', content: `<tool_result tool="${toolCall.tool}">\n${result}\n</tool_result>` });
+
+        if (failureState.repeated) {
+          messages.push({
+            role: 'user',
+            content: `Previous tool call failed repeatedly (${getToolCallSignature(toolCall)}). Do not repeat it. Choose a different tool or provide a final answer with available evidence.`
+          });
+          addNotice(`Repeated failure on ${getToolCallSignature(toolCall)}. Disabled this call pattern for this run.`);
+        }
+      }
     }
 
     // Check context limit
-    if (ctxSize(messages) > CTX_LIMIT) {
-      try {
-        messages = await summarizeContext(userMessage);
-      } catch (e) {
-        addNotice(`? Summarization failed: ${e.message}`);
-        messages = fallbackCompressContext(userMessage);
-        addNotice('Applied fallback context compression without LLM.');
+    const currentCtxSize = ctxSize(messages);
+    if (currentCtxSize > CTX_LIMIT) {
+      if (!canAttemptCompaction(round, currentCtxSize, CTX_LIMIT)) {
+        addNotice('Context near limit, but compaction is cooling down after recent attempts/failures.');
+      } else {
+        try {
+          const beforeSize = currentCtxSize;
+          messages = await summarizeContext(userMessage);
+          const afterSize = ctxSize(messages);
+
+          // If summarization does not reduce enough, fall back to deterministic tail compression.
+          if (afterSize >= (beforeSize * 0.9)) {
+            addNotice('LLM summarization reduction was small; applying deterministic tail compression.');
+            messages = fallbackCompressContext(userMessage);
+          }
+
+          registerCompactionSuccess(round, beforeSize, ctxSize(messages));
+        } catch (e) {
+          registerCompactionFailure(round);
+          addNotice(`? Summarization failed: ${e.message}`);
+          messages = fallbackCompressContext(userMessage);
+          addNotice('Applied fallback context compression without LLM.');
+          if (runCompactionState.consecutiveFailures >= 2) {
+            addNotice('Compaction disabled for this run after repeated failures.');
+          }
+        }
       }
     }
+
     syncSessionState();
     updateCtxBar();
   }
 
   // Exhausted rounds — force final answer
   addNotice('max_rounds (' + MAX_ROUNDS + ') reached. Forcing final answer.');
-  messages.push({ role: 'user', content: 'Answer now with what you know so far. Return the final answer in Markdown only.' });
+  const noEvidenceWarning = runSuccessfulToolCount === 0
+    ? 'No successful tool evidence was gathered in this run. Do not fabricate facts; clearly state uncertainty and what could not be verified.'
+    : 'Use only the verified tool evidence already gathered in this run.';
+  messages.push({ role: 'user', content: `Answer now with what you know so far. Return the final answer in Markdown only. ${noEvidenceWarning}` });
   showThinking('forcing final answer…');
   try {
     throwIfStopRequested();
-    const finalReply = await callLLM(messages, { timeoutMs: isLocalModeActive() ? 70000 : 35000, retries: isLocalModeActive() ? 1 : 2 });
+    const finalReply = await callLLM(messages, getTurnLlmCallOptions());
     throwIfStopRequested();
     const parsedFinalReply = splitModelReply(finalReply);
     const finalMarkdown = parsedFinalReply.visible.replace(getToolRegex(), '').trim();

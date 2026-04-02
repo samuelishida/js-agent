@@ -14,6 +14,8 @@
       { name: 'fs_preview_file', signature: 'fs_preview_file(path)' },
       { name: 'fs_search_name', signature: 'fs_search_name(...)' },
       { name: 'fs_search_content', signature: 'fs_search_content(...)' },
+      { name: 'fs_glob', signature: 'fs_glob(path?, pattern, includeDirectories?, maxResults?)' },
+      { name: 'fs_grep', signature: 'fs_grep(path?, pattern, isRegexp?, caseSensitive?, maxResults?)' },
       { name: 'fs_upload_pick', signature: 'fs_upload_pick()' },
       { name: 'fs_save_upload', signature: 'fs_save_upload(...)' },
       { name: 'fs_download_file', signature: 'fs_download_file(...) // browser download fallback/export' },
@@ -23,7 +25,12 @@
       { name: 'fs_copy_file', signature: 'fs_copy_file(...)' },
       { name: 'fs_move_file', signature: 'fs_move_file(...)' },
       { name: 'fs_delete_path', signature: 'fs_delete_path(path)' },
-      { name: 'fs_rename_path', signature: 'fs_rename_path(...)' }
+      { name: 'fs_rename_path', signature: 'fs_rename_path(...)' },
+      { name: 'file_read', signature: 'file_read(path, offset?, length?) // src alias' },
+      { name: 'file_write', signature: 'file_write(path, content) // src alias' },
+      { name: 'file_edit', signature: 'file_edit(path, oldText, newText, replaceAll?) // src-style edit' },
+      { name: 'glob', signature: 'glob(path?, pattern) // src alias' },
+      { name: 'grep', signature: 'grep(path?, pattern) // src alias' }
     ]
   };
 })();

@@ -7,6 +7,9 @@ const CHAT_SESSIONS_KEY = 'agent_chat_sessions_v1';
 const ACTIVE_SESSION_KEY = 'agent_active_session_v1';
 const TOOL_CACHE_KEY = 'agent_tool_cache_v1';
 const TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
+const CACHE_SCHEMA_VERSION = 2;
+const SESSION_SCHEMA_VERSION = 2;
+const DEFAULT_TOOL_CACHE_TTL_MS = TOOL_CACHE_TTL_MS;
 const SIDEBAR_COLLAPSED_KEY = 'agent_sidebar_collapsed_v1';
 const SIDEBAR_PANELS_KEY = 'agent_sidebar_panels_v1';
 const SIDEBAR_AUTO_COLLAPSE_WIDTH = 1180;
@@ -17,7 +20,11 @@ const NON_CACHEABLE_TOOLS = new Set([
   'notification_request_permission',
   'notification_send',
   'tab_listen',
-  'tab_broadcast'
+  'tab_broadcast',
+  'todo_write',
+  'task_create',
+  'task_update',
+  'ask_user_question'
 ]);
 let notificationPermissionRequested = false;
 // Derive a stable instance ID from localStorage so it survives module load order races.
@@ -42,6 +49,7 @@ let enabledTools = {
   calc: true,
   datetime: true,
   read_page: true,
+  web_fetch: true,
   geo_current_location: true,
   weather_current: true,
   http_fetch: true,
@@ -68,6 +76,8 @@ let enabledTools = {
   fs_preview_file: true,
   fs_search_name: true,
   fs_search_content: true,
+  fs_glob: true,
+  fs_grep: true,
   fs_tree: true,
   fs_exists: true,
   fs_stat: true,
@@ -77,7 +87,22 @@ let enabledTools = {
   fs_copy_file: true,
   fs_move_file: true,
   fs_delete_path: true,
-  fs_rename_path: true
+  fs_rename_path: true,
+  file_read: true,
+  read_file: true,
+  file_write: true,
+  write_file: true,
+  file_edit: true,
+  edit_file: true,
+  glob: true,
+  grep: true,
+  todo_write: true,
+  task_create: true,
+  task_get: true,
+  task_list: true,
+  task_update: true,
+  ask_user_question: true,
+  tool_search: true
 };
 let localBackend = {
   enabled: localStorage.getItem('agent_prefer_local_backend') !== 'false',
@@ -286,15 +311,67 @@ function loadGithubTokenStatus() {
 }
 
 function loadToolCache() {
+  const emptyStore = {
+    version: CACHE_SCHEMA_VERSION,
+    buckets: { tool: {} }
+  };
+
   try {
-    return JSON.parse(localStorage.getItem(TOOL_CACHE_KEY) || '{}');
+    const raw = JSON.parse(localStorage.getItem(TOOL_CACHE_KEY) || 'null');
+    if (!raw || typeof raw !== 'object') return emptyStore;
+
+    if (Number(raw.version) === CACHE_SCHEMA_VERSION && raw.buckets && typeof raw.buckets === 'object') {
+      return raw;
+    }
+
+    // Migrate legacy flat map cache into the new namespaced structure.
+    return {
+      version: CACHE_SCHEMA_VERSION,
+      buckets: {
+        tool: raw
+      }
+    };
   } catch {
-    return {};
+    return emptyStore;
   }
 }
 
-function saveToolCache(cache) {
-  localStorage.setItem(TOOL_CACHE_KEY, JSON.stringify(cache));
+function saveToolCache(cacheStore) {
+  localStorage.setItem(TOOL_CACHE_KEY, JSON.stringify(cacheStore));
+}
+
+function getCacheBucket(cacheStore, scope = 'tool') {
+  if (!cacheStore.buckets || typeof cacheStore.buckets !== 'object') {
+    cacheStore.buckets = {};
+  }
+  if (!cacheStore.buckets[scope] || typeof cacheStore.buckets[scope] !== 'object') {
+    cacheStore.buckets[scope] = {};
+  }
+  return cacheStore.buckets[scope];
+}
+
+function pruneCacheBucket(cacheStore, scope = 'tool') {
+  const bucket = getCacheBucket(cacheStore, scope);
+  const now = Date.now();
+  let changed = false;
+
+  for (const key of Object.keys(bucket)) {
+    const entry = bucket[key];
+    if (!entry || typeof entry !== 'object') {
+      delete bucket[key];
+      changed = true;
+      continue;
+    }
+
+    const ttlMs = Number(entry.ttlMs || DEFAULT_TOOL_CACHE_TTL_MS);
+    const timestamp = Number(entry.timestamp || 0);
+    if (!timestamp || (now - timestamp) > ttlMs) {
+      delete bucket[key];
+      changed = true;
+    }
+  }
+
+  return changed;
 }
 
 function getToolCacheKey(call) {
@@ -310,7 +387,8 @@ function isCacheableTool(call) {
 }
 
 function clearToolCache(predicate = () => true) {
-  const cache = loadToolCache();
+  const cacheStore = loadToolCache();
+  const cache = getCacheBucket(cacheStore, 'tool');
   let changed = false;
 
   for (const key of Object.keys(cache)) {
@@ -321,33 +399,42 @@ function clearToolCache(predicate = () => true) {
   }
 
   if (changed) {
-    saveToolCache(cache);
+    saveToolCache(cacheStore);
   }
 }
 
 function getCachedToolResult(call) {
   if (!isCacheableTool(call)) return null;
-  const cache = loadToolCache();
+  const cacheStore = loadToolCache();
+  pruneCacheBucket(cacheStore, 'tool');
+  const cache = getCacheBucket(cacheStore, 'tool');
   const key = getToolCacheKey(call);
   const entry = cache[key];
   if (!entry) return null;
-  if ((Date.now() - entry.timestamp) > TOOL_CACHE_TTL_MS) {
-    delete cache[key];
-    saveToolCache(cache);
-    return null;
+
+  // Backward compatibility with legacy cache shape.
+  if (Object.prototype.hasOwnProperty.call(entry, 'result')) {
+    return entry.result;
   }
-  return entry.result;
+
+  return entry.payload;
 }
 
 function setCachedToolResult(call, result) {
   if (!isCacheableTool(call)) return;
-  const cache = loadToolCache();
+  const cacheStore = loadToolCache();
+  const cache = getCacheBucket(cacheStore, 'tool');
   const key = getToolCacheKey(call);
-  const entry = { result, timestamp: Date.now() };
+  const entry = {
+    payload: result,
+    timestamp: Date.now(),
+    ttlMs: DEFAULT_TOOL_CACHE_TTL_MS
+  };
   cache[key] = entry;
-  saveToolCache(cache);
+  saveToolCache(cacheStore);
   cacheSyncChannel?.postMessage({
     type: 'cache-set',
+    scope: 'tool',
     key,
     entry,
     from: agentInstanceId
@@ -365,13 +452,14 @@ function initCacheSync() {
 
   cacheSyncChannel = new BroadcastChannel(CACHE_SYNC_CHANNEL);
   cacheSyncChannel.onmessage = event => {
-    const { type, key, entry, from } = event.data || {};
+    const { type, scope, key, entry, from } = event.data || {};
     if (from === agentInstanceId || type !== 'cache-set' || !key || !entry) return;
 
-    const cache = loadToolCache();
-    if (!cache[key] || cache[key].timestamp < entry.timestamp) {
-      cache[key] = entry;
-      saveToolCache(cache);
+    const cacheStore = loadToolCache();
+    const bucket = getCacheBucket(cacheStore, String(scope || 'tool'));
+    if (!bucket[key] || Number(bucket[key].timestamp || 0) < Number(entry.timestamp || 0)) {
+      bucket[key] = entry;
+      saveToolCache(cacheStore);
     }
   };
 }
@@ -398,16 +486,50 @@ function broadcastBusyState(busy) {
 }
 
 function loadSessions() {
+  const normalizeStats = stats => ({
+    rounds: Number(stats?.rounds || 0),
+    tools: Number(stats?.tools || 0),
+    resets: Number(stats?.resets || 0),
+    msgs: Number(stats?.msgs || 0)
+  });
+
+  const normalizeSession = (session, index = 0) => {
+    const fallbackId = `session_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`;
+    return {
+      id: String(session?.id || fallbackId),
+      title: makeSessionTitle(session?.title || 'New session'),
+      createdAt: String(session?.createdAt || new Date().toISOString()),
+      updatedAt: String(session?.updatedAt || session?.createdAt || new Date().toISOString()),
+      messages: Array.isArray(session?.messages) ? session.messages : [],
+      stats: normalizeStats(session?.stats),
+      context: {
+        compactions: Number(session?.context?.compactions || 0),
+        lastCompactedAt: session?.context?.lastCompactedAt || null
+      }
+    };
+  };
+
   try {
     const stored = JSON.parse(localStorage.getItem(CHAT_SESSIONS_KEY) || '[]');
-    return Array.isArray(stored) ? stored : [];
+    if (Array.isArray(stored)) {
+      return stored.map((session, index) => normalizeSession(session, index));
+    }
+
+    if (stored && typeof stored === 'object' && Array.isArray(stored.sessions)) {
+      return stored.sessions.map((session, index) => normalizeSession(session, index));
+    }
+
+    return [];
   } catch {
     return [];
   }
 }
 
 function saveSessions() {
-  localStorage.setItem(CHAT_SESSIONS_KEY, JSON.stringify(chatSessions));
+  localStorage.setItem(CHAT_SESSIONS_KEY, JSON.stringify({
+    version: SESSION_SCHEMA_VERSION,
+    sessions: chatSessions
+  }));
 }
 
 function makeSessionTitle(sourceText = 'New session') {
@@ -416,12 +538,16 @@ function makeSessionTitle(sourceText = 'New session') {
 
 function createSession(initialTitle = 'New session') {
   const session = {
-    id: `session_${Date.now()}`,
+    id: `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     title: makeSessionTitle(initialTitle),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     messages: [],
-    stats: { rounds: 0, tools: 0, resets: 0, msgs: 0 }
+    stats: { rounds: 0, tools: 0, resets: 0, msgs: 0 },
+    context: {
+      compactions: 0,
+      lastCompactedAt: null
+    }
   };
   chatSessions.unshift(session);
   activeSessionId = session.id;

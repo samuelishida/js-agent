@@ -96,6 +96,29 @@
     }
 
     const requested = canonicalToolName(call.tool);
+    const aliasMap = {
+      webfetch: 'web_fetch',
+      fileread: 'file_read',
+      readfile: 'read_file',
+      filewrite: 'file_write',
+      writefile: 'write_file',
+      fileedit: 'file_edit',
+      editfile: 'edit_file',
+      globtool: 'glob',
+      greptool: 'grep',
+      todowrite: 'todo_write',
+      taskcreate: 'task_create',
+      taskget: 'task_get',
+      tasklist: 'task_list',
+      taskupdate: 'task_update',
+      askuserquestion: 'ask_user_question',
+      toolsearch: 'tool_search'
+    };
+
+    if (aliasMap[requested] && registry[aliasMap[requested]]) {
+      return { tool: aliasMap[requested], args: call.args || {} };
+    }
+
     const candidates = Object.keys(registry);
     const exact = candidates.find(name => canonicalToolName(name) === requested);
     if (exact) {

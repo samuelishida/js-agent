@@ -19,6 +19,8 @@
     }
   })();
   const AGENT_CHANNEL = 'loopagent-v1';
+  const TASKS_STORAGE_KEY = 'agent_tasks_v1';
+  const TODOS_STORAGE_KEY = 'agent_todos_v1';
   let broadcastChannel = null;
   const broadcastListeners = new Map();
 
@@ -107,6 +109,168 @@
     return /(recent|recente|latest|last\s+(hour|day|week|month|year)|today|hoje|agora|atual|atualizado|news|noticia|noticias|ultim[ao]s?|202[4-9]|2030)/i.test(String(text || ''));
   }
 
+  function detectCodingIntent(text) {
+    return /(github|repo|repository|source code|javascript|typescript|python|java|rust|go|node|npm|package|library|framework|api sdk|open source)/i.test(String(text || ''));
+  }
+
+  function detectBiographicalFactIntent(text) {
+    return /(when|quando|date|data|born|nasc|died|morreu|faleceu|death|obito|biography|biografia|idade|age)/i.test(String(text || ''));
+  }
+
+  const SAFE_CLASSIFIED_TOOLS = new Set([
+    'web_search',
+    'web_fetch',
+    'read_page',
+    'http_fetch',
+    'extract_links',
+    'page_metadata',
+    'datetime',
+    'geo_current_location',
+    'weather_current',
+    'parse_json',
+    'parse_csv',
+    'fs_list_roots',
+    'fs_authorize_folder',
+    'fs_list_dir',
+    'fs_read_file',
+    'fs_preview_file',
+    'fs_search_name',
+    'fs_search_content',
+    'fs_glob',
+    'fs_grep',
+    'fs_tree',
+    'fs_exists',
+    'fs_stat',
+    'file_read',
+    'read_file',
+    'glob',
+    'grep',
+    'task_get',
+    'task_list',
+    'tool_search'
+  ]);
+
+  const WRITE_CLASSIFIED_TOOLS = new Set([
+    'clipboard_write',
+    'storage_set',
+    'notification_send',
+    'tab_broadcast',
+    'fs_write_file',
+    'fs_copy_file',
+    'fs_move_file',
+    'fs_delete_path',
+    'fs_rename_path',
+    'fs_mkdir',
+    'fs_touch',
+    'fs_save_upload',
+    'fs_download_file',
+    'file_write',
+    'write_file',
+    'file_edit',
+    'edit_file',
+    'todo_write',
+    'task_create',
+    'task_update'
+  ]);
+
+  const NON_CONCURRENT_TOOLS = new Set([
+    'tab_listen',
+    'fs_authorize_folder',
+    'fs_pick_directory',
+    'fs_write_file',
+    'fs_copy_file',
+    'fs_move_file',
+    'fs_delete_path',
+    'fs_rename_path',
+    'fs_mkdir',
+    'fs_touch',
+    'fs_save_upload',
+    'fs_download_file',
+    'file_write',
+    'write_file',
+    'file_edit',
+    'edit_file',
+    'todo_write',
+    'task_create',
+    'task_update',
+    'ask_user_question'
+  ]);
+
+  const BUILTIN_EXECUTION_META = {
+    calc: { readOnly: true, concurrencySafe: true, destructive: false, riskLevel: 'normal' },
+    datetime: { readOnly: true, concurrencySafe: true, destructive: false, riskLevel: 'normal' }
+  };
+
+  function classifyRecommendedTools(tools) {
+    const safe = [];
+    const write = [];
+    const other = [];
+
+    for (const tool of tools) {
+      if (SAFE_CLASSIFIED_TOOLS.has(tool)) safe.push(tool);
+      else if (WRITE_CLASSIFIED_TOOLS.has(tool)) write.push(tool);
+      else other.push(tool);
+    }
+
+    return {
+      safe,
+      write,
+      other,
+      riskLevel: write.length ? 'elevated' : 'normal'
+    };
+  }
+
+  function getToolExecutionMeta(toolName) {
+    const name = String(toolName || '').trim();
+    if (!name) {
+      return {
+        readOnly: false,
+        concurrencySafe: false,
+        destructive: false,
+        riskLevel: 'elevated'
+      };
+    }
+
+    if (BUILTIN_EXECUTION_META[name]) {
+      return BUILTIN_EXECUTION_META[name];
+    }
+
+    const isWrite = WRITE_CLASSIFIED_TOOLS.has(name);
+    const isSafe = SAFE_CLASSIFIED_TOOLS.has(name);
+    const isFilesystemTool = name.startsWith('fs_');
+    const isConcurrentCandidate = !isWrite && !NON_CONCURRENT_TOOLS.has(name) && !isFilesystemTool;
+
+    return {
+      readOnly: !isWrite,
+      concurrencySafe: isConcurrentCandidate,
+      destructive: isWrite,
+      riskLevel: isWrite ? 'elevated' : (isSafe ? 'normal' : 'normal')
+    };
+  }
+
+  function canRunToolConcurrently(call) {
+    const meta = getToolExecutionMeta(call?.tool);
+    return !!meta.concurrencySafe;
+  }
+
+  function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async function withTimeout(promise, timeoutMs) {
+    let timerId = 0;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timerId = window.setTimeout(() => reject(new Error(`timeout ${timeoutMs}ms`)), timeoutMs);
+        })
+      ]);
+    } finally {
+      if (timerId) window.clearTimeout(timerId);
+    }
+  }
+
   function buildPreflightPlan(userMessage) {
     const plan = [];
     const hints = [];
@@ -179,10 +343,64 @@
       hints.push('No strong preflight intent detected. Use the most specific tool available.');
     }
 
+    const recommendedTools = [...new Set(plan)];
+    const classification = classifyRecommendedTools(recommendedTools);
+    hints.push(`Tool classification: safe=${classification.safe.length}, write=${classification.write.length}, other=${classification.other.length}, risk=${classification.riskLevel}.`);
+    if (classification.write.length) {
+      hints.push(`Write-capable tools in plan: ${classification.write.join(', ')}. Require explicit user intent before destructive actions.`);
+    }
+
     return {
-      recommendedTools: [...new Set(plan)],
-      hints
+      recommendedTools,
+      hints,
+      classification
     };
+  }
+
+  async function runDeferredPrefetches(userMessage, preflight) {
+    const blocks = [];
+    const tasks = [];
+    const urls = extractEntities(userMessage).urls.slice(0, 1);
+    const pair = detectFxPair(userMessage);
+
+    if (pair) {
+      tasks.push(async () => {
+        const fx = await searchFxRate(userMessage);
+        if (fx) blocks.push(fx);
+      });
+    }
+
+    for (const url of urls) {
+      tasks.push(async () => {
+        const page = await fetchReadablePage(url);
+        blocks.push(formatToolResult(`Prefetched page ${url}`, page));
+      });
+      tasks.push(async () => {
+        const meta = await getPageMetadata({ url });
+        blocks.push(meta);
+      });
+    }
+
+    if (detectRecencyIntent(userMessage) && preflight?.recommendedTools?.includes('web_search')) {
+      tasks.push(async () => {
+        const quick = await withTimeout(searchGoogleNewsRss(userMessage), 900);
+        if (quick) blocks.push(quick);
+      });
+    }
+
+    const pending = tasks.map(task => (async () => {
+      try {
+        await withTimeout(task(), 1200);
+      } catch {}
+    })());
+
+    // Do not block the first agent round for long-running prefetches.
+    await Promise.race([
+      Promise.allSettled(pending),
+      delay(1400)
+    ]);
+
+    return blocks;
   }
 
   function formatToolResult(title, body) {
@@ -326,12 +544,29 @@
       .trim();
   }
 
+  function looksLikePersonNameQuery(query) {
+    const text = String(query || '').trim();
+    if (!text) return false;
+    if (/\b(what|who|when|where|why|how|o que|quem|quando|onde|porque|por que|como|noticias|news)\b/i.test(text)) {
+      return false;
+    }
+
+    const tokens = text
+      .replace(/["'`.,!?()\[\]{}:;\/\\]+/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+
+    if (tokens.length < 2 || tokens.length > 6) return false;
+    return tokens.every(token => /^[\p{L}\p{M}][\p{L}\p{M}'-]*$/u.test(token));
+  }
+
   function buildSearchQueryVariants(query) {
     const original = String(query || '')
       .replace(/[+]/g, ' ')
       .trim();
+    if (!original) return [];
     const normalized = normalizeSearchQuery(query);
-    const variants = [original, normalized];
+    const variants = [original, normalized, `"${original}"`];
 
     const withoutDeathTerms = normalized
       .replace(/\bmorte\b/g, ' ')
@@ -348,7 +583,15 @@
 
     if (entityLike) variants.push(entityLike);
 
-    return [...new Set(variants.filter(Boolean))].slice(0, 4);
+    if (looksLikePersonNameQuery(original)) {
+      const parts = original.split(/\s+/).filter(Boolean);
+      if (parts.length >= 2) {
+        const firstLast = `${parts[0]} ${parts[parts.length - 1]}`;
+        variants.push(firstLast, `"${firstLast}"`);
+      }
+    }
+
+    return [...new Set(variants.filter(Boolean))].slice(0, 7);
   }
 
   function decodeHtmlEntities(text) {
@@ -400,6 +643,7 @@
 
   async function searchWikipedia(query) {
     const variants = buildSearchQueryVariants(query);
+    if (!variants.length) return null;
     const domains = ['pt.wikipedia.org', 'en.wikipedia.org'];
     const seen = new Set();
     const entries = [];
@@ -484,6 +728,7 @@
 
   async function searchWikidata(query) {
     const variants = buildSearchQueryVariants(query);
+    if (!variants.length) return null;
     const seen = new Set();
     const entries = [];
 
@@ -561,6 +806,7 @@
 
   async function searchDuckDuckGo(query) {
     const variants = buildSearchQueryVariants(query);
+    if (!variants.length) return null;
     const seen = new Set();
     const entries = [];
 
@@ -695,6 +941,67 @@
     }
   }
 
+  async function searchReadableWebFallback(query) {
+    const terms = String(query || '').trim();
+    if (!terms) return null;
+
+    const encoded = encodeURIComponent(terms);
+    const wikiTitle = encodeURIComponent(terms.replace(/\s+/g, '_'));
+    const candidates = [
+      `https://r.jina.ai/http://duckduckgo.com/?q=${encoded}`,
+      `https://r.jina.ai/http://www.bing.com/search?q=${encoded}`,
+      `https://r.jina.ai/http://en.wikipedia.org/wiki/${wikiTitle}`,
+      `https://r.jina.ai/http://pt.wikipedia.org/wiki/${wikiTitle}`
+    ];
+
+    const seenUrls = new Set();
+    const entries = [];
+
+    for (const url of candidates) {
+      if (entries.length >= 6) break;
+      try {
+        const res = await window.fetchWithTimeout(url, { cache: 'no-store' }, 12000);
+        if (!res.ok) continue;
+
+        const rawText = (await res.text()).trim();
+        if (rawText.length < 120) continue;
+
+        const sourceHost = (() => {
+          try {
+            return new URL(url.replace('https://r.jina.ai/http://', 'http://')).hostname;
+          } catch {
+            return 'readable-web';
+          }
+        })();
+
+        const linkedUrls = [...new Set(
+          [...rawText.matchAll(/https?:\/\/[^\s"'<>\])]+/gi)]
+            .map(match => String(match[0] || '').trim())
+            .filter(link => link && !/r\.jina\.ai/i.test(link))
+        )];
+
+        const firstUrl = linkedUrls.find(link => !seenUrls.has(link));
+        const snippet = normalizeSearchSnippet(rawText).slice(0, 420);
+        const title = normalizeSearchSnippet(rawText.split(/\r?\n/).find(line => line.trim().length > 20) || terms).slice(0, 110);
+
+        if (!snippet) continue;
+        if (firstUrl) seenUrls.add(firstUrl);
+
+        entries.push(formatSearchEntry(
+          entries.length + 1,
+          title || terms,
+          snippet,
+          firstUrl || '',
+          `readable:${sourceHost}`
+        ));
+      } catch (error) {
+        console.debug(`Readable fallback failed for ${url}: ${error?.message || error}`);
+      }
+    }
+
+    return entries.length ? formatToolResult('Readable web fallback', entries.join('\n\n')) : null;
+  }
+
   function hasMeaningfulToolBody(result) {
     const text = String(result || '').trim();
     if (!text) return false;
@@ -802,61 +1109,55 @@
     }
   }
 
+  function stripAgentTags(text) {
+    return String(text || '')
+      .replace(/<tool_result[\s\S]*?<\/tool_result>/gi, ' ')
+      .replace(/<initial_context>[\s\S]*?<\/initial_context>/gi, ' ')
+      .replace(/<execution_steering>[\s\S]*?<\/execution_steering>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function deriveWebSearchQuery(query, context = {}) {
+    const direct = String(query || '').trim();
+    if (direct) return direct;
+
+    const history = Array.isArray(context?.messages) ? context.messages : [];
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      const message = history[i];
+      if (message?.role !== 'user') continue;
+      const candidate = stripAgentTags(message.content);
+      if (candidate) return candidate.slice(0, 240);
+    }
+
+    return '';
+  }
+
   async function runSearchSkills(query) {
     const diagnostics = [];
     const originalQuery = String(query || '').trim();
-    
-    // LLM preflight: Attempt query clarification with very short timeout
-    // Use local backend if available, otherwise fall back to Gemini
-    let searchQuery = originalQuery;
-    
-    if (originalQuery.length > 10) {
-      try {
-        console.debug(`[Preflight] Starting for: "${originalQuery}"`);
-        const clarifyPromise = (async () => {
-          const response = await window.callLLM?.(
-            [
-              {
-                role: 'user',
-                content: `Optimize this search query. Make it shorter, clearer. Respond with ONLY the improved query:\n\n"${originalQuery}"`
-              }
-            ],
-            {
-              maxTokens: 30,
-              temperature: 0.2,
-              timeoutMs: 300
-            }
-          );
-          
-          const clarified = response?.text?.trim() || originalQuery;
-          console.debug(`[Preflight] LLM responded: "${clarified}"`);
-          return (clarified && clarified.length > 2) ? clarified : originalQuery;
-        })();
-        
-        // 300ms timeout - fast enough to not block search
-        const clarified = await Promise.race([
-          clarifyPromise,
-          new Promise(resolve => setTimeout(() => resolve(originalQuery), 300))
-        ]);
-        
-        if (clarified && clarified !== originalQuery) {
-          searchQuery = clarified;
-          console.debug(`[Preflight] Using clarified: "${searchQuery}"`);
-        }
-      } catch (error) {
-        console.debug(`[Preflight] Error: ${error.message}`);
-        // Continue with original query
-      }
+
+    if (!originalQuery) {
+      return formatToolResult('web_search', 'ERROR: web_search requires a non-empty query string.');
     }
-    
+
+    const searchQuery = originalQuery;
+    const isCodingQuery = detectCodingIntent(searchQuery);
+    const isBioFactQuery = detectBiographicalFactIntent(searchQuery);
+    const isRecentQuery = detectRecencyIntent(searchQuery);
+    const hasFxIntent = !!detectFxPair(searchQuery);
+    const hasWeatherIntent = detectWeatherIntent(searchQuery);
+
     const runners = [
-      { name: 'weather_current', run: () => detectWeatherIntent(searchQuery) ? getCurrentWeather({}) : null },
-      { name: 'fx_rate', run: () => searchFxRate(searchQuery) },
-      { name: 'google_news', run: () => searchGoogleNewsRss(searchQuery) },
-      { name: 'github_repositories', run: () => searchGithubRepositories(searchQuery) },
-      { name: 'duckduckgo', run: () => searchDuckDuckGo(searchQuery) },
-      { name: 'wikipedia', run: () => searchWikipedia(searchQuery) },
-      { name: 'wikidata', run: () => searchWikidata(searchQuery) }
+      { name: 'weather_current', enabled: () => hasWeatherIntent, run: () => getCurrentWeather({}) },
+      { name: 'fx_rate', enabled: () => hasFxIntent, run: () => searchFxRate(searchQuery) },
+      { name: 'google_news', enabled: () => (isRecentQuery || isBioFactQuery), run: () => searchGoogleNewsRss(searchQuery) },
+      { name: 'wikipedia', enabled: () => true, run: () => searchWikipedia(searchQuery) },
+      { name: 'wikidata', enabled: () => true, run: () => searchWikidata(searchQuery) },
+      { name: 'duckduckgo', enabled: () => true, run: () => searchDuckDuckGo(searchQuery) },
+      { name: 'readable_web_fallback', enabled: () => true, run: () => searchReadableWebFallback(searchQuery) },
+      { name: 'github_repositories', enabled: () => isCodingQuery, run: () => searchGithubRepositories(searchQuery) }
     ];
     const results = [];
 
@@ -866,6 +1167,12 @@
     }
 
     for (const runner of runners) {
+      if (typeof runner.enabled === 'function' && !runner.enabled()) {
+        diagnostics.push(`${runner.name}: ↷ skipped (intent mismatch)`);
+        console.debug(`  ↷ ${runner.name}: Skipped (intent mismatch)`);
+        continue;
+      }
+
       try {
         const result = await runner.run();
         if (hasMeaningfulToolBody(result)) {
@@ -893,8 +1200,9 @@
       console.debug(`⚠️ No results found. Trying ultimate fallback with original query: "${originalQuery}"`);
       
       for (const runner of runners) {
-        // Skip non-applicable runners for fallback
-        if (['weather_current', 'fx_rate'].includes(runner.name)) continue;
+        if (typeof runner.enabled === 'function' && !runner.enabled()) continue;
+        // Skip high-latency or intent-irrelevant providers in the fallback retry phase.
+        if (['weather_current', 'fx_rate', 'readable_web_fallback'].includes(runner.name)) continue;
         
         try {
           console.debug(`  🔄 Fallback retry: ${runner.name}`);
@@ -904,8 +1212,10 @@
           
           if (runner.name === 'google_news') {
             result = await searchGoogleNewsRss(originalQuery);
-          } else if (runner.name === 'github_repositories') {
+          } else if (runner.name === 'github_repositories' && isCodingQuery) {
             result = await searchGithubRepositories(originalQuery);
+          } else if (runner.name === 'readable_web_fallback') {
+            result = await searchReadableWebFallback(originalQuery);
           } else if (runner.name === 'duckduckgo') {
             // Direct DuckDuckGo call with original query
             try {
@@ -1016,11 +1326,26 @@
       diagnostics.push('recency-check: only encyclopedic sources responded; answer may be outdated.');
     }
 
+    if (isBioFactQuery && !nonEncyclopedic.length) {
+      diagnostics.push('verification-warning: sensitive biographical claim with only encyclopedic sources. Treat as unverified unless independent reporting confirms it.');
+    }
+
     if (results.length < 2) {
       diagnostics.push('source-diversity: only one provider returned data for this query.');
     }
 
-    return [results.map(entry => entry.content).join('\n\n'), formatToolResult('Search diagnostics', diagnostics.join('\n'))].join('\n\n');
+    const verificationBlock = isBioFactQuery && !nonEncyclopedic.length
+      ? formatToolResult(
+          'Verification warning',
+          'Biographical claim detected (for example death/age/birth) but only encyclopedic sources responded. Treat this as unverified and avoid definitive claims until independent reporting confirms it.'
+        )
+      : '';
+
+    return [
+      results.map(entry => entry.content).join('\n\n'),
+      verificationBlock,
+      formatToolResult('Search diagnostics', diagnostics.join('\n'))
+    ].filter(Boolean).join('\n\n');
   }
 
   function parseGithubRepositoryUrl(url) {
@@ -1497,26 +1822,16 @@
   async function buildInitialContext(userMessage) {
     const blocks = [];
     const preflight = buildPreflightPlan(userMessage);
-    const pair = detectFxPair(userMessage);
 
     blocks.push(formatToolResult(
       'preflight',
-      `Recommended tools: ${preflight.recommendedTools.join(', ') || 'none'}\n${preflight.hints.join('\n')}`
+      `Recommended tools: ${preflight.recommendedTools.join(', ') || 'none'}\nRisk level: ${preflight.classification?.riskLevel || 'normal'}\n${preflight.hints.join('\n')}`
     ));
 
-    if (pair) {
-      try {
-        const fx = await searchFxRate(userMessage);
-        if (fx) blocks.push(fx);
-      } catch {}
-    }
-
-    for (const url of extractEntities(userMessage).urls.slice(0, 1)) {
-      try {
-        const page = await fetchReadablePage(url);
-        blocks.push(formatToolResult(`Prefetched page ${url}`, page));
-      } catch {}
-    }
+    try {
+      const prefetchedBlocks = await runDeferredPrefetches(userMessage, preflight);
+      blocks.push(...prefetchedBlocks);
+    } catch {}
 
     return blocks.length ? `<initial_context>\n${blocks.join('\n\n')}\n</initial_context>\n\n${userMessage}` : userMessage;
   }
@@ -1795,6 +2110,296 @@
     return formatToolResult('fs_search_content', matches.length ? matches.join('\n') : 'No content matches.');
   }
 
+  function escapeRegexLiteral(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function globPatternToRegExp(pattern) {
+    const source = String(pattern || '**/*').replace(/\\/g, '/').trim() || '**/*';
+    let out = '^';
+
+    for (let i = 0; i < source.length; i += 1) {
+      const ch = source[i];
+      const next = source[i + 1];
+
+      if (ch === '*' && next === '*') {
+        out += '.*';
+        i += 1;
+        continue;
+      }
+
+      if (ch === '*') {
+        out += '[^/]*';
+        continue;
+      }
+
+      if (ch === '?') {
+        out += '[^/]';
+        continue;
+      }
+
+      out += escapeRegexLiteral(ch);
+    }
+
+    out += '$';
+    return new RegExp(out, 'i');
+  }
+
+  async function globPaths({ path = '', pattern = '**/*', includeDirectories = false, maxResults = 200 }) {
+    const { handle } = await resolveDirectory(path);
+    const entries = await walkDirectory(handle, path || '');
+    const matcher = globPatternToRegExp(pattern);
+    const limit = Math.max(1, Math.min(1000, Number(maxResults) || 200));
+
+    const matches = [];
+    for (const entry of entries) {
+      if (!includeDirectories && entry.kind !== 'file') continue;
+      const normalizedPath = String(entry.path || '').replace(/\\/g, '/').replace(/^\/+/, '');
+      if (!normalizedPath) continue;
+      if (!matcher.test(normalizedPath)) continue;
+      matches.push(`${entry.kind}: /${normalizedPath}`);
+      if (matches.length >= limit) break;
+    }
+
+    return formatToolResult(
+      'fs_glob',
+      `Path: ${path || '/'}\nPattern: ${pattern}\nMatches: ${matches.length}\n\n${matches.join('\n') || '(no matches)'}`
+    );
+  }
+
+  async function grepPaths({ path = '', pattern, isRegexp = false, caseSensitive = false, maxResults = 200 }) {
+    const rawPattern = String(pattern || '');
+    if (!rawPattern.trim()) {
+      throw new Error('grep requires a non-empty pattern.');
+    }
+
+    const flags = caseSensitive ? 'g' : 'gi';
+    const matcher = new RegExp(isRegexp ? rawPattern : escapeRegexLiteral(rawPattern), flags);
+    const { handle } = await resolveDirectory(path);
+    const entries = await walkDirectory(handle, path || '');
+    const limit = Math.max(1, Math.min(1000, Number(maxResults) || 200));
+    const results = [];
+
+    for (const entry of entries) {
+      if (entry.kind !== 'file' || !supportsTextPreview(entry.handle.name)) continue;
+      const text = await readFileAsText(entry.handle);
+      const lines = String(text || '').split(/\r?\n/);
+
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        matcher.lastIndex = 0;
+        if (!matcher.test(line)) continue;
+        results.push(`${entry.path}:${i + 1}: ${line.slice(0, 220)}`);
+        if (results.length >= limit) break;
+      }
+
+      if (results.length >= limit) break;
+    }
+
+    return formatToolResult(
+      'fs_grep',
+      `Path: ${path || '/'}\nPattern: ${rawPattern}\nMatches: ${results.length}\n\n${results.join('\n') || '(no matches)'}`
+    );
+  }
+
+  async function editLocalFile({ path, oldText, newText, replaceAll = false }) {
+    const targetPath = String(path || '').trim();
+    if (!targetPath) throw new Error('file_edit requires a path.');
+
+    const before = String(oldText ?? '');
+    if (!before.length) throw new Error('file_edit requires oldText.');
+
+    const replacement = String(newText ?? '');
+    const { handle } = await resolveFile(targetPath, false);
+    const content = await readFileAsText(handle);
+    if (!String(content).includes(before)) {
+      throw new Error('file_edit could not find oldText in file.');
+    }
+
+    const updated = replaceAll
+      ? String(content).split(before).join(replacement)
+      : String(content).replace(before, replacement);
+
+    await writeFile(handle, updated);
+
+    return formatToolResult(
+      'file_edit',
+      `Edited file: ${targetPath}\nReplace all: ${replaceAll ? 'yes' : 'no'}\nOld length: ${before.length}\nNew length: ${replacement.length}`
+    );
+  }
+
+  function loadTodos() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(TODOS_STORAGE_KEY) || '[]');
+      return Array.isArray(stored) ? stored : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveTodos(todos) {
+    localStorage.setItem(TODOS_STORAGE_KEY, JSON.stringify(todos));
+  }
+
+  async function todoWrite({ items, text }) {
+    const now = new Date().toISOString();
+    let normalizedItems = [];
+
+    if (Array.isArray(items)) {
+      normalizedItems = items
+        .map(item => {
+          if (typeof item === 'string') {
+            return { text: item.trim(), status: 'todo' };
+          }
+
+          const value = item && typeof item === 'object' ? item : null;
+          const itemText = String(value?.text || value?.title || '').trim();
+          const status = String(value?.status || 'todo').trim() || 'todo';
+          if (!itemText) return null;
+          return { text: itemText, status };
+        })
+        .filter(Boolean);
+    } else {
+      const lines = String(text || '')
+        .split(/\r?\n/)
+        .map(line => line.replace(/^\s*[-*\d.\[\]xX]+\s*/, '').trim())
+        .filter(Boolean);
+      normalizedItems = lines.map(line => ({ text: line, status: 'todo' }));
+    }
+
+    if (!normalizedItems.length) {
+      throw new Error('todo_write requires non-empty items or text.');
+    }
+
+    const next = normalizedItems.map((item, index) => ({
+      id: `todo_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`,
+      text: item.text,
+      status: item.status,
+      createdAt: now,
+      updatedAt: now
+    }));
+
+    saveTodos(next);
+
+    return formatToolResult(
+      'todo_write',
+      `Saved ${next.length} todo item(s).\n\n${next.map((item, index) => `${index + 1}. [${item.status}] ${item.text}`).join('\n')}`
+    );
+  }
+
+  function loadTasks() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(TASKS_STORAGE_KEY) || '[]');
+      return Array.isArray(stored) ? stored : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveTasks(tasks) {
+    localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
+  }
+
+  function normalizeTaskStatus(status) {
+    const value = String(status || 'todo').toLowerCase().trim();
+    if (['todo', 'in_progress', 'done', 'blocked'].includes(value)) return value;
+    return 'todo';
+  }
+
+  async function taskCreate(args = {}) {
+    const title = String(args.title || '').trim();
+    if (!title) throw new Error('task_create requires title.');
+
+    const tasks = loadTasks();
+    const now = new Date().toISOString();
+    const task = {
+      id: `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      title,
+      description: String(args.description || '').trim(),
+      status: normalizeTaskStatus(args.status),
+      createdAt: now,
+      updatedAt: now
+    };
+
+    tasks.unshift(task);
+    saveTasks(tasks);
+    return formatToolResult('task_create', JSON.stringify(task, null, 2));
+  }
+
+  async function taskGet({ id }) {
+    const taskId = String(id || '').trim();
+    if (!taskId) throw new Error('task_get requires id.');
+    const task = loadTasks().find(item => item.id === taskId);
+    if (!task) throw new Error(`task_get: task not found (${taskId}).`);
+    return formatToolResult('task_get', JSON.stringify(task, null, 2));
+  }
+
+  async function taskList({ status, limit = 50 } = {}) {
+    const max = Math.max(1, Math.min(500, Number(limit) || 50));
+    const wanted = String(status || '').trim().toLowerCase();
+    const tasks = loadTasks()
+      .filter(item => !wanted || String(item.status || '').toLowerCase() === wanted)
+      .slice(0, max);
+
+    return formatToolResult(
+      'task_list',
+      tasks.length
+        ? tasks.map((item, index) => `${index + 1}. ${item.id} | [${item.status}] ${item.title}`).join('\n')
+        : '(no tasks)'
+    );
+  }
+
+  async function taskUpdate(args = {}) {
+    const taskId = String(args.id || '').trim();
+    if (!taskId) throw new Error('task_update requires id.');
+
+    const tasks = loadTasks();
+    const index = tasks.findIndex(item => item.id === taskId);
+    if (index < 0) throw new Error(`task_update: task not found (${taskId}).`);
+
+    const current = tasks[index];
+    const next = {
+      ...current,
+      ...(args.title !== undefined ? { title: String(args.title || '').trim() } : {}),
+      ...(args.description !== undefined ? { description: String(args.description || '').trim() } : {}),
+      ...(args.status !== undefined ? { status: normalizeTaskStatus(args.status) } : {}),
+      updatedAt: new Date().toISOString()
+    };
+
+    tasks[index] = next;
+    saveTasks(tasks);
+    return formatToolResult('task_update', JSON.stringify(next, null, 2));
+  }
+
+  async function askUserQuestion({ question, options }) {
+    const prompt = String(question || '').trim();
+    if (!prompt) throw new Error('ask_user_question requires question.');
+    const optionList = Array.isArray(options) ? options.map(item => `- ${String(item)}`).join('\n') : '';
+
+    return formatToolResult(
+      'ask_user_question',
+      `Question for user:\n${prompt}${optionList ? `\n\nOptions:\n${optionList}` : ''}\n\nRuntime note: direct interactive prompt tool is not available in this browser runtime. Ask the user in chat and continue after they reply.`
+    );
+  }
+
+  async function toolSearch({ query = '', limit = 30 }) {
+    const terms = String(query || '').toLowerCase().trim();
+    const max = Math.max(1, Math.min(200, Number(limit) || 30));
+    const entries = Object.values(registry || {});
+    const matches = entries.filter(item => {
+      if (!terms) return true;
+      const hay = `${item.name || ''} ${item.description || ''}`.toLowerCase();
+      return hay.includes(terms);
+    }).slice(0, max);
+
+    return formatToolResult(
+      'tool_search',
+      matches.length
+        ? matches.map((item, index) => `${index + 1}. ${item.name} — ${item.description || 'no description'}`).join('\n')
+        : '(no matching tools)'
+    );
+  }
+
   async function writeTextFile({ path, content }) {
     if (!supportsFsAccess()) {
       const fallbackName = String(path || 'download.txt').split(/[\\/]/).pop() || 'download.txt';
@@ -1916,7 +2521,10 @@
       name: 'web_search',
       description: 'Performs live search skills and returns concise findings.',
       retries: 1,
-      run: ({ query }) => runSearchSkills(query)
+      run: (args = {}, context = {}) => {
+        const recoveredQuery = deriveWebSearchQuery(args?.query, context);
+        return runSearchSkills(recoveredQuery);
+      }
     },
     read_page: {
       name: 'read_page',
@@ -1940,6 +2548,12 @@
     http_fetch: {
       name: 'http_fetch',
       description: 'Fetches an HTTP resource and returns a readable response preview.',
+      retries: 1,
+      run: args => fetchHttpResource(args)
+    },
+    web_fetch: {
+      name: 'web_fetch',
+      description: 'Alias of http_fetch for src compatibility.',
       retries: 1,
       run: args => fetchHttpResource(args)
     },
@@ -2082,6 +2696,18 @@
       retries: 1,
       run: args => searchByContent(args)
     },
+    fs_glob: {
+      name: 'fs_glob',
+      description: 'Matches local paths using glob patterns (*, **, ?).',
+      retries: 1,
+      run: args => globPaths(args)
+    },
+    fs_grep: {
+      name: 'fs_grep',
+      description: 'Searches local file contents and returns path:line matches.',
+      retries: 1,
+      run: args => grepPaths(args)
+    },
     fs_tree: {
       name: 'fs_tree',
       description: 'Recursively lists a local directory tree.',
@@ -2117,6 +2743,96 @@
       description: 'Creates or overwrites a local text file. If direct filesystem access is unavailable, it falls back to a browser download using the requested filename.',
       retries: 1,
       run: args => writeTextFile(args)
+    },
+    file_read: {
+      name: 'file_read',
+      description: 'Alias of fs_read_file for src compatibility.',
+      retries: 1,
+      run: args => readLocalFile(args)
+    },
+    read_file: {
+      name: 'read_file',
+      description: 'Alias of fs_read_file for src compatibility.',
+      retries: 1,
+      run: args => readLocalFile(args)
+    },
+    file_write: {
+      name: 'file_write',
+      description: 'Alias of fs_write_file for src compatibility.',
+      retries: 1,
+      run: args => writeTextFile(args)
+    },
+    write_file: {
+      name: 'write_file',
+      description: 'Alias of fs_write_file for src compatibility.',
+      retries: 1,
+      run: args => writeTextFile(args)
+    },
+    file_edit: {
+      name: 'file_edit',
+      description: 'Edits a local file by replacing oldText with newText.',
+      retries: 1,
+      run: args => editLocalFile(args)
+    },
+    edit_file: {
+      name: 'edit_file',
+      description: 'Alias of file_edit for src compatibility.',
+      retries: 1,
+      run: args => editLocalFile(args)
+    },
+    glob: {
+      name: 'glob',
+      description: 'Alias of fs_glob for src compatibility.',
+      retries: 1,
+      run: args => globPaths(args)
+    },
+    grep: {
+      name: 'grep',
+      description: 'Alias of fs_grep for src compatibility.',
+      retries: 1,
+      run: args => grepPaths(args)
+    },
+    todo_write: {
+      name: 'todo_write',
+      description: 'Stores a todo list in local browser state.',
+      retries: 1,
+      run: args => todoWrite(args)
+    },
+    task_create: {
+      name: 'task_create',
+      description: 'Creates a persisted task record.',
+      retries: 1,
+      run: args => taskCreate(args)
+    },
+    task_get: {
+      name: 'task_get',
+      description: 'Retrieves a persisted task by id.',
+      retries: 1,
+      run: args => taskGet(args)
+    },
+    task_list: {
+      name: 'task_list',
+      description: 'Lists persisted tasks with optional status filter.',
+      retries: 1,
+      run: args => taskList(args)
+    },
+    task_update: {
+      name: 'task_update',
+      description: 'Updates an existing persisted task.',
+      retries: 1,
+      run: args => taskUpdate(args)
+    },
+    ask_user_question: {
+      name: 'ask_user_question',
+      description: 'Asks the user for clarification in chat-friendly format.',
+      retries: 1,
+      run: args => askUserQuestion(args)
+    },
+    tool_search: {
+      name: 'tool_search',
+      description: 'Searches available tools by name and description.',
+      retries: 1,
+      run: args => toolSearch(args)
     },
     fs_copy_file: {
       name: 'fs_copy_file',
@@ -2160,6 +2876,8 @@
     buildPreflightPlan,
     runSearchSkills,
     fetchReadablePage,
+    getToolExecutionMeta,
+    canRunToolConcurrently,
     buildInitialContext,
     abortAllTabListeners
   };

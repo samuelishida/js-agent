@@ -89,10 +89,62 @@ async function retryWithBackoff(fn, { retries = 2, baseDelayMs = 700, signal } =
   throw lastError;
 }
 
+function validateAndNormalizeLocalUrl(rawUrl) {
+  const original = String(rawUrl || '').trim();
+  if (!original) {
+    return { valid: false, url: '', reason: 'local backend URL is empty' };
+  }
+
+  let candidate = original;
+  if (!/^https?:\/\//i.test(candidate) && /^[^\s]+$/.test(candidate)) {
+    candidate = `http://${candidate}`;
+  }
+
+  try {
+    const parsed = new URL(candidate);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return { valid: false, url: '', reason: 'local backend URL must start with http:// or https://' };
+    }
+
+    const hostname = String(parsed.hostname || '').toLowerCase();
+    if (!hostname) {
+      return { valid: false, url: '', reason: 'local backend URL is missing a host' };
+    }
+
+    if (hostname === 'localhos') {
+      return { valid: false, url: '', reason: 'local backend host appears misspelled (did you mean localhost?)' };
+    }
+
+    return {
+      valid: true,
+      url: parsed.origin.replace(/\/+$/, '')
+    };
+  } catch {
+    return { valid: false, url: '', reason: 'local backend URL is not a valid URL' };
+  }
+}
+
 function getLaneForRequest() {
-  const lane = (localBackend.enabled && localBackend.url) ? 'local' : 'cloud';
-  console.debug(`[LLM Route] localBackend.enabled=${localBackend.enabled}, url=${localBackend.url ? '✓' : '✗'} → lane='${lane}'`);
-  return lane;
+  if (localBackend.enabled) {
+    const localUrlState = validateAndNormalizeLocalUrl(localBackend.url);
+    if (!localUrlState.valid) {
+      return {
+        lane: 'local',
+        error: `Local LLM configuration error: ${localUrlState.reason}`
+      };
+    }
+
+    if (localBackend.url !== localUrlState.url) {
+      localBackend.url = localUrlState.url;
+      localStorage.setItem('agent_local_backend_url', localBackend.url);
+    }
+
+    console.debug(`[LLM Route] localBackend.enabled=true, url=✓ → lane='local'`);
+    return { lane: 'local', error: '' };
+  }
+
+  console.debug(`[LLM Route] localBackend.enabled=false, url=${localBackend.url ? '✓' : '✗'} → lane='cloud'`);
+  return { lane: 'cloud', error: '' };
 }
 
 function getRateLimitMs(lane, options = {}) {
@@ -507,7 +559,13 @@ async function callLLM(msgs, options = {}) {
 
   activeLlmController = new AbortController();
   const { signal: outerSignal } = activeLlmController;
-  const lane = getLaneForRequest();
+  const route = getLaneForRequest();
+  if (route.error) {
+    const configError = new Error(route.error);
+    configError.code = 'LOCAL_CONFIG_INVALID';
+    throw configError;
+  }
+  const lane = route.lane;
   console.debug(`[callLLM] Selected lane: ${lane}`);
   
   const timeoutMs = getTimeoutMs(lane, options);
@@ -718,6 +776,16 @@ async function callLocal(msgs, signal, options = {}) {
     const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
     const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
 
+  const localUrlState = validateAndNormalizeLocalUrl(localBackend.url);
+  if (!localUrlState.valid) {
+    throw new Error(`Local LLM configuration error: ${localUrlState.reason}`);
+  }
+  const localBaseUrl = localUrlState.url;
+  if (localBackend.url !== localBaseUrl) {
+    localBackend.url = localBaseUrl;
+    localStorage.setItem('agent_local_backend_url', localBackend.url);
+  }
+
   // Detect endpoint type from model select or probed URL
   const modelSel = document.getElementById('local-model-select').value;
   const model = modelSel || localBackend.model || 'mistralai/ministral-3-14b-reasoning';
@@ -763,7 +831,7 @@ async function callLocal(msgs, signal, options = {}) {
 
   const openaiMsgs = normalizeLocalMessages(rawMsgs);
 
-  const inferred = inferProbeConfigFromUrl(localBackend.url || '');
+  const inferred = inferProbeConfigFromUrl(localBaseUrl || '');
   const preferredChatPath = localBackend.chatPath || inferred.chatPath || '/v1/chat/completions';
   const endpoints = [];
   const pushEndpoint = (path, format) => {
@@ -787,7 +855,7 @@ async function callLocal(msgs, signal, options = {}) {
         body = { model, messages: openaiMsgs, max_tokens: maxTokens, temperature, stream: false };
       }
 
-      const res = await fetch(localBackend.url + ep.path, {
+      const res = await fetch(localBaseUrl + ep.path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -822,6 +890,9 @@ async function callLocal(msgs, signal, options = {}) {
       lastEndpointError = `${ep.path}: unrecognized response schema`;
       return JSON.stringify(data);
     } catch (e) {
+      if (signal?.aborted || e?.name === 'AbortError') {
+        throw e;
+      }
       if (ep.format === 'openai') continue; // try next
       lastEndpointError = `${ep.path}: ${e.message}`;
       if (Number.isFinite(e?.status)) lastEndpointStatus = Number(e.status);
@@ -829,11 +900,11 @@ async function callLocal(msgs, signal, options = {}) {
     }
   }
   if (lastEndpointError) {
-    const error = new Error(`Local LLM: no compatible endpoint at ${localBackend.url}. Last error: ${lastEndpointError}`);
+    const error = new Error(`Local LLM: no compatible endpoint at ${localBaseUrl}. Last error: ${lastEndpointError}`);
     if (lastEndpointStatus) error.status = lastEndpointStatus;
     throw error;
   }
-  const error = new Error(`Local LLM: no endpoint responded at ${localBackend.url}`);
+  const error = new Error(`Local LLM: no endpoint responded at ${localBaseUrl}`);
   if (lastEndpointStatus) error.status = lastEndpointStatus;
   throw error;
 }

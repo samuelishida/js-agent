@@ -513,16 +513,32 @@
       maxDepth = 5,
       maxResults = 800,
       includeFiles = true,
-      includeDirectories = true
+      includeDirectories = true,
+      maxOutputChars = 15000
     } = {}) {
       const safeDepth = Math.max(0, Math.min(20, Number(maxDepth) || 5));
       const limit = Math.max(1, Math.min(5000, Number(maxResults) || 800));
       const includeFilesFlag = includeFiles !== false;
       const includeDirsFlag = includeDirectories === true;
+      const outputCharLimit = Math.max(1000, Math.min(19000, Number(maxOutputChars) || 15000));
 
       const { handle } = await resolveDirectory(path, false);
       const lines = [];
       let truncated = false;
+      let currentChars = 0;
+
+      function pushLine(line) {
+        const safeLine = String(line || '');
+        const projected = currentChars + safeLine.length + 1;
+        if (projected > outputCharLimit) {
+          truncated = true;
+          return false;
+        }
+
+        lines.push(safeLine);
+        currentChars = projected;
+        return true;
+      }
 
       async function visit(dirHandle, basePath, depth) {
         if (lines.length >= limit) {
@@ -536,7 +552,7 @@
 
           if (child.kind === 'directory') {
             if (includeDirsFlag) {
-              lines.push(label);
+              if (!pushLine(label)) return;
               if (lines.length >= limit) {
                 truncated = true;
                 return;
@@ -551,7 +567,7 @@
           }
 
           if (includeFilesFlag) {
-            lines.push(label);
+            if (!pushLine(label)) return;
             if (lines.length >= limit) {
               truncated = true;
               return;

@@ -198,8 +198,11 @@
     M1[modules/filesystem-runtime.js]
     M2[modules/data-runtime.js]
     M3[modules/registry-runtime.js]
-    G1[groups/web and device]
-    G2[groups/data and filesystem]
+    M4[modules/web-runtime.js]
+    G1[groups/web.js]
+    G2[groups/device.js]
+    G3[groups/data.js]
+    G4[groups/filesystem.js]
   end
 
   subgraph EXT[External IO]
@@ -227,6 +230,11 @@
           <div class="k">Tool Selection</div>
           <div class="v">Risk-aware metadata</div>
           <div class="d">Tool execution meta controls batching and concurrency-safe parallel execution for read-only operations.</div>
+        </div>
+        <div class="card">
+          <div class="k">Skills Modularity</div>
+          <div class="v">Shared orchestration + runtime modules</div>
+          <div class="d">Web/search/network logic is isolated in <code>modules/web-runtime.js</code>, while <code>shared.js</code> focuses on orchestration and runtime wiring.</div>
         </div>
         <div class="card">
           <div class="k">Context Manager</div>
@@ -266,9 +274,11 @@
       <h2>Implementation Anchors</h2>
       <ul>
         <li><code>src/app/agent.js</code>: loop state, tool execution, context manager pipeline, guardrails, and final-answer forcing.</li>
-        <li><code>src/skills/shared.js</code>: preflight plan, optional planner LLM call, search pipeline, and runtime capabilities.</li>
+        <li><code>src/skills/shared.js</code>: preflight plan, optional planner LLM call, runtime orchestration, and registry wiring.</li>
         <li><code>src/skills/core/*</code>: intent detection and tool execution metadata.</li>
+        <li><code>src/skills/modules/web-runtime.js</code>: search providers, web fetch pipeline, weather/geolocation, and page utilities.</li>
         <li><code>src/skills/modules/*</code>: filesystem/data/registry runtime responsibilities.</li>
+        <li><code>src/skills/groups/*.js</code>: flattened UI group descriptors for tool families.</li>
       </ul>
     </section>
   </div>

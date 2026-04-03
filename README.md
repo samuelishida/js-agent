@@ -42,6 +42,10 @@ flowchart TD
    - Registry-driven tool definitions with execution metadata (risk, read-only, concurrency-safe)
    - Safe batching for read-only concurrent tools
    - Source-compatible aliases for file/search operations
+- Skills modularization:
+   - `src/skills/shared.js` focuses on orchestration, preflight, and runtime wiring
+   - `src/skills/modules/web-runtime.js` isolates web/search/weather/network provider logic
+   - Flattened `src/skills/groups/*.js` files provide UI-facing group descriptors
 - Context manager:
    - Stable tool-result budgeting for large outputs
    - Lightweight microcompact of older `<tool_result>` blocks
@@ -81,12 +85,13 @@ Agent/
 |     |- modules/
 |     |  |- filesystem-runtime.js
 |     |  |- data-runtime.js
-|     |  `- registry-runtime.js
+|     |  |- registry-runtime.js
+|     |  `- web-runtime.js
 |     |- groups/
-|     |  |- web/index.js
-|     |  |- device/index.js
-|     |  |- data/index.js
-|     |  `- filesystem/index.js
+|     |  |- web.js
+|     |  |- device.js
+|     |  |- data.js
+|     |  `- filesystem.js
 |     |- shared.js
 |     `- index.js
 `- proxy/
@@ -130,3 +135,4 @@ Recommended setup:
 ## Documentation
 
 Detailed architecture reference is in `docs/agentic-search-arch.html`.
+It includes the layered runtime map with the extracted `web-runtime.js` module and flattened group files.

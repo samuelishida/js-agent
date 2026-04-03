@@ -21,6 +21,60 @@
     }
   }
 
+  function extractBalancedObjectAfterKey(raw, key) {
+    const value = String(raw || '');
+    if (!value) return null;
+
+    const keyMatch = value.match(new RegExp(`"${key}"\\s*:`,'i'));
+    if (!keyMatch || keyMatch.index == null) return null;
+
+    const keyStart = keyMatch.index + keyMatch[0].length;
+    let start = value.indexOf('{', keyStart);
+    if (start < 0) return null;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start; i < value.length; i++) {
+      const ch = value[i];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (ch === '{') {
+        depth += 1;
+        continue;
+      }
+
+      if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          return value.slice(start, i + 1);
+        }
+      }
+    }
+
+    return null;
+  }
+
   function tryParseToolObject(raw) {
     const parsed = parseJsonSafely(raw);
     if (parsed?.tool) {
@@ -45,8 +99,8 @@
     const tool = extractJsonString(raw, 'tool');
     if (!tool) return null;
 
-    const argsMatch = String(raw || '').match(/"args"\s*:\s*(\{[\s\S]*\})/i);
-    const args = argsMatch ? (parseJsonSafely(argsMatch[1]) || {}) : {};
+    const argsRaw = extractBalancedObjectAfterKey(raw, 'args');
+    const args = argsRaw ? (parseJsonSafely(argsRaw) || {}) : {};
     return { tool, args };
   }
 
@@ -137,6 +191,8 @@
     const expression = extractJsonString(raw, 'expression');
     const url = extractJsonString(raw, 'url');
     const path = extractJsonString(raw, 'path');
+    const root = extractJsonString(raw, 'root');
+    const filePath = extractJsonString(raw, 'filePath');
     const sourcePath = extractJsonString(raw, 'sourcePath');
     const destinationPath = extractJsonString(raw, 'destinationPath');
     const pattern = extractJsonString(raw, 'pattern');
@@ -149,6 +205,8 @@
     const value = extractJsonString(raw, 'value');
     const method = extractJsonString(raw, 'method');
     const textArg = extractJsonString(raw, 'text');
+    const offset = raw.match(/"offset"\s*:\s*(-?\d+)/i)?.[1];
+    const length = raw.match(/"length"\s*:\s*(-?\d+)/i)?.[1];
     const latitude = raw.match(/"latitude"\s*:\s*(-?\d+(?:\.\d+)?)/i)?.[1];
     const longitude = raw.match(/"longitude"\s*:\s*(-?\d+(?:\.\d+)?)/i)?.[1];
 
@@ -161,6 +219,8 @@
         ...(expression && { expression }),
         ...(url && { url }),
         ...(path && { path }),
+        ...(root && { root }),
+        ...(filePath && { filePath }),
         ...(sourcePath && { sourcePath }),
         ...(destinationPath && { destinationPath }),
         ...(pattern && { pattern }),
@@ -173,6 +233,8 @@
         ...(value && { value }),
         ...(method && { method }),
         ...(textArg && { text: textArg }),
+        ...(offset !== undefined && { offset: Number(offset) }),
+        ...(length !== undefined && { length: Number(length) }),
         ...(latitude && { latitude: Number(latitude) }),
         ...(longitude && { longitude: Number(longitude) })
       }
@@ -192,6 +254,21 @@
 
   function hasUnprocessedToolCall(text) {
     return TOOL_BLOCK.test(String(text || ''));
+  }
+
+  function isBareToolCallOutput(text) {
+    const value = String(text || '').trim();
+    if (!value) return false;
+
+    if (/^<tool_call>[\s\S]*<\/tool_call>$/i.test(value)) {
+      return true;
+    }
+
+    if (/^```(?:json)?\s*<tool_call>[\s\S]*<\/tool_call>\s*```$/i.test(value)) {
+      return true;
+    }
+
+    return false;
   }
 
   function looksLikeReasoningLeak(text) {
@@ -214,7 +291,7 @@
     const issues = [];
 
     if (!value.trim()) issues.push('empty output');
-    if (hasUnprocessedToolCall(value)) issues.push('contains nested tool_call');
+    if (isBareToolCallOutput(value)) issues.push('contains bare tool_call block');
     if (value.length > 20000) issues.push('output too large');
 
     return { valid: !issues.length, issues };
@@ -225,6 +302,7 @@
     extractToolCall,
     extractAllToolCalls,
     hasUnprocessedToolCall,
+    isBareToolCallOutput,
     looksLikeReasoningLeak,
     validateSkillOutput
   };

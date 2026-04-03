@@ -79,6 +79,7 @@ let enabledTools = {
   fs_glob: true,
   fs_grep: true,
   fs_tree: true,
+  fs_walk: true,
   fs_exists: true,
   fs_stat: true,
   fs_mkdir: true,
@@ -268,6 +269,42 @@ function saveKey() {
   localStorage.setItem('gemini_api_key', apiKey);
   setStatus('ok', 'key saved');
   maybeRequestNotifPermission();
+}
+
+function saveOllamaCloudEndpoint() {
+  const input = document.getElementById('ollama-cloud-endpoint');
+  if (!input) return;
+
+  const raw = String(input.value || '').trim();
+  if (!raw) {
+    localStorage.removeItem('agent_ollama_cloud_endpoint');
+    setStatus('ok', 'ollama endpoint reset');
+    return;
+  }
+
+  let endpoint = raw;
+  if (!/^https?:\/\//i.test(endpoint)) {
+    endpoint = `https://${endpoint}`;
+  }
+
+  try {
+    const parsed = new URL(endpoint);
+    let normalized = `${parsed.protocol}//${parsed.host}${parsed.pathname}`.replace(/\/+$/, '');
+    normalized = normalized.replace(/^https:\/\/api\.ollama\.com$/i, 'https://ollama.com');
+    localStorage.setItem('agent_ollama_cloud_endpoint', normalized);
+    input.value = normalized;
+    setStatus('ok', 'ollama endpoint saved');
+  } catch {
+    setStatus('error', 'invalid ollama endpoint');
+    addNotice('Invalid Ollama endpoint URL. Example: https://api.ollama.com/v1');
+  }
+}
+
+function loadOllamaCloudEndpoint() {
+  const input = document.getElementById('ollama-cloud-endpoint');
+  if (!input) return;
+  const stored = localStorage.getItem('agent_ollama_cloud_endpoint') || 'https://ollama.com/v1';
+  input.value = stored.replace(/^https:\/\/api\.ollama\.com/i, 'https://ollama.com');
 }
 
 function saveGithubToken() {

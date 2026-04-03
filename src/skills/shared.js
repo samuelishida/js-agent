@@ -25,233 +25,42 @@
   const broadcastListeners = new Map();
 
   const TEXT_EXTENSIONS = new Set(['txt', 'md', 'json', 'js', 'ts', 'css', 'html', 'xml', 'csv', 'log', 'yml', 'yaml']);
+  const skillCore = window.AgentSkillCore || {};
+  const intentCore = skillCore.intents || {};
+  const toolMetaCore = skillCore.toolMeta || {};
 
-  function extractEntities(text) {
-    const input = String(text || '');
-    return {
-      urls: [...input.matchAll(/https?:\/\/[^\s]+/gi)].map(match => match[0]),
-      currencies: [...input.matchAll(/\b(usd|dolar|d[oÃ³]lar|brl|real|reais|eur|euro|gbp|libra|jpy|iene)\b/gi)].map(match => match[1].toLowerCase())
-    };
-  }
+  const {
+    extractEntities = () => ({ urls: [], currencies: [] }),
+    detectFxPair = () => null,
+    detectWeatherIntent = () => false,
+    detectFilesystemIntent = () => false,
+    detectAuthorizeFolderIntent = () => false,
+    detectFullFileDisplayIntent = () => false,
+    detectProjectSkillsIntent = () => false,
+    detectSaveIntent = () => false,
+    detectClipboardIntent = () => false,
+    detectParsingIntent = () => false,
+    detectTabCoordinationIntent = () => false,
+    detectRecencyIntent = () => false,
+    detectCodingIntent = () => false,
+    detectBiographicalFactIntent = () => false
+  } = intentCore;
 
-  function normalizeCurrencyToken(token) {
-    const aliases = {
-      usd: 'USD',
-      dolar: 'USD',
-      'dÃ³lar': 'USD',
-      dolar: 'USD',
-      brl: 'BRL',
-      real: 'BRL',
-      reais: 'BRL',
-      eur: 'EUR',
-      euro: 'EUR',
-      gbp: 'GBP',
-      libra: 'GBP',
-      jpy: 'JPY',
-      iene: 'JPY'
-    };
-
-    return aliases[String(token || '').toLowerCase()] || null;
-  }
-
-  function detectFxPair(text) {
-    const currencies = extractEntities(text).currencies.map(normalizeCurrencyToken).filter(Boolean);
-    const unique = [...new Set(currencies)];
-
-    if (unique.length >= 2) return { base: unique[0], quote: unique[1] };
-    if (unique.length === 1 && (unique[0] === 'USD' || unique[0] === 'BRL')) return { base: 'USD', quote: 'BRL' };
-    if (/\bcota[cÃ§][aÃ£]o\b/i.test(text) && /\b(dolar|d[oÃ³]lar|usd)\b/i.test(text) && /\b(real|reais|brl)\b/i.test(text)) {
-      return { base: 'USD', quote: 'BRL' };
-    }
-
-    return null;
-  }
-
-  function detectWeatherIntent(text) {
-    const value = String(text || '').toLowerCase();
-    return /(weather|temperature|temperatura|clima|forecast|previs[aÃ£]o|how hot|how cold)/i.test(value);
-  }
-
-  function detectFilesystemIntent(text) {
-    return /(file|files|arquivo|arquivos|folder|pasta|directory|diret[oÃ³]rio|rename|renome|move|mover|copy|copiar|delete|deletar|remove|remover|list files|listar arquivos|search file|buscar arquivo|open file|abrir arquivo|read project|ler projeto|leia o projeto|leio o proejto|codebase|repo|repository|src\/|[a-z]:\\)/i.test(String(text || ''));
-  }
-
-  function detectAuthorizeFolderIntent(text) {
-    return /(authorize folder|autorizar pasta|authorize|autoriz[aá]r|permiss[aã]o|directory access|acesso [àa] pasta)/i.test(String(text || ''));
-  }
-
-  function detectFullFileDisplayIntent(text) {
-    const value = String(text || '');
-    return /(show|mostre|mostrar|exiba|print|imprima|cat|dump|full|complete|completo|inteiro).*(readme|README|arquivo|file)|((readme|README).*(full|complete|completo|inteiro))/i.test(value);
-  }
-
-  function detectProjectSkillsIntent(text) {
-    return /(explain|explique|skills|habilidades|capabilities|capacidades).*(project|projeto|repo|codebase)|((project|projeto|repo|codebase).*(skills|habilidades|capabilities))/i.test(String(text || ''));
-  }
-
-  function detectSaveIntent(text) {
-    return /(save|salvar|write file|escrever arquivo|export|exportar|download|baixar|save it|save as|json file|arquivo json)/i.test(String(text || ''));
-  }
-
-  function detectClipboardIntent(text) {
-    return /(clipboard|area de transferencia|Ã¡rea de transferÃªncia|copiar texto|paste|colar)/i.test(String(text || ''));
-  }
-
-  function detectParsingIntent(text) {
-    return /(json|csv|parse|validar json|parsear csv|extract links|extrair links|metadata)/i.test(String(text || ''));
-  }
-
-  function detectTabCoordinationIntent(text) {
-    return /(other tab|another tab|open tab|other window|another window|dashboard|share|send to other tab|manda pra outra aba|outra aba|outra janela|espera a outra aba|broadcast|all tabs|todas as abas)/i.test(String(text || ''));
-  }
-
-  function detectRecencyIntent(text) {
-    return /(recent|recente|latest|last\s+(hour|day|week|month|year)|today|hoje|agora|atual|atualizado|news|noticia|noticias|ultim[ao]s?|202[4-9]|2030)/i.test(String(text || ''));
-  }
-
-  function detectCodingIntent(text) {
-    return /(github|repo|repository|source code|javascript|typescript|python|java|rust|go|node|npm|package|library|framework|api sdk|open source)/i.test(String(text || ''));
-  }
-
-  function detectBiographicalFactIntent(text) {
-    return /(when|quando|date|data|born|nasc|died|morreu|faleceu|death|obito|biography|biografia|idade|age)/i.test(String(text || ''));
-  }
-
-  const SAFE_CLASSIFIED_TOOLS = new Set([
-    'web_search',
-    'web_fetch',
-    'read_page',
-    'http_fetch',
-    'extract_links',
-    'page_metadata',
-    'datetime',
-    'geo_current_location',
-    'weather_current',
-    'parse_json',
-    'parse_csv',
-    'fs_list_roots',
-    'fs_authorize_folder',
-    'fs_list_dir',
-    'fs_read_file',
-    'fs_preview_file',
-    'fs_search_name',
-    'fs_search_content',
-    'fs_glob',
-    'fs_grep',
-    'fs_tree',
-    'fs_exists',
-    'fs_stat',
-    'file_read',
-    'read_file',
-    'glob',
-    'grep',
-    'task_get',
-    'task_list',
-    'tool_search'
-  ]);
-
-  const WRITE_CLASSIFIED_TOOLS = new Set([
-    'clipboard_write',
-    'storage_set',
-    'notification_send',
-    'tab_broadcast',
-    'fs_write_file',
-    'fs_copy_file',
-    'fs_move_file',
-    'fs_delete_path',
-    'fs_rename_path',
-    'fs_mkdir',
-    'fs_touch',
-    'fs_save_upload',
-    'fs_download_file',
-    'file_write',
-    'write_file',
-    'file_edit',
-    'edit_file',
-    'todo_write',
-    'task_create',
-    'task_update'
-  ]);
-
-  const NON_CONCURRENT_TOOLS = new Set([
-    'tab_listen',
-    'fs_authorize_folder',
-    'fs_pick_directory',
-    'fs_write_file',
-    'fs_copy_file',
-    'fs_move_file',
-    'fs_delete_path',
-    'fs_rename_path',
-    'fs_mkdir',
-    'fs_touch',
-    'fs_save_upload',
-    'fs_download_file',
-    'file_write',
-    'write_file',
-    'file_edit',
-    'edit_file',
-    'todo_write',
-    'task_create',
-    'task_update',
-    'ask_user_question'
-  ]);
-
-  const BUILTIN_EXECUTION_META = {
-    calc: { readOnly: true, concurrencySafe: true, destructive: false, riskLevel: 'normal' },
-    datetime: { readOnly: true, concurrencySafe: true, destructive: false, riskLevel: 'normal' }
-  };
-
-  function classifyRecommendedTools(tools) {
-    const safe = [];
-    const write = [];
-    const other = [];
-
-    for (const tool of tools) {
-      if (SAFE_CLASSIFIED_TOOLS.has(tool)) safe.push(tool);
-      else if (WRITE_CLASSIFIED_TOOLS.has(tool)) write.push(tool);
-      else other.push(tool);
-    }
-
-    return {
-      safe,
-      write,
-      other,
-      riskLevel: write.length ? 'elevated' : 'normal'
-    };
-  }
-
-  function getToolExecutionMeta(toolName) {
-    const name = String(toolName || '').trim();
-    if (!name) {
-      return {
-        readOnly: false,
-        concurrencySafe: false,
-        destructive: false,
-        riskLevel: 'elevated'
-      };
-    }
-
-    if (BUILTIN_EXECUTION_META[name]) {
-      return BUILTIN_EXECUTION_META[name];
-    }
-
-    const isWrite = WRITE_CLASSIFIED_TOOLS.has(name);
-    const isSafe = SAFE_CLASSIFIED_TOOLS.has(name);
-    const isFilesystemTool = name.startsWith('fs_');
-    const isConcurrentCandidate = !isWrite && !NON_CONCURRENT_TOOLS.has(name) && !isFilesystemTool;
-
-    return {
-      readOnly: !isWrite,
-      concurrencySafe: isConcurrentCandidate,
-      destructive: isWrite,
-      riskLevel: isWrite ? 'elevated' : (isSafe ? 'normal' : 'normal')
-    };
-  }
-
-  function canRunToolConcurrently(call) {
-    const meta = getToolExecutionMeta(call?.tool);
-    return !!meta.concurrencySafe;
-  }
+  const {
+    classifyRecommendedTools = tools => ({
+      safe: [],
+      write: [],
+      other: Array.isArray(tools) ? [...tools] : [],
+      riskLevel: 'normal'
+    }),
+    getToolExecutionMeta = () => ({
+      readOnly: false,
+      concurrencySafe: false,
+      destructive: false,
+      riskLevel: 'elevated'
+    }),
+    canRunToolConcurrently = call => !!getToolExecutionMeta(call?.tool).concurrencySafe
+  } = toolMetaCore;
 
   function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -269,6 +78,178 @@
     } finally {
       if (timerId) window.clearTimeout(timerId);
     }
+  }
+
+  function parseJsonObjectFromText(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return null;
+
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fenced ? String(fenced[1] || '').trim() : text;
+
+    const start = candidate.indexOf('{');
+    const end = candidate.lastIndexOf('}');
+    if (start < 0 || end <= start) return null;
+
+    try {
+      return JSON.parse(candidate.slice(start, end + 1));
+    } catch {
+      return null;
+    }
+  }
+
+  function normalizePlannerIntent(value) {
+    const intent = String(value || '').trim().toLowerCase();
+    const allowed = new Set(['weather', 'news', 'biography', 'filesystem', 'coding', 'fx', 'web_lookup', 'other']);
+    return allowed.has(intent) ? intent : 'other';
+  }
+
+  function normalizePlannerQuery(value) {
+    return String(value || '')
+      .replace(/[\r\n]+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+      .slice(0, 180);
+  }
+
+  function normalizePlannerTools(list, fallbackTools = []) {
+    const source = Array.isArray(list) ? list : [];
+    const allowed = new Set([
+      ...Object.keys(window.AgentSkills?.registry || {}),
+      ...(Array.isArray(fallbackTools) ? fallbackTools : []),
+      'web_search',
+      'weather_current',
+      'geo_current_location',
+      'read_page',
+      'page_metadata',
+      'extract_links'
+    ]);
+
+    return [...new Set(source
+      .map(item => String(item || '').trim())
+      .filter(Boolean)
+      .filter(item => allowed.has(item)))];
+  }
+
+  async function planPreflightWithLlm(userMessage, preflight) {
+    const text = String(userMessage || '').trim();
+    if (!text) return null;
+
+    const llm = typeof window.callLLM === 'function'
+      ? window.callLLM
+      : (typeof callLLM === 'function' ? callLLM : null);
+    if (!llm) return null;
+
+    const currentTools = Array.isArray(preflight?.recommendedTools)
+      ? preflight.recommendedTools
+      : [];
+    const currentHints = Array.isArray(preflight?.hints)
+      ? preflight.hints.slice(0, 6)
+      : [];
+
+    const prompt = [
+      `User request: ${text}`,
+      `Current recommended tools: ${currentTools.join(', ') || 'none'}`,
+      `Current hints:`,
+      ...currentHints.map(hint => `- ${hint}`),
+      '',
+      'Return only JSON with this exact schema:',
+      '{',
+      '  "intent": "weather|news|biography|filesystem|coding|fx|web_lookup|other",',
+      '  "confidence": 0.0,',
+      '  "optimized_query": "string",',
+      '  "recommended_tools": ["tool_name"],',
+      '  "notes": "short guidance"',
+      '}',
+      '',
+      'Rules:',
+      '- Keep optimized_query concise and search-ready.',
+      '- For weather questions, include location and time words if available.',
+      '- Do not suggest repeated or near-duplicate web_search calls.',
+      '- If no better query exists, reuse the original intent with an empty optimized_query.'
+    ].join('\n');
+
+    try {
+      const raw = await withTimeout(
+        llm(
+          [
+            {
+              role: 'system',
+              content: 'You optimize intent detection and web search query quality for a tool-calling agent. Output strict JSON only.'
+            },
+            { role: 'user', content: prompt }
+          ],
+          { maxTokens: 220, temperature: 0.1, timeoutMs: 2200, retries: 0 }
+        ),
+        2600
+      );
+
+      const parsed = parseJsonObjectFromText(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+
+      const confidenceValue = Number(parsed.confidence);
+      const confidence = Number.isFinite(confidenceValue)
+        ? Math.max(0, Math.min(1, confidenceValue))
+        : 0;
+      const intent = normalizePlannerIntent(parsed.intent);
+      const optimizedQuery = normalizePlannerQuery(parsed.optimized_query);
+      const recommendedTools = normalizePlannerTools(parsed.recommended_tools, currentTools);
+      const notes = String(parsed.notes || '').replace(/\s{2,}/g, ' ').trim().slice(0, 180);
+
+      if (!optimizedQuery && !recommendedTools.length && intent === 'other') {
+        return null;
+      }
+
+      return {
+        intent,
+        confidence,
+        optimizedQuery,
+        recommendedTools,
+        notes
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function mergePlannerIntoPreflight(preflight, planner, userMessage) {
+    if (!planner) return preflight;
+
+    const mergedTools = [...new Set([
+      ...(Array.isArray(preflight?.recommendedTools) ? preflight.recommendedTools : []),
+      ...(Array.isArray(planner?.recommendedTools) ? planner.recommendedTools : [])
+    ])];
+
+    if (planner.intent === 'weather' && !mergedTools.includes('weather_current')) {
+      mergedTools.unshift('weather_current');
+    }
+
+    if (planner.optimizedQuery && detectWeatherIntent(userMessage) && !mergedTools.includes('web_search')) {
+      mergedTools.push('web_search');
+    }
+
+    const hints = [
+      ...(Array.isArray(preflight?.hints) ? preflight.hints : []),
+      `Planner intent: ${planner.intent} (confidence ${planner.confidence.toFixed(2)}).`
+    ];
+
+    if (planner.notes) {
+      hints.push(`Planner note: ${planner.notes}`);
+    }
+
+    if (planner.optimizedQuery) {
+      hints.push(`Planner optimized query: "${planner.optimizedQuery}". If web_search is needed, run one call with this query before trying variants.`);
+    }
+
+    hints.push('Loop guard: avoid repeated near-duplicate web_search calls in the same run.');
+
+    return {
+      ...preflight,
+      recommendedTools: mergedTools,
+      hints,
+      classification: classifyRecommendedTools(mergedTools),
+      planner
+    };
   }
 
   function buildPreflightPlan(userMessage) {
@@ -293,7 +274,7 @@
     }
 
     if (detectFilesystemIntent(text)) {
-      plan.push('fs_list_roots', 'fs_authorize_folder', 'fs_list_dir', 'fs_read_file', 'fs_search_name', 'fs_search_content');
+      plan.push('fs_list_roots', 'fs_authorize_folder', 'fs_list_dir', 'fs_walk', 'fs_read_file', 'fs_search_name', 'fs_search_content');
       hints.push('Filesystem intent detected: explore before mutating unless the user explicitly asked to save/export a file.');
       if (!state.roots.size) {
         hints.push('No local folder is authorized yet. Ask the user to click the "Authorize Folder" button in the Files panel before trying direct file access.');
@@ -309,7 +290,7 @@
     }
 
     if (detectProjectSkillsIntent(text)) {
-      plan.push('fs_list_dir', 'fs_read_file');
+      plan.push('fs_walk', 'fs_list_dir', 'fs_read_file');
       hints.push('Project + skills intent detected: read README and src/skills files before answering; prefer evidence-based summaries over assumptions.');
     }
 
@@ -1134,6 +1115,47 @@
     return '';
   }
 
+  function sanitizePathCandidate(candidate) {
+    return String(candidate || '')
+      .trim()
+      .replace(/^['"`]+|['"`]+$/g, '')
+      .replace(/[),.;:!?]+$/g, '')
+      .trim();
+  }
+
+  function extractPathCandidates(text) {
+    const value = String(text || '');
+    if (!value) return [];
+
+    const pattern = /(?:[A-Za-z]:\\[^\s"'`<>|]+|(?:\.{1,2}\/|\/)?[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+)/g;
+    const matches = value.match(pattern) || [];
+
+    return [...new Set(matches
+      .map(sanitizePathCandidate)
+      .filter(Boolean)
+      .filter(item => !/^https?:\/\//i.test(item)))];
+  }
+
+  function deriveFilesystemPathArg(args = {}, context = {}, toolName = 'fs_tool') {
+    const existing = String(args?.path || '').trim();
+    if (existing) return { ...args, path: existing };
+
+    const history = Array.isArray(context?.messages) ? context.messages : [];
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      const message = history[i];
+      if (message?.role !== 'user') continue;
+      const text = stripAgentTags(message.content);
+      const candidates = extractPathCandidates(text);
+      if (!candidates.length) continue;
+
+      const path = candidates[0];
+      console.debug(`${toolName}: recovered missing path from context`, path);
+      return { ...args, path };
+    }
+
+    return { ...args };
+  }
+
   async function runSearchSkills(query) {
     const diagnostics = [];
     const originalQuery = String(query || '').trim();
@@ -1625,62 +1647,34 @@
     );
   }
 
-  async function parseJsonText({ text }) {
-    const value = JSON.parse(String(text || ''));
-    return formatToolResult('parse_json', JSON.stringify(value, null, 2).slice(0, 12000));
+  function missingDataRuntime(name) {
+    return async () => {
+      throw new Error(`Data runtime unavailable: ${name}`);
+    };
   }
 
-  async function parseCsvText({ text }) {
-    const rows = String(text || '')
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .map(line => line.split(',').map(cell => cell.trim()));
+  const dataModuleFactory = window.AgentSkillModules?.createDataRuntime;
+  const dataRuntime = typeof dataModuleFactory === 'function'
+    ? dataModuleFactory({
+        formatToolResult,
+        TODOS_STORAGE_KEY,
+        TASKS_STORAGE_KEY
+      })
+    : {};
 
-    if (!rows.length) {
-      throw new Error('CSV input is empty.');
-    }
-
-    const preview = rows.slice(0, 10).map(row => row.join(' | ')).join('\n');
-    return formatToolResult('parse_csv', `Rows: ${rows.length}\nColumns: ${rows[0].length}\n\n${preview}`);
-  }
-
-  async function clipboardRead() {
-    if (!navigator.clipboard?.readText) {
-      throw new Error('Clipboard read is not supported in this browser.');
-    }
-
-    const text = await navigator.clipboard.readText();
-    return formatToolResult('clipboard_read', text || '(clipboard empty)');
-  }
-
-  async function clipboardWrite({ text }) {
-    if (!navigator.clipboard?.writeText) {
-      throw new Error('Clipboard write is not supported in this browser.');
-    }
-
-    await navigator.clipboard.writeText(String(text || ''));
-    return formatToolResult('clipboard_write', 'Clipboard updated.');
-  }
-
-  async function listStorageKeys() {
-    const lines = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key) continue;
-      lines.push(key);
-    }
-
-    return formatToolResult('storage_list_keys', lines.join('\n') || '(no localStorage keys)');
-  }
-
-  async function storageGet({ key }) {
-    return formatToolResult('storage_get', `${key} = ${localStorage.getItem(String(key))}`);
-  }
-
-  async function storageSet({ key, value }) {
-    localStorage.setItem(String(key), String(value ?? ''));
-    return formatToolResult('storage_set', `Saved ${key}`);
-  }
+  const parseJsonText = dataRuntime.parseJsonText || missingDataRuntime('parseJsonText');
+  const parseCsvText = dataRuntime.parseCsvText || missingDataRuntime('parseCsvText');
+  const clipboardRead = dataRuntime.clipboardRead || missingDataRuntime('clipboardRead');
+  const clipboardWrite = dataRuntime.clipboardWrite || missingDataRuntime('clipboardWrite');
+  const listStorageKeys = dataRuntime.listStorageKeys || missingDataRuntime('listStorageKeys');
+  const storageGet = dataRuntime.storageGet || missingDataRuntime('storageGet');
+  const storageSet = dataRuntime.storageSet || missingDataRuntime('storageSet');
+  const todoWrite = dataRuntime.todoWrite || missingDataRuntime('todoWrite');
+  const taskCreate = dataRuntime.taskCreate || missingDataRuntime('taskCreate');
+  const taskGet = dataRuntime.taskGet || missingDataRuntime('taskGet');
+  const taskList = dataRuntime.taskList || missingDataRuntime('taskList');
+  const taskUpdate = dataRuntime.taskUpdate || missingDataRuntime('taskUpdate');
+  const askUserQuestion = dataRuntime.askUserQuestion || missingDataRuntime('askUserQuestion');
 
   let notificationPermissionState = ('Notification' in window && window.Notification?.permission) || 'unsupported';
 
@@ -1821,12 +1815,25 @@
 
   async function buildInitialContext(userMessage) {
     const blocks = [];
-    const preflight = buildPreflightPlan(userMessage);
+    const baselinePreflight = buildPreflightPlan(userMessage);
+    let preflight = baselinePreflight;
+
+    try {
+      const planner = await planPreflightWithLlm(userMessage, baselinePreflight);
+      preflight = mergePlannerIntoPreflight(baselinePreflight, planner, userMessage);
+    } catch {}
 
     blocks.push(formatToolResult(
       'preflight',
       `Recommended tools: ${preflight.recommendedTools.join(', ') || 'none'}\nRisk level: ${preflight.classification?.riskLevel || 'normal'}\n${preflight.hints.join('\n')}`
     ));
+
+    if (preflight?.planner?.optimizedQuery) {
+      blocks.push(formatToolResult(
+        'query_plan',
+        `intent=${preflight.planner.intent}\nquery=${preflight.planner.optimizedQuery}\nconfidence=${preflight.planner.confidence.toFixed(2)}`
+      ));
+    }
 
     try {
       const prefetchedBlocks = await runDeferredPrefetches(userMessage, preflight);
@@ -1836,551 +1843,47 @@
     return blocks.length ? `<initial_context>\n${blocks.join('\n\n')}\n</initial_context>\n\n${userMessage}` : userMessage;
   }
 
-  function registerRoot(handle, label) {
-    const rootId = label || handle.name || `root-${state.roots.size + 1}`;
-    state.roots.set(rootId, handle);
-    if (!state.defaultRootId) state.defaultRootId = rootId;
-    return rootId;
-  }
-
-  function parseVirtualPath(path) {
-    const raw = String(path || '').trim();
-    if (!raw) return { rootId: state.defaultRootId, segments: [] };
-
-    const normalized = raw.replace(/\\/g, '/').replace(/\/+/g, '/');
-
-    const explicit = normalized.match(/^([^:]+):\/?(.*)$/);
-    if (explicit && state.roots.has(explicit[1])) {
-      return {
-        rootId: explicit[1],
-        segments: explicit[2].split('/').filter(Boolean)
-      };
-    }
-
-    const windowsAbsolute = normalized.match(/^[A-Za-z]:\/(.+)$/);
-    if (windowsAbsolute) {
-      const absoluteSegments = windowsAbsolute[1].split('/').filter(Boolean);
-      for (const rootId of state.roots.keys()) {
-        const rootName = String(rootId || '').toLowerCase();
-        const matchIndex = absoluteSegments.findIndex(segment => segment.toLowerCase() === rootName);
-        if (matchIndex >= 0) {
-          return {
-            rootId,
-            segments: absoluteSegments.slice(matchIndex + 1)
-          };
-        }
-      }
-    }
-
-    // Support paths that redundantly include the authorized root name,
-    // e.g. /agent, /Agent/src when rootId is "Agent".
-    const normalizedSegments = normalized.replace(/^\/+/, '').split('/').filter(Boolean);
-    if (normalizedSegments.length) {
-      const first = normalizedSegments[0].toLowerCase();
-      for (const rootId of state.roots.keys()) {
-        if (String(rootId || '').toLowerCase() === first) {
-          return {
-            rootId,
-            segments: normalizedSegments.slice(1)
-          };
-        }
-      }
-    }
-
-    return {
-      rootId: state.defaultRootId,
-      segments: normalized.replace(/^\/+/, '').split('/').filter(Boolean)
+  function missingFsRuntime(name) {
+    return async () => {
+      throw new Error(`Filesystem runtime unavailable: ${name}`);
     };
   }
 
-  async function ensureRoot(rootId) {
-    const id = rootId || state.defaultRootId;
-    const root = state.roots.get(id);
-    if (!root) {
-      throw new Error('No directory root selected. Ask the user to click "Authorize Folder" in the Files panel first.');
-    }
-    return { rootId: rootId || state.defaultRootId, root };
-  }
-
-  async function resolveDirectory(path, create = false) {
-    const { rootId, segments } = parseVirtualPath(path);
-    const { root } = await ensureRoot(rootId);
-    let current = root;
-
-    for (const segment of segments) {
-      current = await current.getDirectoryHandle(segment, { create });
-    }
-
-    return { rootId, handle: current };
-  }
-
-  async function resolveFile(path, create = false) {
-    const { rootId, segments } = parseVirtualPath(path);
-    if (!segments.length) throw new Error('A file path is required.');
-    const fileName = segments.pop();
-    const { root } = await ensureRoot(rootId);
-    let current = root;
-
-    for (const segment of segments) {
-      current = await current.getDirectoryHandle(segment, { create });
-    }
-
-    const handle = await current.getFileHandle(fileName, { create });
-    return { rootId, parent: current, handle, fileName };
-  }
-
-  async function readFileAsText(handle) {
-    const file = await handle.getFile();
-    return file.text();
-  }
-
-  async function writeFile(handle, content) {
-    const writer = await handle.createWritable();
-    await writer.write(content);
-    await writer.close();
-  }
-
-  async function collectEntries(directoryHandle) {
-    const entries = [];
-    for await (const [name, handle] of directoryHandle.entries()) {
-      entries.push({ name, kind: handle.kind });
-    }
-    return entries.sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  async function walkDirectory(directoryHandle, basePath = '') {
-    const items = [];
-    for await (const [name, handle] of directoryHandle.entries()) {
-      const fullPath = `${basePath}/${name}`.replace(/^\/+/, '/');
-      items.push({ path: fullPath, kind: handle.kind, handle });
-      if (handle.kind === 'directory') {
-        items.push(...await walkDirectory(handle, fullPath));
-      }
-    }
-    return items;
-  }
-
-  async function pickDirectory() {
-    assertFsAccess();
-    let handle;
-    try {
-      handle = await window.showDirectoryPicker();
-    } catch (error) {
-      if (/user gesture/i.test(String(error?.message || ''))) {
-        throw new Error('Directory access requires a direct user gesture. Ask the user to click "Authorize Folder" in the Files panel.');
-      }
-      throw error;
-    }
-    const rootId = registerRoot(handle, handle.name);
-    const entries = await collectEntries(handle);
-    return formatToolResult('fs_pick_directory', `Root: ${rootId}\nEntries: ${entries.length}\n${entries.map(item => `${item.kind}: ${item.name}`).join('\n')}`);
-  }
-
-  async function authorizeFolder() {
-    const roots = [...state.roots.keys()];
-    if (roots.length) {
-      const body = [
-        `Authorized roots: ${roots.join(', ')}`,
-        `Default root: ${state.defaultRootId || roots[0]}`,
-        'You can proceed with fs_list_dir or fs_read_file using one of these roots.'
-      ].join('\n');
-      return formatToolResult('fs_authorize_folder', body);
-    }
-
-    return formatToolResult(
-      'fs_authorize_folder',
-      [
-        'No folder is authorized yet.',
-        'Action required: click "Authorize Folder" in the Files panel (user gesture required by browser security).',
-        'After authorizing, call fs_list_roots and then fs_list_dir to continue.'
-      ].join('\n')
-    );
-  }
-
-  async function listDirectory({ path = '' }) {
-    const { rootId, handle } = await resolveDirectory(path);
-    const entries = await collectEntries(handle);
-    return formatToolResult('fs_list_dir', `Root: ${rootId}\nPath: ${path || '/'}\n${entries.map(item => `${item.kind}: ${item.name}`).join('\n') || '(empty)'}`);
-  }
-
-  async function readLocalFile({ path, offset = 0, length = 12000 }) {
-    const { handle } = await resolveFile(path, false);
-    const text = await readFileAsText(handle);
-    const safeOffset = Math.max(0, Number(offset) || 0);
-    const safeLength = Math.min(20000, Math.max(500, Number(length) || 12000));
-    const chunk = text.slice(safeOffset, safeOffset + safeLength);
-    const nextOffset = safeOffset + chunk.length;
-    const hasMore = nextOffset < text.length;
-
-    const header = [
-      `Path: ${path}`,
-      `Offset: ${safeOffset}`,
-      `Returned chars: ${chunk.length}`,
-      `Total chars: ${text.length}`,
-      `Has more: ${hasMore ? 'yes' : 'no'}`,
-      `Next offset: ${hasMore ? nextOffset : safeOffset}`
-    ].join('\n');
-
-    return formatToolResult(`fs_read_file ${path}`, `${header}\n\n${chunk}`);
-  }
-
-  async function pickUpload() {
-    if (!window.showOpenFilePicker) {
-      throw new Error('Open file picker is not supported in this browser.');
-    }
-
-    const handles = await window.showOpenFilePicker({ multiple: true });
-    const names = [];
-    for (const handle of handles) {
-      state.uploads.set(handle.name, handle);
-      names.push(handle.name);
-    }
-
-    return formatToolResult('fs_upload_pick', names.length ? names.join('\n') : 'No files selected.');
-  }
-
-  async function downloadFile({ path, content = '', filename = '' }) {
-    let blob;
-    let resolvedName = filename;
-
-    if (path) {
-      const { handle, fileName } = await resolveFile(path, false);
-      const file = await handle.getFile();
-      blob = file;
-      resolvedName = resolvedName || fileName;
-    } else {
-      blob = new Blob([String(content)], { type: 'text/plain;charset=utf-8' });
-      resolvedName = resolvedName || 'download.txt';
-    }
-
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = resolvedName;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-
-    return formatToolResult('fs_download_file', `Triggered browser download for ${resolvedName}`);
-  }
-
-  async function previewFile({ path }) {
-    const { handle, fileName } = await resolveFile(path, false);
-    const file = await handle.getFile();
-    const type = file.type || 'application/octet-stream';
-
-    if (type.startsWith('image/')) {
-      return formatToolResult('fs_preview_file', `Image preview available\nName: ${fileName}\nType: ${type}\nSize: ${file.size} bytes`);
-    }
-
-    if (type === 'application/pdf') {
-      return formatToolResult('fs_preview_file', `PDF preview available\nName: ${fileName}\nSize: ${file.size} bytes`);
-    }
-
-    if (supportsTextPreview(fileName)) {
-      return formatToolResult('fs_preview_file', (await file.text()).slice(0, 4000));
-    }
-
-    return formatToolResult('fs_preview_file', `Preview metadata only\nName: ${fileName}\nType: ${type}\nSize: ${file.size} bytes`);
-  }
-
-  async function searchByName({ path = '', pattern }) {
-    const { handle } = await resolveDirectory(path);
-    const entries = await walkDirectory(handle, path || '');
-    const needle = String(pattern || '').toLowerCase();
-    const matches = entries.filter(item => item.path.toLowerCase().includes(needle)).slice(0, 100);
-
-    return formatToolResult('fs_search_name', matches.length ? matches.map(item => `${item.kind}: ${item.path}`).join('\n') : 'No matches.');
-  }
-
-  async function searchByContent({ path = '', pattern }) {
-    const { handle } = await resolveDirectory(path);
-    const entries = await walkDirectory(handle, path || '');
-    const needle = String(pattern || '');
-    const matches = [];
-
-    for (const entry of entries) {
-      if (entry.kind !== 'file' || !supportsTextPreview(entry.handle.name)) continue;
-      const text = await readFileAsText(entry.handle);
-      if (text.includes(needle)) {
-        matches.push(entry.path);
-      }
-      if (matches.length >= 50) break;
-    }
-
-    return formatToolResult('fs_search_content', matches.length ? matches.join('\n') : 'No content matches.');
-  }
-
-  function escapeRegexLiteral(value) {
-    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  function globPatternToRegExp(pattern) {
-    const source = String(pattern || '**/*').replace(/\\/g, '/').trim() || '**/*';
-    let out = '^';
-
-    for (let i = 0; i < source.length; i += 1) {
-      const ch = source[i];
-      const next = source[i + 1];
-
-      if (ch === '*' && next === '*') {
-        out += '.*';
-        i += 1;
-        continue;
-      }
-
-      if (ch === '*') {
-        out += '[^/]*';
-        continue;
-      }
-
-      if (ch === '?') {
-        out += '[^/]';
-        continue;
-      }
-
-      out += escapeRegexLiteral(ch);
-    }
-
-    out += '$';
-    return new RegExp(out, 'i');
-  }
-
-  async function globPaths({ path = '', pattern = '**/*', includeDirectories = false, maxResults = 200 }) {
-    const { handle } = await resolveDirectory(path);
-    const entries = await walkDirectory(handle, path || '');
-    const matcher = globPatternToRegExp(pattern);
-    const limit = Math.max(1, Math.min(1000, Number(maxResults) || 200));
-
-    const matches = [];
-    for (const entry of entries) {
-      if (!includeDirectories && entry.kind !== 'file') continue;
-      const normalizedPath = String(entry.path || '').replace(/\\/g, '/').replace(/^\/+/, '');
-      if (!normalizedPath) continue;
-      if (!matcher.test(normalizedPath)) continue;
-      matches.push(`${entry.kind}: /${normalizedPath}`);
-      if (matches.length >= limit) break;
-    }
-
-    return formatToolResult(
-      'fs_glob',
-      `Path: ${path || '/'}\nPattern: ${pattern}\nMatches: ${matches.length}\n\n${matches.join('\n') || '(no matches)'}`
-    );
-  }
-
-  async function grepPaths({ path = '', pattern, isRegexp = false, caseSensitive = false, maxResults = 200 }) {
-    const rawPattern = String(pattern || '');
-    if (!rawPattern.trim()) {
-      throw new Error('grep requires a non-empty pattern.');
-    }
-
-    const flags = caseSensitive ? 'g' : 'gi';
-    const matcher = new RegExp(isRegexp ? rawPattern : escapeRegexLiteral(rawPattern), flags);
-    const { handle } = await resolveDirectory(path);
-    const entries = await walkDirectory(handle, path || '');
-    const limit = Math.max(1, Math.min(1000, Number(maxResults) || 200));
-    const results = [];
-
-    for (const entry of entries) {
-      if (entry.kind !== 'file' || !supportsTextPreview(entry.handle.name)) continue;
-      const text = await readFileAsText(entry.handle);
-      const lines = String(text || '').split(/\r?\n/);
-
-      for (let i = 0; i < lines.length; i += 1) {
-        const line = lines[i];
-        matcher.lastIndex = 0;
-        if (!matcher.test(line)) continue;
-        results.push(`${entry.path}:${i + 1}: ${line.slice(0, 220)}`);
-        if (results.length >= limit) break;
-      }
-
-      if (results.length >= limit) break;
-    }
-
-    return formatToolResult(
-      'fs_grep',
-      `Path: ${path || '/'}\nPattern: ${rawPattern}\nMatches: ${results.length}\n\n${results.join('\n') || '(no matches)'}`
-    );
-  }
-
-  async function editLocalFile({ path, oldText, newText, replaceAll = false }) {
-    const targetPath = String(path || '').trim();
-    if (!targetPath) throw new Error('file_edit requires a path.');
-
-    const before = String(oldText ?? '');
-    if (!before.length) throw new Error('file_edit requires oldText.');
-
-    const replacement = String(newText ?? '');
-    const { handle } = await resolveFile(targetPath, false);
-    const content = await readFileAsText(handle);
-    if (!String(content).includes(before)) {
-      throw new Error('file_edit could not find oldText in file.');
-    }
-
-    const updated = replaceAll
-      ? String(content).split(before).join(replacement)
-      : String(content).replace(before, replacement);
-
-    await writeFile(handle, updated);
-
-    return formatToolResult(
-      'file_edit',
-      `Edited file: ${targetPath}\nReplace all: ${replaceAll ? 'yes' : 'no'}\nOld length: ${before.length}\nNew length: ${replacement.length}`
-    );
-  }
-
-  function loadTodos() {
-    try {
-      const stored = JSON.parse(localStorage.getItem(TODOS_STORAGE_KEY) || '[]');
-      return Array.isArray(stored) ? stored : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function saveTodos(todos) {
-    localStorage.setItem(TODOS_STORAGE_KEY, JSON.stringify(todos));
-  }
-
-  async function todoWrite({ items, text }) {
-    const now = new Date().toISOString();
-    let normalizedItems = [];
-
-    if (Array.isArray(items)) {
-      normalizedItems = items
-        .map(item => {
-          if (typeof item === 'string') {
-            return { text: item.trim(), status: 'todo' };
-          }
-
-          const value = item && typeof item === 'object' ? item : null;
-          const itemText = String(value?.text || value?.title || '').trim();
-          const status = String(value?.status || 'todo').trim() || 'todo';
-          if (!itemText) return null;
-          return { text: itemText, status };
-        })
-        .filter(Boolean);
-    } else {
-      const lines = String(text || '')
-        .split(/\r?\n/)
-        .map(line => line.replace(/^\s*[-*\d.\[\]xX]+\s*/, '').trim())
-        .filter(Boolean);
-      normalizedItems = lines.map(line => ({ text: line, status: 'todo' }));
-    }
-
-    if (!normalizedItems.length) {
-      throw new Error('todo_write requires non-empty items or text.');
-    }
-
-    const next = normalizedItems.map((item, index) => ({
-      id: `todo_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`,
-      text: item.text,
-      status: item.status,
-      createdAt: now,
-      updatedAt: now
-    }));
-
-    saveTodos(next);
-
-    return formatToolResult(
-      'todo_write',
-      `Saved ${next.length} todo item(s).\n\n${next.map((item, index) => `${index + 1}. [${item.status}] ${item.text}`).join('\n')}`
-    );
-  }
-
-  function loadTasks() {
-    try {
-      const stored = JSON.parse(localStorage.getItem(TASKS_STORAGE_KEY) || '[]');
-      return Array.isArray(stored) ? stored : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function saveTasks(tasks) {
-    localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
-  }
-
-  function normalizeTaskStatus(status) {
-    const value = String(status || 'todo').toLowerCase().trim();
-    if (['todo', 'in_progress', 'done', 'blocked'].includes(value)) return value;
-    return 'todo';
-  }
-
-  async function taskCreate(args = {}) {
-    const title = String(args.title || '').trim();
-    if (!title) throw new Error('task_create requires title.');
-
-    const tasks = loadTasks();
-    const now = new Date().toISOString();
-    const task = {
-      id: `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      title,
-      description: String(args.description || '').trim(),
-      status: normalizeTaskStatus(args.status),
-      createdAt: now,
-      updatedAt: now
-    };
-
-    tasks.unshift(task);
-    saveTasks(tasks);
-    return formatToolResult('task_create', JSON.stringify(task, null, 2));
-  }
-
-  async function taskGet({ id }) {
-    const taskId = String(id || '').trim();
-    if (!taskId) throw new Error('task_get requires id.');
-    const task = loadTasks().find(item => item.id === taskId);
-    if (!task) throw new Error(`task_get: task not found (${taskId}).`);
-    return formatToolResult('task_get', JSON.stringify(task, null, 2));
-  }
-
-  async function taskList({ status, limit = 50 } = {}) {
-    const max = Math.max(1, Math.min(500, Number(limit) || 50));
-    const wanted = String(status || '').trim().toLowerCase();
-    const tasks = loadTasks()
-      .filter(item => !wanted || String(item.status || '').toLowerCase() === wanted)
-      .slice(0, max);
-
-    return formatToolResult(
-      'task_list',
-      tasks.length
-        ? tasks.map((item, index) => `${index + 1}. ${item.id} | [${item.status}] ${item.title}`).join('\n')
-        : '(no tasks)'
-    );
-  }
-
-  async function taskUpdate(args = {}) {
-    const taskId = String(args.id || '').trim();
-    if (!taskId) throw new Error('task_update requires id.');
-
-    const tasks = loadTasks();
-    const index = tasks.findIndex(item => item.id === taskId);
-    if (index < 0) throw new Error(`task_update: task not found (${taskId}).`);
-
-    const current = tasks[index];
-    const next = {
-      ...current,
-      ...(args.title !== undefined ? { title: String(args.title || '').trim() } : {}),
-      ...(args.description !== undefined ? { description: String(args.description || '').trim() } : {}),
-      ...(args.status !== undefined ? { status: normalizeTaskStatus(args.status) } : {}),
-      updatedAt: new Date().toISOString()
-    };
-
-    tasks[index] = next;
-    saveTasks(tasks);
-    return formatToolResult('task_update', JSON.stringify(next, null, 2));
-  }
-
-  async function askUserQuestion({ question, options }) {
-    const prompt = String(question || '').trim();
-    if (!prompt) throw new Error('ask_user_question requires question.');
-    const optionList = Array.isArray(options) ? options.map(item => `- ${String(item)}`).join('\n') : '';
-
-    return formatToolResult(
-      'ask_user_question',
-      `Question for user:\n${prompt}${optionList ? `\n\nOptions:\n${optionList}` : ''}\n\nRuntime note: direct interactive prompt tool is not available in this browser runtime. Ask the user in chat and continue after they reply.`
-    );
-  }
+  const fsModuleFactory = window.AgentSkillModules?.createFilesystemRuntime;
+  const fsRuntime = typeof fsModuleFactory === 'function'
+    ? fsModuleFactory({
+        state,
+        formatToolResult,
+        supportsFsAccess,
+        supportsTextPreview
+      })
+    : {};
+
+  const authorizeFolder = fsRuntime.authorizeFolder || missingFsRuntime('authorizeFolder');
+  const listDirectory = fsRuntime.listDirectory || missingFsRuntime('listDirectory');
+  const readLocalFile = fsRuntime.readLocalFile || missingFsRuntime('readLocalFile');
+  const pickUpload = fsRuntime.pickUpload || missingFsRuntime('pickUpload');
+  const downloadFile = fsRuntime.downloadFile || missingFsRuntime('downloadFile');
+  const previewFile = fsRuntime.previewFile || missingFsRuntime('previewFile');
+  const searchByName = fsRuntime.searchByName || missingFsRuntime('searchByName');
+  const searchByContent = fsRuntime.searchByContent || missingFsRuntime('searchByContent');
+  const globPaths = fsRuntime.globPaths || missingFsRuntime('globPaths');
+  const grepPaths = fsRuntime.grepPaths || missingFsRuntime('grepPaths');
+  const editLocalFile = fsRuntime.editLocalFile || missingFsRuntime('editLocalFile');
+  const writeTextFile = fsRuntime.writeTextFile || missingFsRuntime('writeTextFile');
+  const copyFile = fsRuntime.copyFile || missingFsRuntime('copyFile');
+  const deletePath = fsRuntime.deletePath || missingFsRuntime('deletePath');
+  const moveFile = fsRuntime.moveFile || missingFsRuntime('moveFile');
+  const renamePath = fsRuntime.renamePath || missingFsRuntime('renamePath');
+  const listRoots = fsRuntime.listRoots || missingFsRuntime('listRoots');
+  const fileExists = fsRuntime.fileExists || missingFsRuntime('fileExists');
+  const statPath = fsRuntime.statPath || missingFsRuntime('statPath');
+  const makeDirectory = fsRuntime.makeDirectory || missingFsRuntime('makeDirectory');
+  const touchFile = fsRuntime.touchFile || missingFsRuntime('touchFile');
+  const directoryTree = fsRuntime.directoryTree || missingFsRuntime('directoryTree');
+  const walkPaths = fsRuntime.walkPaths || missingFsRuntime('walkPaths');
+  const savePickedUpload = fsRuntime.savePickedUpload || missingFsRuntime('savePickedUpload');
+  const pickDirectory = fsRuntime.pickDirectory || missingFsRuntime('pickDirectory');
 
   async function toolSearch({ query = '', limit = 30 }) {
     const terms = String(query || '').toLowerCase().trim();
@@ -2400,475 +1903,83 @@
     );
   }
 
-  async function writeTextFile({ path, content }) {
-    if (!supportsFsAccess()) {
-      const fallbackName = String(path || 'download.txt').split(/[\\/]/).pop() || 'download.txt';
-      return downloadFile({ content, filename: fallbackName });
-    }
+  const registryModuleFactory = window.AgentSkillModules?.createRegistryRuntime;
+  const registryRuntime = typeof registryModuleFactory === 'function'
+    ? registryModuleFactory({
+        web_search: (args = {}, context = {}) => {
+          const recoveredQuery = deriveWebSearchQuery(args?.query, context);
+          return runSearchSkills(recoveredQuery);
+        },
+        web_fetch: args => fetchHttpResource(args),
+        read_page: ({ url }) => fetchReadablePage(url).then(text => formatToolResult(`read_page ${url}`, text)),
+        http_fetch: args => fetchHttpResource(args),
+        extract_links: args => extractLinks(args),
+        page_metadata: args => getPageMetadata(args),
+        geo_current_location: () => getCurrentLocation(),
+        weather_current: args => getCurrentWeather(args),
+        clipboard_read: () => clipboardRead(),
+        clipboard_write: args => clipboardWrite(args),
+        storage_list_keys: () => listStorageKeys(),
+        storage_get: args => storageGet(args),
+        storage_set: args => storageSet(args),
+        notification_request_permission: () => requestNotificationPermission(),
+        notification_send: args => sendNotification(args),
+        tab_broadcast: args => tabBroadcast(args),
+        tab_listen: args => tabListen(args),
+        fs_list_roots: () => listRoots(),
+        fs_authorize_folder: () => authorizeFolder(),
+        fs_pick_directory: () => pickDirectory(),
+        fs_list_dir: (args, context = {}) => listDirectory(deriveFilesystemPathArg(args, context, 'fs_list_dir')),
+        fs_tree: args => directoryTree(args),
+        fs_walk: (args, context = {}) => walkPaths(deriveFilesystemPathArg(args, context, 'fs_walk')),
+        fs_exists: args => fileExists(args),
+        fs_stat: args => statPath(args),
+        fs_read_file: (args, context = {}) => readLocalFile(deriveFilesystemPathArg(args, context, 'fs_read_file')),
+        fs_preview_file: (args, context = {}) => previewFile(deriveFilesystemPathArg(args, context, 'fs_preview_file')),
+        fs_search_name: (args, context = {}) => searchByName(deriveFilesystemPathArg(args, context, 'fs_search_name')),
+        fs_search_content: (args, context = {}) => searchByContent(deriveFilesystemPathArg(args, context, 'fs_search_content')),
+        fs_glob: args => globPaths(args),
+        fs_grep: args => grepPaths(args),
+        fs_upload_pick: () => pickUpload(),
+        fs_save_upload: args => savePickedUpload(args),
+        fs_download_file: args => downloadFile(args),
+        fs_mkdir: args => makeDirectory(args),
+        fs_touch: args => touchFile(args),
+        fs_write_file: args => writeTextFile(args),
+        fs_copy_file: args => copyFile(args),
+        fs_move_file: args => moveFile(args),
+        fs_delete_path: args => deletePath(args),
+        fs_rename_path: args => renamePath(args),
+        file_read: (args, context = {}) => readLocalFile(deriveFilesystemPathArg(args, context, 'file_read')),
+        read_file: (args, context = {}) => readLocalFile(deriveFilesystemPathArg(args, context, 'read_file')),
+        file_write: args => writeTextFile(args),
+        write_file: args => writeTextFile(args),
+        file_edit: args => editLocalFile(args),
+        edit_file: args => editLocalFile(args),
+        glob: args => globPaths(args),
+        grep: args => grepPaths(args),
+        parse_json: args => parseJsonText(args),
+        parse_csv: args => parseCsvText(args),
+        todo_write: args => todoWrite(args),
+        task_create: args => taskCreate(args),
+        task_get: args => taskGet(args),
+        task_list: args => taskList(args),
+        task_update: args => taskUpdate(args),
+        ask_user_question: args => askUserQuestion(args),
+        tool_search: args => toolSearch(args)
+      })
+    : {
+        registry: {},
+        skillGroups: {}
+      };
 
-    const { handle } = await resolveFile(path, true);
-    await writeFile(handle, String(content || ''));
-    return formatToolResult('fs_write_file', `Wrote file: ${path}`);
-  }
-  async function copyFile({ sourcePath, destinationPath }) {
-    const source = await resolveFile(sourcePath, false);
-    const destination = await resolveFile(destinationPath, true);
-    await writeFile(destination.handle, await readFileAsText(source.handle));
-    return formatToolResult('fs_copy_file', `Copied ${sourcePath} -> ${destinationPath}`);
-  }
-
-  async function deletePath({ path, recursive = true }) {
-    const parsed = parseVirtualPath(path);
-    if (!parsed.segments.length) throw new Error('Refusing to delete the root directory.');
-
-    const name = parsed.segments.pop();
-    const parentPath = parsed.rootId ? `${parsed.rootId}:/${parsed.segments.join('/')}` : parsed.segments.join('/');
-    const { handle: parent } = await resolveDirectory(parentPath, false);
-    await parent.removeEntry(name, { recursive: !!recursive });
-    return formatToolResult('fs_delete_path', `Deleted: ${path}`);
-  }
-
-  async function moveFile({ sourcePath, destinationPath }) {
-    await copyFile({ sourcePath, destinationPath });
-    await deletePath({ path: sourcePath, recursive: false });
-    return formatToolResult('fs_move_file', `Moved ${sourcePath} -> ${destinationPath}`);
-  }
-
-  async function renamePath({ path, newName }) {
-    const parsed = parseVirtualPath(path);
-    if (!parsed.segments.length) throw new Error('A path is required.');
-    const currentName = parsed.segments[parsed.segments.length - 1];
-    parsed.segments[parsed.segments.length - 1] = newName;
-    const destination = `${parsed.rootId}:/${parsed.segments.join('/')}`;
-    const source = `${parsed.rootId}:/${[...parsed.segments.slice(0, -1), currentName].join('/')}`;
-    return moveFile({ sourcePath: source, destinationPath: destination });
-  }
-
-  async function listRoots() {
-    const roots = [...state.roots.keys()];
-    if (!roots.length) {
-      return formatToolResult('fs_list_roots', '(no roots selected)\nTip: call fs_authorize_folder for the next authorization step.');
-    }
-
-    const lines = roots.map(rootId => {
-      const marker = rootId === state.defaultRootId ? ' (default)' : '';
-      return `${rootId}${marker}`;
-    });
-    return formatToolResult('fs_list_roots', lines.join('\n'));
-  }
-
-  async function fileExists({ path }) {
-    try {
-      await resolveFile(path, false);
-      return formatToolResult('fs_exists', `${path} = true`);
-    } catch {
-      try {
-        await resolveDirectory(path, false);
-        return formatToolResult('fs_exists', `${path} = true (directory)`);
-      } catch {
-        return formatToolResult('fs_exists', `${path} = false`);
-      }
-    }
-  }
-
-  async function statPath({ path }) {
-    try {
-      const { handle, fileName } = await resolveFile(path, false);
-      const file = await handle.getFile();
-      return formatToolResult('fs_stat', `Path: ${path}\nKind: file\nName: ${fileName}\nSize: ${file.size} bytes\nType: ${file.type || 'unknown'}\nLast modified: ${new Date(file.lastModified).toISOString()}`);
-    } catch {
-      const { handle } = await resolveDirectory(path, false);
-      const entries = await collectEntries(handle);
-      return formatToolResult('fs_stat', `Path: ${path || '/'}\nKind: directory\nEntries: ${entries.length}`);
-    }
-  }
-
-  async function makeDirectory({ path }) {
-    await resolveDirectory(path, true);
-    return formatToolResult('fs_mkdir', `Created directory: ${path}`);
-  }
-
-  async function touchFile({ path }) {
-    const { handle } = await resolveFile(path, true);
-    const file = await handle.getFile();
-    if (file.size === 0) {
-      return formatToolResult('fs_touch', `Touched file: ${path}`);
-    }
-    return formatToolResult('fs_touch', `File already exists: ${path}`);
-  }
-
-  async function directoryTree({ path = '' }) {
-    const { handle } = await resolveDirectory(path, false);
-    const entries = await walkDirectory(handle, path || '');
-    const lines = entries.slice(0, 200).map(entry => `${entry.kind}: ${entry.path}`);
-    return formatToolResult('fs_tree', lines.join('\n') || '(empty)');
-  }
-
-  async function savePickedUpload({ uploadName, destinationPath }) {
-    const handle = state.uploads.get(String(uploadName || ''));
-    if (!handle) {
-      throw new Error('Upload not found in session. Run fs_upload_pick first.');
-    }
-
-    const file = await handle.getFile();
-    const destination = await resolveFile(destinationPath, true);
-    await writeFile(destination.handle, await file.arrayBuffer());
-    return formatToolResult('fs_save_upload', `Saved upload ${uploadName} -> ${destinationPath}`);
-  }
-
-  const registry = {
-    web_search: {
-      name: 'web_search',
-      description: 'Performs live search skills and returns concise findings.',
-      retries: 1,
-      run: (args = {}, context = {}) => {
-        const recoveredQuery = deriveWebSearchQuery(args?.query, context);
-        return runSearchSkills(recoveredQuery);
-      }
-    },
-    read_page: {
-      name: 'read_page',
-      description: 'Fetches and extracts readable page content from a URL.',
-      retries: 1,
-      run: ({ url }) => fetchReadablePage(url).then(text => formatToolResult(`read_page ${url}`, text))
-    },
-    geo_current_location: {
-      name: 'geo_current_location',
-      description: 'Gets the current browser geolocation coordinates.',
-      retries: 1,
-      run: () => getCurrentLocation()
-    },
-    weather_current: {
-      name: 'weather_current',
-      description: 'Gets the current weather for the current or provided coordinates.',
-      retries: 1,
-      run: args => getCurrentWeather(args),
-      fallbacks: ['geo_current_location']
-    },
-    http_fetch: {
-      name: 'http_fetch',
-      description: 'Fetches an HTTP resource and returns a readable response preview.',
-      retries: 1,
-      run: args => fetchHttpResource(args)
-    },
-    web_fetch: {
-      name: 'web_fetch',
-      description: 'Alias of http_fetch for src compatibility.',
-      retries: 1,
-      run: args => fetchHttpResource(args)
-    },
-    extract_links: {
-      name: 'extract_links',
-      description: 'Extracts links from a URL or a block of text.',
-      retries: 1,
-      run: args => extractLinks(args)
-    },
-    page_metadata: {
-      name: 'page_metadata',
-      description: 'Extracts title and metadata from a web page.',
-      retries: 1,
-      run: args => getPageMetadata(args)
-    },
-    parse_json: {
-      name: 'parse_json',
-      description: 'Validates and pretty-prints JSON input.',
-      retries: 1,
-      run: args => parseJsonText(args)
-    },
-    parse_csv: {
-      name: 'parse_csv',
-      description: 'Parses CSV text and returns a structured preview.',
-      retries: 1,
-      run: args => parseCsvText(args)
-    },
-    clipboard_read: {
-      name: 'clipboard_read',
-      description: 'Reads text from the system clipboard when supported.',
-      retries: 1,
-      run: () => clipboardRead()
-    },
-    clipboard_write: {
-      name: 'clipboard_write',
-      description: 'Writes text to the system clipboard when supported.',
-      retries: 1,
-      run: args => clipboardWrite(args)
-    },
-    storage_list_keys: {
-      name: 'storage_list_keys',
-      description: 'Lists localStorage keys available to the app.',
-      retries: 1,
-      run: () => listStorageKeys()
-    },
-    storage_get: {
-      name: 'storage_get',
-      description: 'Reads a value from localStorage.',
-      retries: 1,
-      run: args => storageGet(args)
-    },
-    storage_set: {
-      name: 'storage_set',
-      description: 'Writes a value to localStorage.',
-      retries: 1,
-      run: args => storageSet(args)
-    },
-    notification_request_permission: {
-      name: 'notification_request_permission',
-      description: 'Requests native browser notification permission from the user. Use once before sending notifications if permission is still unknown.',
-      retries: 1,
-      run: () => requestNotificationPermission()
-    },
-    notification_send: {
-      name: 'notification_send',
-      description: 'Sends a native browser notification. Use when a long task finishes, when an important result needs attention, or when the user explicitly asks to be notified.',
-      retries: 1,
-      run: args => sendNotification(args)
-    },
-    tab_broadcast: {
-      name: 'tab_broadcast',
-      description: 'Publishes a message to other open tabs running this agent. Use to share results or coordinate work across multiple windows.',
-      retries: 1,
-      run: args => tabBroadcast(args)
-    },
-    tab_listen: {
-      name: 'tab_listen',
-      description: 'Waits for a broadcast message on a specific topic from another tab and returns the payload or a timeout error.',
-      retries: 1,
-      run: args => tabListen(args)
-    },
-    fs_list_roots: {
-      name: 'fs_list_roots',
-      description: 'Lists the currently selected local directory roots.',
-      retries: 1,
-      run: () => listRoots()
-    },
-    fs_authorize_folder: {
-      name: 'fs_authorize_folder',
-      description: 'Reports folder authorization status and tells the user how to authorize a directory from the Files panel when needed.',
-      retries: 1,
-      run: () => authorizeFolder()
-    },
-    fs_pick_directory: {
-      name: 'fs_pick_directory',
-      description: 'Prompts the user to pick a local directory root for direct file operations. This must be triggered from a direct user gesture, such as clicking the Authorize Folder button in the Files panel.',
-      retries: 1,
-      run: () => pickDirectory()
-    },
-    fs_list_dir: {
-      name: 'fs_list_dir',
-      description: 'Lists entries inside a selected local directory.',
-      retries: 1,
-      run: args => listDirectory(args),
-      fallbacks: ['fs_authorize_folder', 'fs_pick_directory']
-    },
-    fs_read_file: {
-      name: 'fs_read_file',
-      description: 'Opens and reads a local file as text, with optional chunking via offset and length.',
-      retries: 1,
-      run: args => readLocalFile(args)
-    },
-    fs_upload_pick: {
-      name: 'fs_upload_pick',
-      description: 'Opens the browser upload picker and registers selected files for the session.',
-      retries: 1,
-      run: () => pickUpload()
-    },
-    fs_download_file: {
-      name: 'fs_download_file',
-      description: 'Triggers a browser download from content or a local file path; use this when direct filesystem access is unavailable or when the user asks to export/download a file.',
-      retries: 1,
-      run: args => downloadFile(args)
-    },
-    fs_preview_file: {
-      name: 'fs_preview_file',
-      description: 'Returns preview information or text preview for a supported local file.',
-      retries: 1,
-      run: args => previewFile(args)
-    },
-    fs_search_name: {
-      name: 'fs_search_name',
-      description: 'Searches local files and folders by name pattern.',
-      retries: 1,
-      run: args => searchByName(args)
-    },
-    fs_search_content: {
-      name: 'fs_search_content',
-      description: 'Searches inside local text files for matching content.',
-      retries: 1,
-      run: args => searchByContent(args)
-    },
-    fs_glob: {
-      name: 'fs_glob',
-      description: 'Matches local paths using glob patterns (*, **, ?).',
-      retries: 1,
-      run: args => globPaths(args)
-    },
-    fs_grep: {
-      name: 'fs_grep',
-      description: 'Searches local file contents and returns path:line matches.',
-      retries: 1,
-      run: args => grepPaths(args)
-    },
-    fs_tree: {
-      name: 'fs_tree',
-      description: 'Recursively lists a local directory tree.',
-      retries: 1,
-      run: args => directoryTree(args)
-    },
-    fs_exists: {
-      name: 'fs_exists',
-      description: 'Checks whether a file or directory exists.',
-      retries: 1,
-      run: args => fileExists(args)
-    },
-    fs_stat: {
-      name: 'fs_stat',
-      description: 'Returns metadata about a file or directory.',
-      retries: 1,
-      run: args => statPath(args)
-    },
-    fs_mkdir: {
-      name: 'fs_mkdir',
-      description: 'Creates a local directory path.',
-      retries: 1,
-      run: args => makeDirectory(args)
-    },
-    fs_touch: {
-      name: 'fs_touch',
-      description: 'Creates an empty file if it does not exist.',
-      retries: 1,
-      run: args => touchFile(args)
-    },
-    fs_write_file: {
-      name: 'fs_write_file',
-      description: 'Creates or overwrites a local text file. If direct filesystem access is unavailable, it falls back to a browser download using the requested filename.',
-      retries: 1,
-      run: args => writeTextFile(args)
-    },
-    file_read: {
-      name: 'file_read',
-      description: 'Alias of fs_read_file for src compatibility.',
-      retries: 1,
-      run: args => readLocalFile(args)
-    },
-    read_file: {
-      name: 'read_file',
-      description: 'Alias of fs_read_file for src compatibility.',
-      retries: 1,
-      run: args => readLocalFile(args)
-    },
-    file_write: {
-      name: 'file_write',
-      description: 'Alias of fs_write_file for src compatibility.',
-      retries: 1,
-      run: args => writeTextFile(args)
-    },
-    write_file: {
-      name: 'write_file',
-      description: 'Alias of fs_write_file for src compatibility.',
-      retries: 1,
-      run: args => writeTextFile(args)
-    },
-    file_edit: {
-      name: 'file_edit',
-      description: 'Edits a local file by replacing oldText with newText.',
-      retries: 1,
-      run: args => editLocalFile(args)
-    },
-    edit_file: {
-      name: 'edit_file',
-      description: 'Alias of file_edit for src compatibility.',
-      retries: 1,
-      run: args => editLocalFile(args)
-    },
-    glob: {
-      name: 'glob',
-      description: 'Alias of fs_glob for src compatibility.',
-      retries: 1,
-      run: args => globPaths(args)
-    },
-    grep: {
-      name: 'grep',
-      description: 'Alias of fs_grep for src compatibility.',
-      retries: 1,
-      run: args => grepPaths(args)
-    },
-    todo_write: {
-      name: 'todo_write',
-      description: 'Stores a todo list in local browser state.',
-      retries: 1,
-      run: args => todoWrite(args)
-    },
-    task_create: {
-      name: 'task_create',
-      description: 'Creates a persisted task record.',
-      retries: 1,
-      run: args => taskCreate(args)
-    },
-    task_get: {
-      name: 'task_get',
-      description: 'Retrieves a persisted task by id.',
-      retries: 1,
-      run: args => taskGet(args)
-    },
-    task_list: {
-      name: 'task_list',
-      description: 'Lists persisted tasks with optional status filter.',
-      retries: 1,
-      run: args => taskList(args)
-    },
-    task_update: {
-      name: 'task_update',
-      description: 'Updates an existing persisted task.',
-      retries: 1,
-      run: args => taskUpdate(args)
-    },
-    ask_user_question: {
-      name: 'ask_user_question',
-      description: 'Asks the user for clarification in chat-friendly format.',
-      retries: 1,
-      run: args => askUserQuestion(args)
-    },
-    tool_search: {
-      name: 'tool_search',
-      description: 'Searches available tools by name and description.',
-      retries: 1,
-      run: args => toolSearch(args)
-    },
-    fs_copy_file: {
-      name: 'fs_copy_file',
-      description: 'Copies a local file from one path to another.',
-      retries: 1,
-      run: args => copyFile(args)
-    },
-    fs_move_file: {
-      name: 'fs_move_file',
-      description: 'Moves a local file from one path to another.',
-      retries: 1,
-      run: args => moveFile(args)
-    },
-    fs_delete_path: {
-      name: 'fs_delete_path',
-      description: 'Deletes a local file or directory under the selected root.',
-      retries: 1,
-      run: args => deletePath(args)
-    },
-    fs_rename_path: {
-      name: 'fs_rename_path',
-      description: 'Renames a local file or directory.',
-      retries: 1,
-      run: args => renamePath(args)
-    },
-    fs_save_upload: {
-      name: 'fs_save_upload',
-      description: 'Saves a previously picked upload into the selected local directory.',
-      retries: 1,
-      run: args => savePickedUpload(args)
-    }
-  };
+  const registry = registryRuntime.registry || {};
+  const skillGroups = registryRuntime.skillGroups || {};
 
   window.AgentSkills = {
     state,
     registry,
+    skillGroups,
     instanceId,
     extractEntities,
     detectFxPair,

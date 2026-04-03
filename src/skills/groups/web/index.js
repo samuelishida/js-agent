@@ -1,5 +1,10 @@
 (() => {
   window.AgentSkillGroups = window.AgentSkillGroups || {};
+  if (window.AgentSkills?.skillGroups?.web) {
+    window.AgentSkillGroups.web = window.AgentSkills.skillGroups.web;
+    return;
+  }
+
   window.AgentSkillGroups.web = {
     label: 'Web & Context',
     tools: [

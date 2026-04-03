@@ -266,7 +266,7 @@ function parseCloudProviderModel(rawModel) {
   const model = String(rawModel || '').trim();
   if (!model) return { provider: 'gemini', model: 'gemini-2.5-flash' };
 
-  const prefixed = model.match(/^(gemini|openai|claude|azure)\/(.+)$/i);
+  const prefixed = model.match(/^(gemini|openai|claude|azure|ollama)\/(.+)$/i);
   if (prefixed) {
     return {
       provider: prefixed[1].toLowerCase(),
@@ -301,6 +301,7 @@ async function callCloud(msgs, signal, options = {}) {
   if (provider === 'openai') return callOpenAiCloud(msgs, signal, options, model);
   if (provider === 'claude') return callClaudeCloud(msgs, signal, options, model);
   if (provider === 'azure') return callAzureOpenAiCloud(msgs, signal, options, model);
+  if (provider === 'ollama') return callOllamaCloud(msgs, signal, options, model);
   return callGeminiDirect(msgs, signal, options, model);
 }
 
@@ -770,6 +771,76 @@ async function callAzureOpenAiCloud(msgs, signal, options = {}, initialDeploymen
 
   const data = JSON.parse(text);
   return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || '';
+}
+
+async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
+  let configuredEndpoint = String(localStorage.getItem('agent_ollama_cloud_endpoint') || 'https://ollama.com').replace(/\/+$/, '');
+  // api.ollama.com responds with redirect for preflight; use canonical host to avoid that branch.
+  configuredEndpoint = configuredEndpoint.replace(/^https:\/\/api\.ollama\.com$/i, 'https://ollama.com');
+  const endpoint = /\/v1$/i.test(configuredEndpoint)
+    ? configuredEndpoint
+    : `${configuredEndpoint}/v1`;
+
+  const model = String(initialModel || 'llama3.1:8b').trim();
+  const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
+  const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
+  const body = {
+    model,
+    messages: buildOpenAiStyleMessages(msgs),
+    max_tokens: maxTokens,
+    temperature,
+    stream: false
+  };
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  let res;
+  try {
+    res = await fetch(`${endpoint}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal
+    });
+  } catch (e) {
+    if (signal?.aborted || e?.name === 'AbortError') throw e;
+
+    const error = new Error(
+      'Ollama Cloud request failed in browser. This is usually a CORS block. ' +
+      'Use a same-origin proxy endpoint (example: /api/ollama/v1) and save it in Ollama Cloud Endpoint.'
+    );
+    error.code = 'OLLAMA_CLOUD_CORS_BLOCKED';
+    throw error;
+  }
+
+  const text = await res.text();
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      const authError = new Error('Ollama Cloud authentication failed. Check your API key and endpoint.');
+      authError.status = res.status;
+      throw authError;
+    }
+
+    const error = new Error(`Ollama Cloud ${res.status}: ${text.slice(0, 300)}`);
+    error.status = res.status;
+    throw error;
+  }
+
+  const data = JSON.parse(text);
+  if (data.error) {
+    const error = new Error(data.error?.message || data.error || 'Ollama Cloud error');
+    if (Number.isFinite(data.error?.code)) error.status = Number(data.error.code);
+    throw error;
+  }
+
+  return data.choices?.[0]?.message?.content
+    || data.choices?.[0]?.text
+    || data.message?.content
+    || data.response
+    || '';
 }
 
 async function callLocal(msgs, signal, options = {}) {

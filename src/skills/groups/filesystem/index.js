@@ -1,5 +1,10 @@
-﻿(() => {
+(() => {
   window.AgentSkillGroups = window.AgentSkillGroups || {};
+  if (window.AgentSkills?.skillGroups?.filesystem) {
+    window.AgentSkillGroups.filesystem = window.AgentSkills.skillGroups.filesystem;
+    return;
+  }
+
   window.AgentSkillGroups.filesystem = {
     label: 'Local Files',
     tools: [
@@ -8,6 +13,7 @@
       { name: 'fs_pick_directory', signature: 'fs_pick_directory() // direct disk access when supported' },
       { name: 'fs_list_dir', signature: 'fs_list_dir(path)' },
       { name: 'fs_tree', signature: 'fs_tree(path)' },
+      { name: 'fs_walk', signature: 'fs_walk(path?, maxDepth?, maxResults?, includeFiles?, includeDirectories?)' },
       { name: 'fs_exists', signature: 'fs_exists(path)' },
       { name: 'fs_stat', signature: 'fs_stat(path)' },
       { name: 'fs_read_file', signature: 'fs_read_file(path, offset?, length?)' },
@@ -34,4 +40,3 @@
     ]
   };
 })();
-

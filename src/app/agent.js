@@ -10,6 +10,7 @@ function parseToolCall(text) {
 
 let stopRequested = false;
 let runDisabledToolCalls = new Set();
+let runDisabledSemanticToolCalls = new Set();
 const runToolFailureCounts = new Map();
 let runFsRootExplored = false;
 let runSuccessfulToolCount = 0;
@@ -22,6 +23,17 @@ let runCompactionState = {
   lastCompactionRound: 0,
   lastBeforeSize: 0,
   lastAfterSize: 0
+};
+let runToolResultReplacementState = {
+  seenSignatures: new Set(),
+  replacements: new Map()
+};
+let runCompactedResultNoticeSignatures = new Set();
+
+const TOOL_RESULT_CONTEXT_BUDGET = {
+  inlineMaxChars: 6000,
+  previewChars: 1800,
+  keepRecentResults: 8
 };
 
 function setStopButtonState(running) {
@@ -53,7 +65,13 @@ function throwIfStopRequested() {
 
 function resetRunGuards() {
   runDisabledToolCalls = new Set();
+  runDisabledSemanticToolCalls = new Set();
   runToolFailureCounts.clear();
+  runToolResultReplacementState = {
+    seenSignatures: new Set(),
+    replacements: new Map()
+  };
+  runCompactedResultNoticeSignatures = new Set();
   runFsRootExplored = false;
   runSuccessfulToolCount = 0;
   runLocalTimeoutStreak = 0;
@@ -70,6 +88,28 @@ function resetRunGuards() {
 
 function getToolCallSignature(call) {
   return `${call?.tool || 'unknown'}:${JSON.stringify(call?.args || {})}`;
+}
+
+function getSemanticToolCallSignature(call) {
+  const tool = String(call?.tool || '').trim();
+  if (!tool) return 'unknown';
+
+  if (tool !== 'web_search') {
+    return getToolCallSignature(call);
+  }
+
+  const rawQuery = String(call?.args?.query || '').trim();
+  const normalized = rawQuery
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\b(de|da|do|das|dos|para|por|com|na|no|nas|nos|em|e|a|o)\b/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  const tokens = [...new Set(normalized.split(/\s+/).filter(Boolean))].sort();
+  return `${tool}:${tokens.join(' ') || normalized || rawQuery.toLowerCase()}`;
 }
 
 function normalizeToolArgs(args) {
@@ -134,7 +174,7 @@ function registerCompactionFailure(round) {
 }
 
 function recordRepeatedToolCall(call) {
-  const signature = getToolCallSignature(call);
+  const signature = getSemanticToolCallSignature(call);
 
   if (signature === runLastToolCallSignature) {
     runRepeatedToolCallCount += 1;
@@ -144,7 +184,7 @@ function recordRepeatedToolCall(call) {
   }
 
   if (runRepeatedToolCallCount >= 2) {
-    runDisabledToolCalls.add(signature);
+    runDisabledSemanticToolCalls.add(signature);
     return { repeated: true, count: runRepeatedToolCallCount, signature };
   }
 
@@ -249,9 +289,14 @@ async function executeTool(call) {
   const { tool, args } = call;
 
   const callSignature = getToolCallSignature(call);
+  const semanticSignature = getSemanticToolCallSignature(call);
 
   if (runDisabledToolCalls.has(callSignature)) {
     return `ERROR: tool call '${callSignature}' is temporarily disabled for this run after repeated failures.`;
+  }
+
+  if (runDisabledSemanticToolCalls.has(semanticSignature)) {
+    return `ERROR: tool call '${tool}' was blocked to prevent repeated near-duplicate requests in this run.`;
   }
 
   if (!enabledTools[tool]) {
@@ -372,6 +417,116 @@ function fallbackCompressContext(userQuery) {
   }
 
   return [sysMsg, ...tail];
+}
+
+function applyToolResultContextBudget(call, result) {
+  const text = String(result || '');
+  if (!text) return text;
+
+  const signature = getToolCallSignature(call);
+  const existingReplacement = runToolResultReplacementState.replacements.get(signature);
+  if (existingReplacement !== undefined) {
+    return existingReplacement;
+  }
+
+  runToolResultReplacementState.seenSignatures.add(signature);
+
+  if (/^ERROR\b/i.test(text) || text.length <= TOOL_RESULT_CONTEXT_BUDGET.inlineMaxChars) {
+    return text;
+  }
+
+  const preview = text.slice(0, TOOL_RESULT_CONTEXT_BUDGET.previewChars).trimEnd();
+  const compacted = [
+    '[tool_result_compacted]',
+    `Tool: ${call?.tool || 'unknown'}`,
+    `Original chars: ${text.length}`,
+    '',
+    'Preview:',
+    preview,
+    '',
+    'Use narrower follow-up tool calls if full output is required.'
+  ].join('\n');
+
+  runToolResultReplacementState.replacements.set(signature, compacted);
+  return compacted;
+}
+
+function microcompactToolResultMessages(msgs, keepRecent = TOOL_RESULT_CONTEXT_BUDGET.keepRecentResults) {
+  const toolResultIndexes = [];
+  for (let i = 0; i < msgs.length; i += 1) {
+    const msg = msgs[i];
+    if (msg?.role !== 'user') continue;
+    if (!String(msg?.content || '').includes('<tool_result')) continue;
+    toolResultIndexes.push(i);
+  }
+
+  if (toolResultIndexes.length <= keepRecent) {
+    return { messages: msgs, clearedCount: 0, savedChars: 0 };
+  }
+
+  const keepSet = new Set(toolResultIndexes.slice(-Math.max(1, keepRecent)));
+  const next = [...msgs];
+  let clearedCount = 0;
+  let savedChars = 0;
+
+  for (const index of toolResultIndexes) {
+    if (keepSet.has(index)) continue;
+
+    const original = String(msgs[index]?.content || '');
+    if (original.includes('[Old tool result content cleared by microcompact]')) continue;
+
+    const compacted = original.replace(
+      /<tool_result([^>]*)>[\s\S]*?<\/tool_result>/gi,
+      '<tool_result$1>\n[Old tool result content cleared by microcompact]\n</tool_result>'
+    );
+
+    if (compacted === original) continue;
+    clearedCount += 1;
+    savedChars += Math.max(0, original.length - compacted.length);
+    next[index] = { ...msgs[index], content: compacted };
+  }
+
+  return { messages: next, clearedCount, savedChars };
+}
+
+async function applyContextManagementPipeline({ round, userMessage, ctxLimit }) {
+  const microcompact = microcompactToolResultMessages(messages);
+  if (microcompact.clearedCount > 0) {
+    messages = microcompact.messages;
+    addNotice(`Context manager: cleared ${microcompact.clearedCount} older tool result(s), saved ~${microcompact.savedChars} chars.`);
+  }
+
+  const currentCtxSize = ctxSize(messages);
+  if (currentCtxSize <= ctxLimit) {
+    return;
+  }
+
+  if (!canAttemptCompaction(round, currentCtxSize, ctxLimit)) {
+    addNotice('Context near limit, but compaction is cooling down after recent attempts/failures.');
+    return;
+  }
+
+  try {
+    const beforeSize = currentCtxSize;
+    messages = await summarizeContext(userMessage);
+    const afterSize = ctxSize(messages);
+
+    // If summarization does not reduce enough, fall back to deterministic tail compression.
+    if (afterSize >= (beforeSize * 0.9)) {
+      addNotice('LLM summarization reduction was small; applying deterministic tail compression.');
+      messages = fallbackCompressContext(userMessage);
+    }
+
+    registerCompactionSuccess(round, beforeSize, ctxSize(messages));
+  } catch (e) {
+    registerCompactionFailure(round);
+    addNotice(`? Summarization failed: ${e.message}`);
+    messages = fallbackCompressContext(userMessage);
+    addNotice('Applied fallback context compression without LLM.');
+    if (runCompactionState.consecutiveFailures >= 2) {
+      addNotice('Compaction disabled for this run after repeated failures.');
+    }
+  }
 }
 
 // -- AGENTIC LOOP --------------------------------------------------------------
@@ -556,7 +711,16 @@ async function agentLoop(userMessage) {
         }
 
         const failureState = recordToolFailure(toolCall, result);
-        messages.push({ role: 'user', content: `<tool_result tool="${toolCall.tool}">\n${result}\n</tool_result>` });
+        const contextSafeResult = applyToolResultContextBudget(toolCall, result);
+        if (contextSafeResult !== String(result || '')) {
+          const signature = getToolCallSignature(toolCall);
+          if (!runCompactedResultNoticeSignatures.has(signature)) {
+            runCompactedResultNoticeSignatures.add(signature);
+            addNotice(`Context manager compacted a large ${toolCall.tool} result before storing it in history.`);
+          }
+        }
+
+        messages.push({ role: 'user', content: `<tool_result tool="${toolCall.tool}">\n${contextSafeResult}\n</tool_result>` });
 
         if (failureState.repeated) {
           messages.push({
@@ -568,35 +732,7 @@ async function agentLoop(userMessage) {
       }
     }
 
-    // Check context limit
-    const currentCtxSize = ctxSize(messages);
-    if (currentCtxSize > CTX_LIMIT) {
-      if (!canAttemptCompaction(round, currentCtxSize, CTX_LIMIT)) {
-        addNotice('Context near limit, but compaction is cooling down after recent attempts/failures.');
-      } else {
-        try {
-          const beforeSize = currentCtxSize;
-          messages = await summarizeContext(userMessage);
-          const afterSize = ctxSize(messages);
-
-          // If summarization does not reduce enough, fall back to deterministic tail compression.
-          if (afterSize >= (beforeSize * 0.9)) {
-            addNotice('LLM summarization reduction was small; applying deterministic tail compression.');
-            messages = fallbackCompressContext(userMessage);
-          }
-
-          registerCompactionSuccess(round, beforeSize, ctxSize(messages));
-        } catch (e) {
-          registerCompactionFailure(round);
-          addNotice(`? Summarization failed: ${e.message}`);
-          messages = fallbackCompressContext(userMessage);
-          addNotice('Applied fallback context compression without LLM.');
-          if (runCompactionState.consecutiveFailures >= 2) {
-            addNotice('Compaction disabled for this run after repeated failures.');
-          }
-        }
-      }
-    }
+    await applyContextManagementPipeline({ round, userMessage, ctxLimit: CTX_LIMIT });
 
     syncSessionState();
     updateCtxBar();
@@ -861,6 +997,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initBusySync();
   updateFileAccessStatus();
   loadGithubTokenStatus();
+  if (typeof loadOllamaCloudEndpoint === 'function') {
+    loadOllamaCloudEndpoint();
+  }
   if (!chatSessions.length) createSession();
   if (!getActiveSession()) activeSessionId = chatSessions[0]?.id || createSession().id;
   renderSessionList();

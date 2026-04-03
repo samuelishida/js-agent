@@ -1,5 +1,10 @@
 (() => {
   window.AgentSkillGroups = window.AgentSkillGroups || {};
+  if (window.AgentSkills?.skillGroups?.data) {
+    window.AgentSkillGroups.data = window.AgentSkills.skillGroups.data;
+    return;
+  }
+
   window.AgentSkillGroups.data = {
     label: 'Data',
     tools: [

@@ -1,5 +1,10 @@
 (() => {
   window.AgentSkillGroups = window.AgentSkillGroups || {};
+  if (window.AgentSkills?.skillGroups?.device) {
+    window.AgentSkillGroups.device = window.AgentSkills.skillGroups.device;
+    return;
+  }
+
   window.AgentSkillGroups.device = {
     label: 'Device & Browser',
     tools: [

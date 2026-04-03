@@ -1,449 +1,285 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>JS Agent Architecture</title>
-<style>
-  :root {
-    --bg: #0c1117;
-    --panel: #121923;
-    --panel-2: #182231;
-    --line: rgba(255,255,255,0.08);
-    --line-strong: rgba(255,255,255,0.16);
-    --text: #e8eef7;
-    --muted: #9aa8bb;
-    --soft: #6e7d92;
-    --blue: #63a4ff;
-    --green: #53d3a6;
-    --amber: #ffbd59;
-    --rose: #ff8f8f;
-    --mono: "JetBrains Mono", "Fira Code", monospace;
-    --sans: "Segoe UI", "Inter", sans-serif;
-  }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JS Agent - Architecture</title>
+  <style>
+    :root {
+      --bg: #0a1118;
+      --panel: #111b27;
+      --panel-2: #172436;
+      --line: rgba(255, 255, 255, 0.12);
+      --text: #e8eef7;
+      --muted: #9caecc;
+      --accent: #74b2ff;
+      --ok: #61d4a4;
+      --warn: #ffd27a;
+      --mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
+      --sans: "Segoe UI", "Inter", system-ui, sans-serif;
+    }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    background: radial-gradient(circle at top, #152132 0%, var(--bg) 50%);
-    color: var(--text);
-    font: 14px/1.6 var(--sans);
-    padding: 28px;
-  }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
-  .wrap { max-width: 1180px; margin: 0 auto; }
-  header {
-    display: flex;
-    justify-content: space-between;
-    gap: 24px;
-    align-items: flex-start;
-    margin-bottom: 28px;
-    flex-wrap: wrap;
-  }
-  h1 { font-size: 28px; line-height: 1.1; letter-spacing: -0.03em; }
-  .sub { color: var(--muted); max-width: 720px; margin-top: 10px; }
-  .badges { display: flex; gap: 10px; flex-wrap: wrap; }
-  .badge {
-    border: 1px solid var(--line-strong);
-    border-radius: 999px;
-    padding: 6px 10px;
-    font: 12px var(--mono);
-    color: var(--muted);
-    background: rgba(255,255,255,0.03);
-  }
+    body {
+      background: radial-gradient(circle at top left, #162437 0%, var(--bg) 48%);
+      color: var(--text);
+      font: 14px/1.6 var(--sans);
+      padding: 20px;
+    }
 
-  .hero {
-    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
-    border: 1px solid var(--line);
-    border-radius: 18px;
-    padding: 20px;
-    margin-bottom: 22px;
-    overflow-x: auto;
-  }
+    .wrap { max-width: 1120px; margin: 0 auto; }
 
-  svg { display: block; min-width: 980px; width: 100%; height: auto; }
-  .panel {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 18px;
-    padding: 20px;
-    margin-bottom: 18px;
-  }
-  .panel h2 {
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: var(--muted);
-    margin-bottom: 14px;
-  }
-  .panel p { color: var(--muted); }
+    h1 {
+      font-size: 28px;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
 
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 14px;
-  }
-  .card {
-    background: var(--panel-2);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 16px;
-  }
-  .card .k {
-    color: var(--soft);
-    font: 11px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-bottom: 8px;
-  }
-  .card .v {
-    font-size: 15px;
-    font-weight: 600;
-    margin-bottom: 8px;
-  }
-  .card .d {
-    color: var(--muted);
-    font-size: 13px;
-  }
+    .sub {
+      color: var(--muted);
+      max-width: 900px;
+      margin-bottom: 16px;
+    }
 
-  details {
-    background: var(--panel-2);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    margin-bottom: 12px;
-    overflow: hidden;
-  }
-  summary {
-    list-style: none;
-    cursor: pointer;
-    padding: 16px 18px;
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    align-items: center;
-  }
-  summary::-webkit-details-marker { display: none; }
-  .summary-text strong { display: block; font-size: 15px; }
-  .summary-text span { color: var(--muted); font-size: 13px; }
-  .chev { color: var(--soft); font: 18px var(--mono); }
-  details[open] .chev { color: var(--blue); }
-  .body {
-    border-top: 1px solid var(--line);
-    padding: 16px 18px 18px;
-  }
-  .body p { margin-bottom: 12px; }
-  pre {
-    background: #0b1016;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 14px 16px;
-    overflow-x: auto;
-    white-space: pre;
-    color: #dbe7f6;
-    font: 12px/1.75 var(--mono);
-  }
+    .badges {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
 
-  .cols {
-    display: grid;
-    grid-template-columns: 1.1fr 0.9fr;
-    gap: 18px;
-  }
-  ul {
-    padding-left: 18px;
-    color: var(--muted);
-  }
-  li + li { margin-top: 8px; }
+    .badge {
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--muted);
+      font: 12px var(--mono);
+    }
 
-  @media (max-width: 920px) {
-    body { padding: 16px; }
-    .cols { grid-template-columns: 1fr; }
-  }
-</style>
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+
+    .panel h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .panel p {
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel-2);
+      padding: 12px;
+    }
+
+    .k {
+      color: var(--muted);
+      font: 11px var(--mono);
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      letter-spacing: 0.08em;
+    }
+
+    .v {
+      font-size: 15px;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    .d { color: var(--muted); }
+
+    ul { padding-left: 18px; }
+    li { color: var(--muted); margin-bottom: 6px; }
+
+    .mermaid {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #0e1824;
+      padding: 10px;
+      overflow-x: auto;
+    }
+
+    code {
+      font-family: var(--mono);
+      font-size: 12px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--line);
+      padding: 1px 6px;
+      border-radius: 6px;
+    }
+  </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div>
-      <h1>JS Agent Architecture</h1>
-      <p class="sub">
-        Browser-native multi-step agent with modular app/runtime layers, hosted and local model routing,
-        alias-compatible browser skills, batched tool execution, filesystem fallbacks, and multi-tab coordination.
-      </p>
-    </div>
+  <div class="wrap">
+    <h1>JS Agent Architecture</h1>
+    <p class="sub">
+      Updated architecture for the current browser runtime with modular skills, preflight query steering,
+      semantic loop guards, and an explicit context-management pipeline.
+    </p>
+
     <div class="badges">
       <div class="badge">runtime: browser</div>
-      <div class="badge">loop: transition + batched tools</div>
-      <div class="badge">skills: registry-based</div>
-      <div class="badge">multi-tab: BroadcastChannel</div>
-    </div>
-  </header>
-
-  <section class="hero">
-    <svg viewBox="0 0 1080 420" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-          <path d="M1 1 L9 5 L1 9" fill="none" stroke="context-stroke" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-        </marker>
-      </defs>
-
-      <rect x="36" y="54" width="170" height="90" rx="14" fill="#152033" stroke="#63a4ff" stroke-width="1.3"/>
-      <text x="121" y="88" text-anchor="middle" fill="#dce9f8" font-size="16" font-family="Segoe UI" font-weight="600">User + UI</text>
-      <text x="121" y="112" text-anchor="middle" fill="#8ea5c0" font-size="12" font-family="JetBrains Mono">sidebar, chat, sessions</text>
-      <text x="121" y="130" text-anchor="middle" fill="#8ea5c0" font-size="12" font-family="JetBrains Mono">input, status, tool toggles</text>
-
-      <rect x="266" y="40" width="220" height="118" rx="14" fill="#162230" stroke="#53d3a6" stroke-width="1.3"/>
-      <text x="376" y="78" text-anchor="middle" fill="#e8f7f1" font-size="16" font-family="Segoe UI" font-weight="600">App Modules</text>
-      <text x="376" y="104" text-anchor="middle" fill="#9ccdbd" font-size="12" font-family="JetBrains Mono">state.js | tools.js | agent.js</text>
-      <text x="376" y="122" text-anchor="middle" fill="#9ccdbd" font-size="12" font-family="JetBrains Mono">llm.js | local-backend.js</text>
-
-      <rect x="546" y="40" width="220" height="118" rx="14" fill="#1f1d2d" stroke="#ffbd59" stroke-width="1.3"/>
-      <text x="656" y="78" text-anchor="middle" fill="#fff0cf" font-size="16" font-family="Segoe UI" font-weight="600">Orchestrator Layer</text>
-      <text x="656" y="104" text-anchor="middle" fill="#d9c08f" font-size="12" font-family="JetBrains Mono">prompt-loader.js</text>
-      <text x="656" y="122" text-anchor="middle" fill="#d9c08f" font-size="12" font-family="JetBrains Mono">regex.js + orchestrator.js</text>
-
-      <rect x="826" y="40" width="218" height="118" rx="14" fill="#251d22" stroke="#ff8f8f" stroke-width="1.3"/>
-      <text x="935" y="78" text-anchor="middle" fill="#ffe1e1" font-size="16" font-family="Segoe UI" font-weight="600">Model Routing</text>
-      <text x="935" y="104" text-anchor="middle" fill="#d9a5a5" font-size="12" font-family="JetBrains Mono">Gemini hosted API</text>
-      <text x="935" y="122" text-anchor="middle" fill="#d9a5a5" font-size="12" font-family="JetBrains Mono">or local OpenAI-compatible backend</text>
-
-      <rect x="266" y="234" width="220" height="118" rx="14" fill="#182434" stroke="#63a4ff" stroke-width="1.3"/>
-      <text x="376" y="272" text-anchor="middle" fill="#dce9f8" font-size="16" font-family="Segoe UI" font-weight="600">Skill Registry</text>
-      <text x="376" y="298" text-anchor="middle" fill="#8ea5c0" font-size="12" font-family="JetBrains Mono">shared.js + grouped skill metadata</text>
-      <text x="376" y="316" text-anchor="middle" fill="#8ea5c0" font-size="12" font-family="JetBrains Mono">web, parse, device, filesystem</text>
-
-      <rect x="546" y="234" width="220" height="118" rx="14" fill="#162a22" stroke="#53d3a6" stroke-width="1.3"/>
-      <text x="656" y="272" text-anchor="middle" fill="#e8f7f1" font-size="16" font-family="Segoe UI" font-weight="600">Browser Capabilities</text>
-      <text x="656" y="298" text-anchor="middle" fill="#9ccdbd" font-size="12" font-family="JetBrains Mono">clipboard, storage, notifications</text>
-      <text x="656" y="316" text-anchor="middle" fill="#9ccdbd" font-size="12" font-family="JetBrains Mono">BroadcastChannel, downloads, FS API</text>
-
-      <rect x="826" y="234" width="218" height="118" rx="14" fill="#2a2417" stroke="#ffbd59" stroke-width="1.3"/>
-      <text x="935" y="272" text-anchor="middle" fill="#fff0cf" font-size="16" font-family="Segoe UI" font-weight="600">Persistence + Sync</text>
-      <text x="935" y="298" text-anchor="middle" fill="#d9c08f" font-size="12" font-family="JetBrains Mono">localStorage sessions + tool cache</text>
-      <text x="935" y="316" text-anchor="middle" fill="#d9c08f" font-size="12" font-family="JetBrains Mono">cache sync + busy sync across tabs</text>
-
-      <line x1="206" y1="98" x2="264" y2="98" stroke="#63a4ff" stroke-width="1.5" marker-end="url(#arrow)"/>
-      <line x1="486" y1="98" x2="544" y2="98" stroke="#53d3a6" stroke-width="1.5" marker-end="url(#arrow)"/>
-      <line x1="766" y1="98" x2="824" y2="98" stroke="#ffbd59" stroke-width="1.5" marker-end="url(#arrow)"/>
-      <line x1="376" y1="160" x2="376" y2="232" stroke="#63a4ff" stroke-width="1.5" marker-end="url(#arrow)"/>
-      <line x1="656" y1="160" x2="656" y2="232" stroke="#53d3a6" stroke-width="1.5" marker-end="url(#arrow)"/>
-      <line x1="935" y1="160" x2="935" y2="232" stroke="#ff8f8f" stroke-width="1.5" marker-end="url(#arrow)"/>
-      <path d="M486 292 C520 292, 520 292, 544 292" fill="none" stroke="#63a4ff" stroke-width="1.5" marker-end="url(#arrow)"/>
-      <path d="M766 292 C796 292, 796 292, 824 292" fill="none" stroke="#53d3a6" stroke-width="1.5" marker-end="url(#arrow)"/>
-    </svg>
-  </section>
-
-  <section class="panel">
-    <h2>Current Runtime Snapshot</h2>
-    <div class="grid">
-      <div class="card">
-        <div class="k">UI shell</div>
-        <div class="v">Collapsible sidebar + retractable panels</div>
-        <div class="d">Chat, model controls, runtime toggles, sessions, capability groups, and activity live in one browser page.</div>
-      </div>
-      <div class="card">
-        <div class="k">Agent loop</div>
-        <div class="v">Round-bounded transition loop</div>
-        <div class="d">The app builds a system prompt, parses one or more tool calls, executes safe batches, injects tool results, and exits on final answer or deterministic stop conditions.</div>
-      </div>
-      <div class="card">
-        <div class="k">Routing</div>
-        <div class="v">Hosted or local model path</div>
-        <div class="d">Requests can go to Gemini or to a locally probed OpenAI-compatible backend such as LM Studio or Ollama-style endpoints. Best local results so far: <code>mistralai/ministral-3-14b-reasoning</code>.</div>
-      </div>
-      <div class="card">
-        <div class="k">Storage</div>
-        <div class="v">Browser-only persistence</div>
-        <div class="d">API key, sessions, active session id, local backend preferences, sidebar state, and tool cache are kept in localStorage.</div>
-      </div>
-    </div>
-  </section>
-
-  <section class="cols">
-    <div class="panel">
-      <h2>Execution Flow</h2>
-
-      <details open>
-        <summary>
-          <div class="summary-text">
-            <strong>1. Bootstrap and module wiring</strong>
-            <span>`index.html` loads core, skills, and app modules in order.</span>
-          </div>
-          <span class="chev">+</span>
-        </summary>
-        <div class="body">
-          <p>The page loads prompt helpers, skill modules, the orchestrator, and then the app modules. `DOMContentLoaded` restores sessions, initializes sidebar state, probes local backends, and wires tab-level sync channels.</p>
-          <pre>&lt;script src="src/core/regex.js" defer&gt;&lt;/script&gt;
-&lt;script src="src/core/prompt-loader.js" defer&gt;&lt;/script&gt;
-&lt;script src="src/skills/shared.js" defer&gt;&lt;/script&gt;
-&lt;script src="src/core/orchestrator.js" defer&gt;&lt;/script&gt;
-&lt;script src="src/app/state.js" defer&gt;&lt;/script&gt;
-&lt;script src="src/app/agent.js" defer&gt;&lt;/script&gt;</pre>
-        </div>
-      </details>
-
-      <details>
-        <summary>
-          <div class="summary-text">
-            <strong>2. Prompt creation and policy layer</strong>
-            <span>`prompt-loader.js` + `orchestrator.js` build the final system prompt.</span>
-          </div>
-          <span class="chev">+</span>
-        </summary>
-        <div class="body">
-          <p>The orchestrator receives enabled tools, normalizes source-compatible aliases, composes the prompt contract, and handles tool-call parsing plus summarization prompts when context gets too large.</p>
-          <pre>buildSystemPrompt({
-  userMessage,
-  maxRounds,
-  ctxLimit,
-  enabledTools
-})</pre>
-        </div>
-      </details>
-
-      <details>
-        <summary>
-          <div class="summary-text">
-            <strong>3. Agent loop</strong>
-            <span>The app keeps iterating until a final answer or max rounds.</span>
-          </div>
-          <span class="chev">+</span>
-        </summary>
-        <div class="body">
-          <p>The loop sends current history to the selected model, parses one or more tool calls, executes a concurrency-safe batch through the registry, appends `tool_result` blocks, and continues. If the model answers directly, the loop stops and renders a Markdown-first response through the sanitizer pipeline.</p>
-          <pre>while (round &lt; MAX_ROUNDS) {
-  const reply = await callModel(messages);
-  const toolCalls = parseToolCalls(reply);
-  if (!toolCalls.length) return finalAnswer(reply);
-
-  const results = await executeToolBatch(toolCalls);
-  messages.push({ role: "user", content: toolResultsBlock(results) });
-
-  if (ctxSize(messages) &gt; CTX_LIMIT) {
-    messages = await summarizeContext(userMessage);
-  }
-}</pre>
-        </div>
-      </details>
-
-      <details>
-        <summary>
-          <div class="summary-text">
-            <strong>4. Skill execution</strong>
-            <span>Tools resolve through `window.AgentSkills.registry`.</span>
-          </div>
-          <span class="chev">+</span>
-        </summary>
-        <div class="body">
-          <p>The registry covers search, parsing, clipboard, storage, notifications, multi-tab messaging, task/todo helpers, and filesystem actions. Source-style aliases are normalized before execution, and the app can toggle tool availability without changing skill code.</p>
-          <pre>{
-  web_search,
-  web_fetch,
-  fs_glob,
-  fs_grep,
-  file_edit,
-  todo_write,
-  task_create,
-  tool_search,
-  read_page,
-  parse_json,
-  clipboard_write,
-  notification_send,
-  tab_broadcast,
-  tab_listen,
-  fs_write_file
-}</pre>
-        </div>
-      </details>
+      <div class="badge">loop: multi-round tool orchestration</div>
+      <div class="badge">skills: core + modules + groups</div>
+      <div class="badge">context manager: budget + microcompact + summarize</div>
     </div>
 
-    <div class="panel">
-      <h2>Important Behaviors</h2>
+    <section class="panel">
+      <h2>Overall Agent Loop</h2>
+      <p>
+        This Mermaid diagram is valid for Mermaid <code>11.12.3</code> and represents the runtime flow implemented in
+        <code>src/app/agent.js</code> and <code>src/skills/shared.js</code>.
+      </p>
+      <pre class="mermaid">flowchart TD
+  U[User message] --> P[Preflight plan]
+  P --> E[Context enrichment]
+  E --> L[LLM call]
+  L --> T{Tool calls detected}
+  T -- no --> A[Final answer]
+  T -- yes --> X[Execute tool batches]
+  X --> B[Tool result budget]
+  B --> M[Microcompact old tool results]
+  M --> C{Context over limit}
+  C -- no --> L
+  C -- yes --> S[Summarize context]
+  S --> R{Summary succeeded}
+  R -- yes --> L
+  R -- no --> F[Fallback tail compression]
+  F --> L</pre>
+    </section>
+
+    <section class="panel">
+      <h2>Layered Runtime Map</h2>
+      <pre class="mermaid">flowchart LR
+  subgraph UI[UI Layer]
+    I[index.html]
+    U1[ui-modern.js]
+    S1[state.js]
+  end
+
+  subgraph APP[App Loop Layer]
+    A1[agent.js]
+    T1[tools.js]
+    L1[llm.js]
+    B1[local-backend.js]
+  end
+
+  subgraph CORE[Core Prompt Layer]
+    O1[orchestrator.js]
+    P1[prompt-loader.js]
+    R1[regex.js]
+  end
+
+  subgraph SKILLS[Skills Layer]
+    SH[shared.js]
+    C1[core/intents.js]
+    C2[core/tool-meta.js]
+    M1[modules/filesystem-runtime.js]
+    M2[modules/data-runtime.js]
+    M3[modules/registry-runtime.js]
+    G1[groups/web and device]
+    G2[groups/data and filesystem]
+  end
+
+  subgraph EXT[External IO]
+    CL[Cloud providers]
+    LB[Local backend]
+    FS[Browser File System Access]
+    BC[BroadcastChannel]
+    LS[localStorage]
+  end
+
+  UI --> APP --> CORE --> SKILLS
+  SKILLS --> EXT
+  APP --> EXT</pre>
+    </section>
+
+    <section class="panel">
+      <h2>Core Agentic Systems</h2>
+      <div class="grid">
+        <div class="card">
+          <div class="k">Preflight</div>
+          <div class="v">Intent + query steering</div>
+          <div class="d">Combines heuristic detection with a short-timeout fail-open planner LLM call to improve first-tool selection.</div>
+        </div>
+        <div class="card">
+          <div class="k">Tool Selection</div>
+          <div class="v">Risk-aware metadata</div>
+          <div class="d">Tool execution meta controls batching and concurrency-safe parallel execution for read-only operations.</div>
+        </div>
+        <div class="card">
+          <div class="k">Context Manager</div>
+          <div class="v">Budget, microcompact, summarize</div>
+          <div class="d">Large tool outputs are compacted before storing; older tool results are cleared; full summarize path runs only when required.</div>
+        </div>
+        <div class="card">
+          <div class="k">Loop Guardrails</div>
+          <div class="v">Semantic anti-repeat</div>
+          <div class="d">Near-duplicate <code>web_search</code> signatures are blocked to avoid repetitive loops across rounds.</div>
+        </div>
+        <div class="card">
+          <div class="k">Memory</div>
+          <div class="v">Session and cache persistence</div>
+          <div class="d">Sessions, stats, tool cache, preferences, tasks, and todos are persisted in <code>localStorage</code>.</div>
+        </div>
+        <div class="card">
+          <div class="k">Query Strategy</div>
+          <div class="v">Bounded recursive orchestration</div>
+          <div class="d">Each round decides: call tools, continue with evidence, compact context, or force final answer at max rounds.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Query Strategy and Transition Rules</h2>
       <ul>
-        <li>Filesystem writes prefer direct File System Access when available and fall back to browser download when not.</li>
-        <li>Notification permission is requested from user-triggered actions such as saving the API key or probing the local backend.</li>
-        <li>When the page is hidden, the app can fire a native notification after a run finishes.</li>
-        <li>Multiple tabs share tool-cache entries over `BroadcastChannel`, reducing repeated work for identical calls.</li>
-        <li>Tabs also broadcast busy state so another window can detect that a run is already in progress.</li>
-        <li>The agent itself can publish and listen for messages across tabs through `tab_broadcast` and `tab_listen`.</li>
-        <li>Deterministic repeated-call suppression and bounded rounds prevent low-value loops when tools fail or return empty signals.</li>
-        <li>Search diagnostics distinguish true provider errors from intentional intent-based provider skips.</li>
+        <li>Round-bounded loop with deterministic stop conditions.</li>
+        <li>If model output has no usable tool call and no final text, the loop asks for a corrective continuation.</li>
+        <li>Repeated failures disable exact tool signatures; semantic signatures disable near-duplicate <code>web_search</code> calls.</li>
+        <li>Context manager runs after each tool execution phase to keep prompt growth controlled before hard-limit summarization.</li>
+        <li>When max rounds are reached, the model is forced to produce a final evidence-based answer.</li>
       </ul>
-    </div>
-  </section>
+    </section>
 
-  <section class="panel">
-    <h2>Module Map</h2>
-    <div class="grid">
-      <div class="card">
-        <div class="k">src/app/state.js</div>
-        <div class="v">Persistent state and shared UI/runtime flags</div>
-        <div class="d">API key, sessions, sidebar state, enabled tools, tool cache, cache sync, and busy sync live here.</div>
-      </div>
-      <div class="card">
-        <div class="k">src/app/agent.js</div>
-        <div class="v">Loop execution and chat rendering</div>
-        <div class="d">Owns `sendMessage()`, `agentLoop()`, status updates, final rendering, and completion notifications.</div>
-      </div>
-      <div class="card">
-        <div class="k">src/app/tools.js</div>
-        <div class="v">UI-facing tool controls and prompt wiring</div>
-        <div class="d">Renders tool groups, toggles enabled tools, and delegates prompt construction to the orchestrator.</div>
-      </div>
-      <div class="card">
-        <div class="k">src/app/local-backend.js</div>
-        <div class="v">Local endpoint detection</div>
-        <div class="d">Probes known localhost candidates, detects model lists, and activates local routing when available.</div>
-      </div>
-      <div class="card">
-        <div class="k">src/core/orchestrator.js</div>
-        <div class="v">Policy, aliases, and parsing</div>
-        <div class="d">Builds prompts, normalizes tool aliases, validates skill availability, parses tool calls, and generates summary prompts.</div>
-      </div>
-      <div class="card">
-        <div class="k">src/skills/shared.js</div>
-        <div class="v">Primary skill runtime</div>
-        <div class="d">Holds helper functions, preflight heuristics, device/browser skills, and the registry exposed as `window.AgentSkills`.</div>
-      </div>
-    </div>
-  </section>
+    <section class="panel">
+      <h2>Implementation Anchors</h2>
+      <ul>
+        <li><code>src/app/agent.js</code>: loop state, tool execution, context manager pipeline, guardrails, and final-answer forcing.</li>
+        <li><code>src/skills/shared.js</code>: preflight plan, optional planner LLM call, search pipeline, and runtime capabilities.</li>
+        <li><code>src/skills/core/*</code>: intent detection and tool execution metadata.</li>
+        <li><code>src/skills/modules/*</code>: filesystem/data/registry runtime responsibilities.</li>
+      </ul>
+    </section>
+  </div>
 
-  <section class="panel">
-    <h2>Multi-Tab Architecture</h2>
-    <div class="grid">
-      <div class="card">
-        <div class="k">Case A</div>
-        <div class="v">Agent-triggered tab messaging</div>
-        <div class="d">The model can call `tab_broadcast(topic, payload)` to publish a result and `tab_listen(topic, timeout_ms)` to wait for work happening in another tab.</div>
-      </div>
-      <div class="card">
-        <div class="k">Case B</div>
-        <div class="v">App-internal tab sync</div>
-        <div class="d">Without involving the model, tabs sync tool-cache entries and busy state through dedicated `BroadcastChannel` names.</div>
-      </div>
-      <div class="card">
-        <div class="k">Scope</div>
-        <div class="v">Same origin only</div>
-        <div class="d">This works only across tabs/windows using the same origin and browser profile. It does not cross devices or different browsers.</div>
-      </div>
-    </div>
-    <pre>BroadcastChannel channels
-
-loopagent-v1
-  Agent-level publish/listen tools for cross-tab coordination
-
-loopagent-cache-v1
-  Internal cache replication for tool results
-
-loopagent-busy-v1
-  Internal "another tab is running" state</pre>
-  </section>
-
-  <section class="panel">
-    <h2>Notes</h2>
-    <p>
-      This document reflects the current browser-first implementation, not the older Node server diagram.
-      If the architecture changes again, update this file alongside `README.md` so the doc stays aligned with the actual runtime.
-    </p>
-  </section>
-</div>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.12.3/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      securityLevel: 'loose',
+      theme: 'dark'
+    });
+  </script>
 </body>
 </html>

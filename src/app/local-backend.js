@@ -36,14 +36,29 @@ function inferProbeConfigFromUrl(url) {
   try {
     const parsed = new URL(url);
     const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+    const looksLikeOllama = /ollama/i.test(`${parsed.hostname}${parsed.pathname}`);
 
-    if (port === '11434') {
-      return { paths: ['/api/tags'], chatPath: '/api/chat', name: 'custom/ollama' };
+    if (port === '11434' || looksLikeOllama) {
+      return { paths: ['/api/tags', '/v1/models'], chatPath: '/api/chat', name: 'custom/ollama' };
     }
 
-    return { paths: ['/v1/models'], chatPath: '/v1/chat/completions', name: 'custom/openai' };
+    return { paths: ['/v1/models', '/api/tags'], chatPath: '/v1/chat/completions', name: 'custom/openai' };
   } catch {
-    return { paths: ['/v1/models'], chatPath: '/v1/chat/completions', name: 'custom' };
+    return { paths: ['/v1/models', '/api/tags'], chatPath: '/v1/chat/completions', name: 'custom' };
+  }
+}
+
+function normalizeProbeUrl(rawUrl) {
+  const input = String(rawUrl || '').trim();
+  if (!input) return '';
+
+  const withScheme = /^https?:\/\//i.test(input) ? input : `http://${input}`;
+
+  try {
+    const parsed = new URL(withScheme);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return input.replace(/\/+$/, '');
   }
 }
 
@@ -53,31 +68,45 @@ function getProbeTargets(manualUrl) {
     url: `http://localhost:${candidate.port}`
   }));
 
-  if (!manualUrl) return candidateTargets;
+  const normalizedManual = normalizeProbeUrl(manualUrl);
+
+  if (!normalizedManual) return candidateTargets;
 
   return uniqueTargets([
     {
-      url: manualUrl,
-      ...inferProbeConfigFromUrl(manualUrl)
+      url: normalizedManual,
+      ...inferProbeConfigFromUrl(normalizedManual)
     },
     ...candidateTargets
   ]);
 }
 
 function extractModelsFromPayload(data) {
+  const out = [];
+
   if (Array.isArray(data?.data)) {
-    return data.data
-      .map(model => model?.id || model?.name)
-      .filter(Boolean);
+    data.data.forEach(model => {
+      if (typeof model === 'string' && model.trim()) {
+        out.push(model.trim());
+        return;
+      }
+      const value = model?.id || model?.name || model?.model;
+      if (typeof value === 'string' && value.trim()) out.push(value.trim());
+    });
   }
 
   if (Array.isArray(data?.models)) {
-    return data.models
-      .map(model => model?.name || model?.id)
-      .filter(Boolean);
+    data.models.forEach(model => {
+      if (typeof model === 'string' && model.trim()) {
+        out.push(model.trim());
+        return;
+      }
+      const value = model?.name || model?.model || model?.id;
+      if (typeof value === 'string' && value.trim()) out.push(value.trim());
+    });
   }
 
-  return [];
+  return [...new Set(out)];
 }
 
 async function probeLocal() {
@@ -95,45 +124,63 @@ async function probeLocal() {
   for (const target of targets) {
     const baseUrl = target.url.replace(/\/$/, '');
     const pathsToTry = target.paths || ['/v1/models'];
+    let isReachable = false;
+    const discoveredModels = new Set();
 
     for (const p of pathsToTry) {
       try {
-        const res = await fetchWithTimeout(baseUrl + p, { cache: 'no-store' }, 1500);
+        const timeoutMs = p === '/api/tags' ? 7000 : 2500;
+        const res = await fetchWithTimeout(baseUrl + p, { cache: 'no-store' }, timeoutMs);
         if (res.ok) {
+          isReachable = true;
           let models = [];
           try {
             const data = await res.json();
             models = extractModelsFromPayload(data);
           } catch {}
-
-          localBackend.url = baseUrl;
-          localBackend.detected = true;
-          localBackend.corsBlocked = false;
-          localBackend.model = models[0] || '';
-          localBackend.chatPath = target.chatPath || '/v1/chat/completions';
-          localBackend.name = target.name || 'local';
-          localStorage.setItem('agent_local_backend_url', baseUrl);
-          localStorage.setItem('agent_local_backend_model', localBackend.model || '');
-          localStorage.setItem('agent_local_backend_chat_path', localBackend.chatPath);
-          localStorage.setItem('agent_local_backend_name', localBackend.name);
-
-          // Populate model dropdown
-          const sel = document.getElementById('local-model-select');
-          sel.innerHTML = models.length
-            ? models.map(m => `<option value="${m}">${m}</option>`).join('')
-            : `<option value="">unknown model</option>`;
-          document.getElementById('local-model-row').style.display = 'block';
-          document.getElementById('local-url').value = baseUrl;
-
-          const label = `${target.name} @ ${baseUrl.replace('http://localhost:',':')}`;
-          setLocalStatus('ok', label);
-          setLocalBadge(`local: ${target.name}`, 'var(--green)', 'var(--green2)');
-          if (localStorage.getItem('agent_prefer_local_backend') !== 'false') {
-            _activateLocal(true);
+          for (const model of models) {
+            discoveredModels.add(model);
           }
-          return;
         }
       } catch {}
+    }
+
+    if (isReachable) {
+      const models = [...discoveredModels];
+      const savedModel = localStorage.getItem('agent_local_backend_model') || localBackend.model || '';
+      const selectedModel = models.includes(savedModel) ? savedModel : (models[0] || '');
+
+      localBackend.url = baseUrl;
+      localBackend.detected = true;
+      localBackend.corsBlocked = false;
+      localBackend.model = selectedModel;
+      localBackend.chatPath = target.chatPath || '/v1/chat/completions';
+      localBackend.name = target.name || 'local';
+      localStorage.setItem('agent_local_backend_url', baseUrl);
+      localStorage.setItem('agent_local_backend_model', localBackend.model || '');
+      localStorage.setItem('agent_local_backend_chat_path', localBackend.chatPath);
+      localStorage.setItem('agent_local_backend_name', localBackend.name);
+
+      // Populate model dropdown with the full aggregated model list.
+      const sel = document.getElementById('local-model-select');
+      if (sel) {
+        sel.innerHTML = models.length
+          ? models.map(m => `<option value="${m}">${m}</option>`).join('')
+          : `<option value="">unknown model</option>`;
+        if (selectedModel) sel.value = selectedModel;
+      }
+      const row = document.getElementById('local-model-row');
+      if (row) row.style.display = 'block';
+      const urlInput = document.getElementById('local-url');
+      if (urlInput) urlInput.value = baseUrl;
+
+      const label = `${target.name} @ ${baseUrl.replace('http://localhost:',':')}`;
+      setLocalStatus('ok', label);
+      setLocalBadge(`local: ${target.name}`, 'var(--green)', 'var(--green2)');
+      if (localStorage.getItem('agent_prefer_local_backend') !== 'false') {
+        _activateLocal(true);
+      }
+      return;
     }
 
     // Fallback: detect open local endpoint even when CORS blocks response body.

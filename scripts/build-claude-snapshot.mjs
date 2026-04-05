@@ -193,7 +193,7 @@ function extractObjectLiteralAfterCall(source, functionName) {
 }
 
 function extractReturnTemplateFromFunction(source, functionName) {
-  const fnRegex = new RegExp(`function\\s+${functionName}\\s*\\([^)]*\\)\\s*:\\s*string\\s*\\{`);
+  const fnRegex = new RegExp(`function\\s+${functionName}\\s*\\([^)]*\\)\\s*(?::\\s*[^\\{]+)?\\{`);
   const match = source.match(fnRegex);
   if (!match || match.index == null) return null;
   let i = match.index + match[0].length;
@@ -236,6 +236,15 @@ function extractReturnTemplateFromFunction(source, functionName) {
   const returnMatch = body.match(/return\s*`([\s\S]*?)`/m);
   if (!returnMatch) return null;
   return replaceTemplateExpressions(returnMatch[1]);
+}
+
+function extractConstStringLiteral(source, constName) {
+  const regex = new RegExp(`(?:export\\s+)?const\\s+${constName}\\s*=\\s*`, 'm');
+  const match = source.match(regex);
+  if (!match || match.index == null) return null;
+  let i = match.index + match[0].length;
+  while (i < source.length && /\s/.test(source[i])) i += 1;
+  return parseQuotedValue(source, i);
 }
 
 async function walkFiles(rootDir) {
@@ -335,11 +344,17 @@ function buildPromptSnippetManifest(promptsSource, systemSource) {
     autonomousSection: '',
     hooksSection: '',
     remindersSection: '',
+    functionResultClearingSection: '',
+    summarizeToolResultsSection: '',
     prefixes: [],
   };
 
   extracted.defaultAgentPrompt =
-    sanitizeAnthropicMentions(extractFieldFromObject(promptsSource, 'DEFAULT_AGENT_PROMPT') || '');
+    sanitizeAnthropicMentions(
+      extractConstStringLiteral(promptsSource, 'DEFAULT_AGENT_PROMPT')
+      || extractFieldFromObject(promptsSource, 'DEFAULT_AGENT_PROMPT')
+      || ''
+    );
   extracted.actionsSection =
     sanitizeAnthropicMentions(extractReturnTemplateFromFunction(promptsSource, 'getActionsSection') || '');
   extracted.autonomousSection =
@@ -348,6 +363,10 @@ function buildPromptSnippetManifest(promptsSource, systemSource) {
     sanitizeAnthropicMentions(extractReturnTemplateFromFunction(promptsSource, 'getHooksSection') || '');
   extracted.remindersSection =
     sanitizeAnthropicMentions(extractReturnTemplateFromFunction(promptsSource, 'getSystemRemindersSection') || '');
+  extracted.functionResultClearingSection =
+    sanitizeAnthropicMentions(extractReturnTemplateFromFunction(promptsSource, 'getFunctionResultClearingSection') || '');
+  extracted.summarizeToolResultsSection =
+    sanitizeAnthropicMentions(extractConstStringLiteral(promptsSource, 'SUMMARIZE_TOOL_RESULTS_SECTION') || '');
 
   const prefixKeys = [
     'DEFAULT_PREFIX',

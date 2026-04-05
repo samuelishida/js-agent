@@ -4,6 +4,16 @@
     bundledSkills: [],
     promptSnippets: {}
   };
+  const emptyPromptSnippets = {
+    defaultAgentPrompt: '',
+    actionsSection: '',
+    autonomousSection: '',
+    hooksSection: '',
+    remindersSection: '',
+    functionResultClearingSection: '',
+    summarizeToolResultsSection: '',
+    prefixes: []
+  };
 
   function getManifest() {
     const payload = window.AgentClaudeSnapshotData;
@@ -24,6 +34,24 @@
       .replace(/\bClaude Code\b/gi, 'agent runtime')
       .replace(/\bClaude\b/g, 'Assistant')
       .replace(/\bclaude\b/g, 'assistant');
+  }
+
+  function getPromptSnippets() {
+    const raw = getManifest().promptSnippets;
+    if (!raw || typeof raw !== 'object') return { ...emptyPromptSnippets };
+
+    return {
+      defaultAgentPrompt: sanitizeAnthropicMentions(raw.defaultAgentPrompt || ''),
+      actionsSection: sanitizeAnthropicMentions(raw.actionsSection || ''),
+      autonomousSection: sanitizeAnthropicMentions(raw.autonomousSection || ''),
+      hooksSection: sanitizeAnthropicMentions(raw.hooksSection || ''),
+      remindersSection: sanitizeAnthropicMentions(raw.remindersSection || ''),
+      functionResultClearingSection: sanitizeAnthropicMentions(raw.functionResultClearingSection || ''),
+      summarizeToolResultsSection: sanitizeAnthropicMentions(raw.summarizeToolResultsSection || ''),
+      prefixes: Array.isArray(raw.prefixes)
+        ? raw.prefixes.map(item => sanitizeAnthropicMentions(item)).filter(Boolean)
+        : []
+    };
   }
 
   function normalizeQuery(query) {
@@ -61,8 +89,7 @@
   }
 
   function getPromptAddendum() {
-    const manifest = getManifest();
-    const snippets = manifest.promptSnippets || {};
+    const snippets = getPromptSnippets();
     const skills = getBundledSkills().slice(0, 30);
     if (!skills.length) return '';
 
@@ -121,6 +148,8 @@
   window.AgentClaudeSnapshot = {
     getManifest,
     getBundledSkills,
+    getPromptSnippets,
+    sanitizeAnthropicMentions,
     searchBundledSkills,
     toSnapshotToolName,
     getPromptAddendum,

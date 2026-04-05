@@ -508,19 +508,40 @@
       return formatToolResult('fs_tree', lines.join('\n') || '(empty)');
     }
 
-    async function walkPaths({
-      path = '',
-      maxDepth = 5,
-      maxResults = 800,
-      includeFiles = true,
-      includeDirectories = true,
-      maxOutputChars = 15000
-    } = {}) {
-      const safeDepth = Math.max(0, Math.min(20, Number(maxDepth) || 5));
-      const limit = Math.max(1, Math.min(5000, Number(maxResults) || 800));
-      const includeFilesFlag = includeFiles !== false;
-      const includeDirsFlag = includeDirectories === true;
-      const outputCharLimit = Math.max(1000, Math.min(19000, Number(maxOutputChars) || 15000));
+    function normalizeNameList(value) {
+      if (Array.isArray(value)) {
+        return value
+          .map(item => String(item || '').trim().toLowerCase())
+          .filter(Boolean);
+      }
+
+      if (typeof value === 'string') {
+        return value
+          .split(',')
+          .map(item => String(item || '').trim().toLowerCase())
+          .filter(Boolean);
+      }
+
+      return [];
+    }
+
+    async function walkPaths(args = {}) {
+      const path = String(args.path || '').trim();
+      const resolvedDepth = args.max_depth ?? args.maxDepth ?? 5;
+      const resolvedResults = args.max_results ?? args.maxResults ?? 800;
+      const resolvedIncludeFiles = args.include_files ?? args.includeFiles;
+      const resolvedIncludeDirs = args.include_dirs ?? args.includeDirectories;
+      const resolvedOutputChars = args.max_output_chars ?? args.maxOutputChars ?? 15000;
+      const resolvedIncludeHidden = args.include_hidden ?? args.includeHidden;
+      const excludeNames = normalizeNameList(args.excludeNames || args.exclude_names);
+
+      const safeDepth = Math.max(0, Math.min(20, Number(resolvedDepth) || 5));
+      const limit = Math.max(1, Math.min(5000, Number(resolvedResults) || 800));
+      const includeFilesFlag = resolvedIncludeFiles !== false;
+      const includeDirsFlag = resolvedIncludeDirs === true;
+      const outputCharLimit = Math.max(1000, Math.min(19000, Number(resolvedOutputChars) || 15000));
+      const includeHiddenFlag = resolvedIncludeHidden === true;
+      const excludedNames = new Set(excludeNames);
 
       const { handle } = await resolveDirectory(path, false);
       const lines = [];
@@ -547,6 +568,15 @@
         }
 
         for await (const [name, child] of dirHandle.entries()) {
+          const lowerName = String(name || '').toLowerCase();
+          if (excludedNames.has(lowerName)) {
+            continue;
+          }
+
+          if (!includeHiddenFlag && lowerName.startsWith('.')) {
+            continue;
+          }
+
           const fullPath = `${basePath}/${name}`.replace(/^\/+/, '/');
           const label = `${child.kind}: ${fullPath}`;
 
@@ -585,6 +615,8 @@
           `Depth: ${safeDepth}`,
           `Include files: ${includeFilesFlag ? 'yes' : 'no'}`,
           `Include directories: ${includeDirsFlag ? 'yes' : 'no'}`,
+          `Include hidden: ${includeHiddenFlag ? 'yes' : 'no'}`,
+          `Excluded names: ${excludeNames.length ? excludeNames.join(', ') : '(none)'}`,
           `Results: ${lines.length}`,
           `Truncated: ${truncated ? 'yes' : 'no'}`,
           '',

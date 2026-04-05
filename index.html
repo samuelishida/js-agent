@@ -10,8 +10,8 @@
 <!-- SIDEBAR (Left Navigation) -->
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-header">
-    <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" onclick="toggleSidebar()" title="Collapse sidebar" aria-label="Collapse sidebar">
-      ✕
+    <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" onclick="toggleSidebar()" title="Hide sidebar" aria-label="Hide sidebar" type="button">
+      &larr;
     </button>
   </div>
 
@@ -41,7 +41,7 @@
 <!-- TOP BAR -->
 <header class="topbar">
   <div class="topbar-left">
-    <button class="sidebar-open-btn" id="sidebar-open-btn" onclick="toggleSidebar()" style="display:none" title="Show sidebar">☰</button>
+    <button class="sidebar-open-btn" id="sidebar-open-btn" onclick="toggleSidebar()" title="Show sidebar" aria-label="Show sidebar" type="button">&#9776;</button>
     <div class="topbar-title">
       <span id="topbar-model" class="topbar-badge">—</span>
       <span id="topbar-status" class="topbar-status">idle</span>
@@ -51,7 +51,7 @@
   <div class="topbar-right">
     <div class="topbar-badges">
       <span class="badge badge-sm" id="badge-rounds">10 rounds</span>
-      <span class="badge badge-sm" id="badge-ctx">50k</span>
+      <span class="badge badge-sm" id="badge-ctx">32k</span>
       <span class="badge badge-sm" id="badge-status">idle</span>
     </div>
   </div>
@@ -134,7 +134,7 @@
         <div class="settings-group">
           <label class="settings-label">Ollama Cloud Endpoint (optional)</label>
           <div class="settings-row">
-            <input class="settings-input" id="ollama-cloud-endpoint" type="text" placeholder="https://ollama.com/v1 or /api/ollama/v1" autocomplete="off" />
+            <input class="settings-input" id="ollama-cloud-endpoint" type="text" placeholder="empty = auto (local :11434 → proxy → cloud)" autocomplete="off" />
             <button class="btn-primary btn-sm" onclick="saveOllamaCloudEndpoint()">Save</button>
           </div>
           <div class="settings-hint">Used only when provider is <code>ollama/*</code>. Browser mode may require a same-origin proxy. Default: https://ollama.com/v1</div>
@@ -196,9 +196,9 @@
         <div class="settings-group">
           <label class="settings-label">
             Context Budget
-            <span class="settings-value" id="val-ctx">50</span>k chars
+            <span class="settings-value" id="val-ctx">32</span>k chars
           </label>
-          <input class="settings-slider" type="range" id="sl-ctx" min="10" max="200" value="50"
+          <input class="settings-slider" type="range" id="sl-ctx" min="10" max="200" value="32"
                  oninput="document.getElementById('val-ctx').textContent=this.value;updateBadge()">
         </div>
 
@@ -298,6 +298,8 @@
 <script src="src/core/prompt-loader.js" defer></script>
 <script src="src/skills/core/intents.js" defer></script>
 <script src="src/skills/core/tool-meta.js" defer></script>
+<script src="src/skills/generated/claude-snapshot-data.js" defer></script>
+<script src="src/skills/claude-snapshot-adapter.js" defer></script>
 <script src="src/skills/modules/filesystem-runtime.js" defer></script>
 <script src="src/skills/modules/data-runtime.js" defer></script>
 <script src="src/skills/modules/registry-runtime.js" defer></script>
@@ -310,6 +312,7 @@
 <script src="src/skills/index.js" defer></script>
 <script src="src/core/orchestrator.js" defer></script>
 <script src="src/app/state.js" defer></script>
+<script src="src/app/runtime-memory.js" defer></script>
 <script src="src/app/local-backend.js" defer></script>
 <script src="src/app/tools.js" defer></script>
 <script src="src/app/llm.js" defer></script>

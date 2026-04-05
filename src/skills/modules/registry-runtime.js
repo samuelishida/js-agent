@@ -211,7 +211,7 @@
           }),
           defineTool({
             name: 'fs_walk',
-            signature: 'fs_walk(path?, maxDepth?, maxResults?, includeFiles?, includeDirectories?)',
+            signature: 'fs_walk(path?, maxDepth?, maxResults?, includeFiles?, includeDirectories?, includeHidden?, excludeNames?)',
             description: 'Performs bounded recursive filesystem discovery with depth and result limits.',
             run: handlers.fs_walk
           }),
@@ -425,10 +425,34 @@
             run: handlers.ask_user_question
           }),
           defineTool({
+            name: 'memory_write',
+            signature: 'memory_write(text, tags?, importance?)',
+            description: 'Stores a durable long-term memory preference/fact for future runs.',
+            run: handlers.memory_write
+          }),
+          defineTool({
+            name: 'memory_search',
+            signature: 'memory_search(query, limit?)',
+            description: 'Searches durable long-term memory entries relevant to the query.',
+            run: handlers.memory_search
+          }),
+          defineTool({
+            name: 'memory_list',
+            signature: 'memory_list(limit?)',
+            description: 'Lists recent long-term memory entries.',
+            run: handlers.memory_list
+          }),
+          defineTool({
             name: 'tool_search',
             signature: 'tool_search(query, limit?)',
             description: 'Searches available tools by name and description.',
             run: handlers.tool_search
+          }),
+          defineTool({
+            name: 'snapshot_skill_catalog',
+            signature: 'snapshot_skill_catalog(query?, limit?)',
+            description: 'Lists imported bundled skills extracted from claude-code-main.',
+            run: handlers.snapshot_skill_catalog
           })
         ]
       }

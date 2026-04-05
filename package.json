@@ -1,0 +1,13 @@
+{
+  "name": "agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:claude-snapshot": "node scripts/build-claude-snapshot.mjs",
+    "test:skills-smoke": "node scripts/test-skills-smoke.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12"
+  }
+}

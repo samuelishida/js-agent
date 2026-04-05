@@ -122,6 +122,40 @@ Primary families:
 - Filesystem: roots, authorization flow, list/read/write/search/tree/walk/stat/copy/move/delete/rename
 - Data/planning: parse JSON/CSV, todos, tasks, question prompts, tool search
 
+## Claude Snapshot Integration
+
+This repo now includes a Claude snapshot adapter pipeline:
+
+- Source input: `claude-code-main/src`
+- Transpiled output: `dist/claude-code-main/src` (TS/TSX -> JS)
+- Generated manifest: `dist/claude-code-main/adapter/claude-snapshot-manifest.json`
+- Runtime data bridge: `src/skills/generated/claude-snapshot-data.js`
+
+Build command:
+
+```bash
+npm run build:claude-snapshot
+```
+
+Runtime effects after build:
+
+- Imports bundled skill metadata from the snapshot (`snapshot_skill_catalog`)
+- Registers per-skill pseudo-tools (`snapshot_skill_*`) backed by sanitized prompt templates
+- Extends `tool_search` with imported snapshot skill hits
+- Appends sanitized snapshot prompt guidance into system prompt assembly
+- Sanitizes Anthropic/Claude brand mentions inside extracted prompt/skill text
+
+## Memory + Compaction + Cache
+
+Claude-style runtime upgrades now included:
+
+- Long-term memory manager (`AgentMemory`) with durable write/search/list and auto-extraction from completed turns
+- Memory tools in runtime: `memory_write`, `memory_search`, `memory_list`
+- Context compaction improvements:
+  - cached summary reuse (`context_summary` scoped cache)
+  - stronger tool-result digests used by microcompact for older `<tool_result>` blocks
+- Multi-scope retention cache (`AgentRuntimeCache`) with TTL + max entries + max bytes policy per scope
+
 ## Running
 
 Open `index.html` in a Chromium-based browser. No build step required.

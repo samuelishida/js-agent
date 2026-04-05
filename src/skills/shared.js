@@ -252,10 +252,53 @@
     };
   }
 
-  function buildPreflightPlan(userMessage) {
+  function isFollowUpContinuation(text) {
+    const value = String(text || '').trim().toLowerCase();
+    if (!value) return false;
+
+    // Short follow-up prompts often rely on prior turn context.
+    return /^(and|also|ok|okay|yes|no|continue|go on|keep going|more|details|deeper|dive deeper|expand|elaborate|why|how|what about)/i.test(value)
+      || /(dive deeper|go deeper|expand on|elaborate|more detail|continue this|that part|this part|follow up|follow-up)/i.test(value);
+  }
+
+  function getRecentConversationSignals(conversationMessages = []) {
+    const history = Array.isArray(conversationMessages)
+      ? conversationMessages.filter(item => item && item.role !== 'system')
+      : [];
+    const recent = history.slice(-12);
+    const joined = recent.map(item => String(item.content || '')).join('\n');
+
+    const hasFilesystemEvidence = /<tool_result\s+tool="fs_(list_dir|walk|read_file|search_name|search_content|tree|glob|grep|stat|exists)"/i.test(joined);
+    const hasProjectTerms = /(src\/|readme|orchestrator\.js|shared\.js|skills|codebase|repository|agentic loop|tool call|max_rounds|context manager|preflight)/i.test(joined);
+    const hasWebEvidence = /<tool_result\s+tool="web_search"/i.test(joined);
+
+    return {
+      hasFilesystemEvidence,
+      hasProjectTerms,
+      hasWebEvidence
+    };
+  }
+
+  function buildPreflightPlan(userMessage, conversationMessages = []) {
     const plan = [];
     const hints = [];
     const text = String(userMessage || '');
+    const followUpContinuation = isFollowUpContinuation(text);
+    const recentSignals = getRecentConversationSignals(conversationMessages);
+
+    const continuationLooksProjectScoped = followUpContinuation
+      && (recentSignals.hasFilesystemEvidence || recentSignals.hasProjectTerms)
+      && !recentSignals.hasWebEvidence;
+
+    if (continuationLooksProjectScoped) {
+      plan.push('fs_list_dir', 'fs_walk', 'fs_read_file', 'fs_search_content');
+      hints.push('Follow-up continuation detected from recent project/filesystem context: keep analysis grounded in local repository tools before external web lookup.');
+    }
+
+    if (/(agentic loop|agent loop|orchestrator loop|tool loop|max_rounds|tool_result|context manager)/i.test(text)) {
+      plan.push('fs_search_content', 'fs_read_file');
+      hints.push('Agent loop/runtime topic detected: inspect local orchestrator and runtime files first (for example src/app/agent.js and src/core/orchestrator.js).');
+    }
 
     if (detectWeatherIntent(text)) {
       plan.push('weather_current');
@@ -276,6 +319,8 @@
     if (detectFilesystemIntent(text)) {
       plan.push('fs_list_roots', 'fs_authorize_folder', 'fs_list_dir', 'fs_walk', 'fs_read_file', 'fs_search_name', 'fs_search_content');
       hints.push('Filesystem intent detected: explore before mutating unless the user explicitly asked to save/export a file.');
+      hints.push('Use fs_list_dir first, then scoped fs_walk(path, maxDepth, maxResults) with includeDirectories=true and includeFiles=false for structure-first discovery.');
+      hints.push('For broad scans, set exclude_names (for example .git,node_modules,dist,build) unless the user explicitly asks to inspect those folders.');
       if (!state.roots.size) {
         hints.push('No local folder is authorized yet. Ask the user to click the "Authorize Folder" button in the Files panel before trying direct file access.');
       } else {
@@ -291,7 +336,8 @@
 
     if (detectProjectSkillsIntent(text)) {
       plan.push('fs_walk', 'fs_list_dir', 'fs_read_file');
-      hints.push('Project + skills intent detected: read README and src/skills files before answering; prefer evidence-based summaries over assumptions.');
+      hints.push('Project + skills intent detected: start with fs_list_dir on the project root, then run a bounded fs_walk with directory-first settings and excluded heavy folders.');
+      hints.push('Read README and src/skills files before answering; prefer evidence-based summaries over assumptions.');
     }
 
     if (detectFullFileDisplayIntent(text)) {
@@ -542,6 +588,55 @@
     return next;
   }
 
+  const DEFAULT_FS_WALK_EXCLUDES = [
+    '.git',
+    'node_modules',
+    '.next',
+    'dist',
+    'build',
+    'coverage',
+    '.venv',
+    'venv',
+    '.cache'
+  ];
+
+  function hasOwnArg(obj, key) {
+    return Object.prototype.hasOwnProperty.call(obj || {}, key);
+  }
+
+  function normalizeFsWalkArgs(args = {}, context = {}) {
+    const scoped = deriveFilesystemPathArg(args, context, 'fs_walk');
+    const next = { ...scoped };
+
+    const hasDepth = hasOwnArg(args, 'maxDepth') || hasOwnArg(args, 'max_depth');
+    const hasResults = hasOwnArg(args, 'maxResults') || hasOwnArg(args, 'max_results');
+    const hasIncludeFiles = hasOwnArg(args, 'includeFiles') || hasOwnArg(args, 'include_files');
+    const hasIncludeDirs = hasOwnArg(args, 'includeDirectories') || hasOwnArg(args, 'include_dirs');
+    const hasOutputChars = hasOwnArg(args, 'maxOutputChars') || hasOwnArg(args, 'max_output_chars');
+    const hasIncludeHidden = hasOwnArg(args, 'includeHidden') || hasOwnArg(args, 'include_hidden');
+    const hasExcludeNames = hasOwnArg(args, 'excludeNames') || hasOwnArg(args, 'exclude_names');
+
+    if (!hasDepth) next.maxDepth = 3;
+    if (!hasResults) next.maxResults = 250;
+    if (!hasIncludeFiles) next.includeFiles = false;
+    if (!hasIncludeDirs) next.includeDirectories = true;
+    if (!hasOutputChars) next.maxOutputChars = 12000;
+    if (!hasIncludeHidden) next.includeHidden = false;
+
+    if (!hasExcludeNames) {
+      const targetLeaf = String(next.path || '')
+        .replace(/\\/g, '/')
+        .split('/')
+        .filter(Boolean)
+        .pop()
+        ?.toLowerCase() || '';
+
+      next.excludeNames = DEFAULT_FS_WALK_EXCLUDES.filter(name => name !== targetLeaf);
+    }
+
+    return next;
+  }
+
   function deriveFilesystemPathArg(args = {}, context = {}, toolName = 'fs_tool') {
     const normalized = normalizeFilesystemArgs(args);
     const existing = String(normalized?.path || '').trim();
@@ -729,9 +824,9 @@
     });
   }
 
-  async function buildInitialContext(userMessage) {
+  async function buildInitialContext(userMessage, context = {}) {
     const blocks = [];
-    const baselinePreflight = buildPreflightPlan(userMessage);
+    const baselinePreflight = buildPreflightPlan(userMessage, context?.messages || []);
     let preflight = baselinePreflight;
 
     try {
@@ -805,11 +900,27 @@
     const terms = String(query || '').toLowerCase().trim();
     const max = Math.max(1, Math.min(200, Number(limit) || 30));
     const entries = Object.values(registry || {});
-    const matches = entries.filter(item => {
+    const runtimeMatches = entries.filter(item => {
       if (!terms) return true;
       const hay = `${item.name || ''} ${item.description || ''}`.toLowerCase();
       return hay.includes(terms);
-    }).slice(0, max);
+    });
+
+    const snapshotMatches = window.AgentClaudeSnapshot?.searchBundledSkills?.({
+      query: terms,
+      limit: max
+    }) || [];
+
+    const matches = [
+      ...runtimeMatches.map(item => ({
+        name: item.name,
+        description: item.description || 'no description'
+      })),
+      ...snapshotMatches.map(item => ({
+        name: `snapshot:${item.name}`,
+        description: item.description || item.whenToUse || 'imported skill'
+      }))
+    ].slice(0, max);
 
     return formatToolResult(
       'tool_search',
@@ -817,6 +928,42 @@
         ? matches.map((item, index) => `${index + 1}. ${item.name} — ${item.description || 'no description'}`).join('\n')
         : '(no matching tools)'
     );
+  }
+
+  async function snapshotSkillCatalog({ query = '', limit = 30 } = {}) {
+    const formatted = window.AgentClaudeSnapshot?.formatSkillCatalogForTool?.({ query, limit });
+    if (!formatted) {
+      throw new Error('Snapshot skill catalog is unavailable. Run npm run build:claude-snapshot first.');
+    }
+    return formatToolResult('snapshot_skill_catalog', formatted);
+  }
+
+  async function memoryWrite({ text = '', tags = [], importance = 0.5 } = {}) {
+    const result = window.AgentMemory?.write?.({
+      text,
+      tags,
+      importance,
+      source: 'tool'
+    });
+    if (!result?.saved) {
+      throw new Error(`memory_write failed: ${result?.reason || 'unknown reason'}`);
+    }
+    return formatToolResult(
+      'memory_write',
+      result.duplicate
+        ? `Updated existing memory.\nText: ${result.entry.text}`
+        : `Saved memory.\nText: ${result.entry.text}`
+    );
+  }
+
+  async function memorySearch({ query = '', limit = 8 } = {}) {
+    const entries = window.AgentMemory?.search?.({ query, limit }) || [];
+    return formatToolResult('memory_search', window.AgentMemory?.formatList?.(entries) || '(no memories)');
+  }
+
+  async function memoryList({ limit = 30 } = {}) {
+    const entries = window.AgentMemory?.list?.({ limit }) || [];
+    return formatToolResult('memory_list', window.AgentMemory?.formatList?.(entries) || '(no memories)');
   }
 
   const registryModuleFactory = window.AgentSkillModules?.createRegistryRuntime;
@@ -847,7 +994,7 @@
         fs_pick_directory: () => pickDirectory(),
         fs_list_dir: (args, context = {}) => listDirectory(deriveFilesystemPathArg(args, context, 'fs_list_dir')),
         fs_tree: args => directoryTree(args),
-        fs_walk: (args, context = {}) => walkPaths(deriveFilesystemPathArg(args, context, 'fs_walk')),
+        fs_walk: (args, context = {}) => walkPaths(normalizeFsWalkArgs(args, context)),
         fs_exists: args => fileExists(args),
         fs_stat: args => statPath(args),
         fs_read_file: (args, context = {}) => readLocalFile(deriveFilesystemPathArg(args, context, 'fs_read_file')),
@@ -882,7 +1029,11 @@
         task_list: args => taskList(args),
         task_update: args => taskUpdate(args),
         ask_user_question: args => askUserQuestion(args),
-        tool_search: args => toolSearch(args)
+        memory_write: args => memoryWrite(args),
+        memory_search: args => memorySearch(args),
+        memory_list: args => memoryList(args),
+        tool_search: args => toolSearch(args),
+        snapshot_skill_catalog: args => snapshotSkillCatalog(args)
       })
     : {
         registry: {},
@@ -891,6 +1042,56 @@
 
   const registry = registryRuntime.registry || {};
   const skillGroups = registryRuntime.skillGroups || {};
+
+  function registerSnapshotTools() {
+    const importedSkills = window.AgentClaudeSnapshot?.getBundledSkills?.() || [];
+    if (!importedSkills.length) return;
+
+    if (!skillGroups.snapshot) {
+      skillGroups.snapshot = {
+        label: 'Snapshot Skills',
+        tools: []
+      };
+    }
+
+    for (const skill of importedSkills) {
+      const toolName = window.AgentClaudeSnapshot?.toSnapshotToolName?.(skill.name)
+        || `snapshot_skill_${String(skill.name || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+
+      if (registry[toolName]) continue;
+
+      registry[toolName] = {
+        name: toolName,
+        description: skill.description || skill.whenToUse || `Imported workflow: ${skill.name}`,
+        retries: 1,
+        run: async ({ include_prompt = true } = {}) => {
+          const promptText = include_prompt ? String(skill.promptTemplate || '').trim() : '';
+          const body = [
+            `Imported skill: ${skill.name}`,
+            skill.argumentHint ? `Arguments: ${skill.argumentHint}` : '',
+            skill.description ? `Description: ${skill.description}` : '',
+            skill.whenToUse ? `When to use: ${skill.whenToUse}` : '',
+            promptText ? `\nPrompt template:\n${promptText}` : ''
+          ]
+            .filter(Boolean)
+            .join('\n');
+
+          return formatToolResult(toolName, body || `Imported skill metadata for ${skill.name}`);
+        }
+      };
+
+      skillGroups.snapshot.tools.push({
+        name: toolName,
+        signature: `${toolName}(include_prompt?)`
+      });
+
+      if (typeof enabledTools === 'object' && enabledTools && !Object.prototype.hasOwnProperty.call(enabledTools, toolName)) {
+        enabledTools[toolName] = true;
+      }
+    }
+  }
+
+  registerSnapshotTools();
 
   window.AgentSkills = {
     state,
@@ -909,4 +1110,3 @@
     abortAllTabListeners
   };
 })();
-

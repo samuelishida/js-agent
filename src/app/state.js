@@ -24,7 +24,10 @@ const NON_CACHEABLE_TOOLS = new Set([
   'todo_write',
   'task_create',
   'task_update',
-  'ask_user_question'
+  'ask_user_question',
+  'memory_write',
+  'memory_search',
+  'memory_list'
 ]);
 let notificationPermissionRequested = false;
 // Derive a stable instance ID from localStorage so it survives module load order races.
@@ -103,7 +106,11 @@ let enabledTools = {
   task_list: true,
   task_update: true,
   ask_user_question: true,
-  tool_search: true
+  memory_write: true,
+  memory_search: true,
+  memory_list: true,
+  tool_search: true,
+  snapshot_skill_catalog: true
 };
 let localBackend = {
   enabled: localStorage.getItem('agent_prefer_local_backend') !== 'false',
@@ -146,7 +153,7 @@ function getMaxRounds() {
 
 function getCtxLimit() {
   const el = document.getElementById('sl-ctx');
-  return el ? parseInt(el.value) * 1000 : 50000;
+  return el ? parseInt(el.value) * 1000 : 32000;
 }
 
 function getDelay() {
@@ -180,10 +187,33 @@ function shouldAutoCollapseSidebar() {
   return window.innerWidth <= SIDEBAR_AUTO_COLLAPSE_WIDTH;
 }
 
+function syncSidebarToggleButtons() {
+  const collapsed = document.body.classList.contains('sidebar-collapsed');
+  const openBtn = document.getElementById('sidebar-open-btn');
+  const collapseBtn = document.getElementById('sidebar-collapse-btn');
+  const openLabel = collapsed ? 'Show sidebar' : 'Hide sidebar';
+  const openIcon = collapsed ? '\u2630' : '\u2190';
+
+  if (openBtn) {
+    openBtn.textContent = openIcon;
+    openBtn.title = openLabel;
+    openBtn.setAttribute('aria-label', openLabel);
+    openBtn.setAttribute('aria-expanded', String(!collapsed));
+  }
+
+  if (collapseBtn) {
+    collapseBtn.textContent = '\u2190';
+    collapseBtn.title = 'Hide sidebar';
+    collapseBtn.setAttribute('aria-label', 'Hide sidebar');
+    collapseBtn.setAttribute('aria-expanded', String(!collapsed));
+  }
+}
+
 function applySidebarState() {
   const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
   const collapsed = stored == null ? shouldAutoCollapseSidebar() : stored === 'true';
   document.body.classList.toggle('sidebar-collapsed', collapsed);
+  syncSidebarToggleButtons();
 
   const panels = loadSidebarPanels();
   document.querySelectorAll('.sidebar-panel[data-panel]').forEach(panel => {
@@ -208,12 +238,14 @@ function toggleSidebar() {
   const next = !document.body.classList.contains('sidebar-collapsed');
   document.body.classList.toggle('sidebar-collapsed', next);
   localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
+  syncSidebarToggleButtons();
 }
 
 function handleResponsiveSidebar() {
   if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) == null) {
     applySidebarState();
   }
+  syncSidebarToggleButtons();
 }
 
 function updateFileAccessStatus() {
@@ -282,6 +314,15 @@ function saveOllamaCloudEndpoint() {
     return;
   }
 
+  // Allow same-origin relative paths (example: /api/ollama/v1) for browser CORS-safe proxying.
+  if (raw.startsWith('/')) {
+    const normalizedPath = raw.replace(/\/+$/, '') || '/api/ollama/v1';
+    localStorage.setItem('agent_ollama_cloud_endpoint', normalizedPath);
+    input.value = normalizedPath;
+    setStatus('ok', 'ollama endpoint saved');
+    return;
+  }
+
   let endpoint = raw;
   if (!/^https?:\/\//i.test(endpoint)) {
     endpoint = `https://${endpoint}`;
@@ -296,15 +337,19 @@ function saveOllamaCloudEndpoint() {
     setStatus('ok', 'ollama endpoint saved');
   } catch {
     setStatus('error', 'invalid ollama endpoint');
-    addNotice('Invalid Ollama endpoint URL. Example: https://api.ollama.com/v1');
+    addNotice('Invalid Ollama endpoint URL. Use https://ollama.com/v1 or /api/ollama/v1');
   }
 }
 
 function loadOllamaCloudEndpoint() {
   const input = document.getElementById('ollama-cloud-endpoint');
   if (!input) return;
-  const stored = localStorage.getItem('agent_ollama_cloud_endpoint') || 'https://ollama.com/v1';
-  input.value = stored.replace(/^https:\/\/api\.ollama\.com/i, 'https://ollama.com');
+  // No default — empty means auto: proxy if available, then localhost:11434, then cloud.
+  // User must explicitly set an endpoint to pin behaviour.
+  const stored = localStorage.getItem('agent_ollama_cloud_endpoint') || '';
+  input.value = stored.startsWith('/')
+    ? stored
+    : stored.replace(/^https:\/\/api\.ollama\.com/i, 'https://ollama.com');
 }
 
 function saveGithubToken() {
@@ -700,7 +745,7 @@ function renderChatFromMessages() {
         <div class="empty-logo">⬡</div>
         <div class="empty-title">What can I help you with?</div>
         <div class="empty-examples">
-          <button class="example-chip" onclick="useExample(this)">What's the current BRL/USD exchange rate?</button>
+          <button class="example-chip" onclick="useExample(this)">What's the current USD/BRL exchange rate?</button>
           <button class="example-chip" onclick="useExample(this)">Calculate compound interest: $10k at 5.5% for 7 years</button>
           <button class="example-chip" onclick="useExample(this)">Search for the latest Fed rate decision and summarize</button>
           <button class="example-chip" onclick="useExample(this)">What's today's date and what day of the week is it?</button>

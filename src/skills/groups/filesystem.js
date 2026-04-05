@@ -12,7 +12,7 @@
       { name: 'fs_list_roots', signature: 'fs_list_roots()' },
       { name: 'fs_select_root', signature: 'fs_select_root(root_path)' },
       { name: 'fs_list_dir', signature: 'fs_list_dir(path)' },
-      { name: 'fs_walk', signature: 'fs_walk(path, max_depth?, include_files?, include_dirs?, glob?)' },
+      { name: 'fs_walk', signature: 'fs_walk(path?, maxDepth?, maxResults?, includeFiles?, includeDirectories?, includeHidden?, excludeNames?)' },
       { name: 'fs_read_file', signature: 'fs_read_file(path)' },
       { name: 'fs_write_file', signature: 'fs_write_file(path, text)' },
       { name: 'fs_mkdir', signature: 'fs_mkdir(path)' },

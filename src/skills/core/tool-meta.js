@@ -31,7 +31,10 @@
     'grep',
     'task_get',
     'task_list',
-    'tool_search'
+    'memory_search',
+    'memory_list',
+    'tool_search',
+    'snapshot_skill_catalog'
   ]);
 
   const WRITE_CLASSIFIED_TOOLS = new Set([
@@ -54,7 +57,8 @@
     'edit_file',
     'todo_write',
     'task_create',
-    'task_update'
+    'task_update',
+    'memory_write'
   ]);
 
   const NON_CONCURRENT_TOOLS = new Set([

@@ -74,7 +74,7 @@ body {
   line-height: 1.5;
   display: grid;
   grid-template-rows: 60px 1fr 80px;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 260px minmax(0, 1fr);
   grid-template-areas:
     "sidebar topbar"
     "sidebar chat"
@@ -84,7 +84,7 @@ body {
 }
 
 body.sidebar-collapsed {
-  grid-template-columns: 0 1fr;
+  grid-template-columns: 0 minmax(0, 1fr);
 }
 
 /* Scrollbar Styling */

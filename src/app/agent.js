@@ -29,12 +29,98 @@ let runToolResultReplacementState = {
   replacements: new Map()
 };
 let runCompactedResultNoticeSignatures = new Set();
+let runPermissionDenials = [];
+let runToolUseSummaryState = {
+  emitted: 0
+};
+let runTimeBasedMicrocompactState = {
+  enabled: false,
+  inactivityGapMs: 0
+};
 
 const TOOL_RESULT_CONTEXT_BUDGET = {
   inlineMaxChars: 6000,
   previewChars: 1800,
   keepRecentResults: 8
 };
+const CONTEXT_COMPACTION_POLICY = {
+  thresholdRatio: 0.82,
+  reserveChars: 4000,
+  minRoundGap: 2,
+  maxConsecutiveFailures: 3
+};
+const TIME_BASED_MICROCOMPACT_POLICY = {
+  inactivityMs: 20 * 60 * 1000,
+  keepRecentResults: 4
+};
+const PERMISSION_DENIAL_LIMIT = 30;
+
+function stableHashText(value) {
+  const text = String(value || '');
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function getRuntimeScopedCache(scope, key) {
+  return window.AgentRuntimeCache?.get?.(scope, key) ?? null;
+}
+
+function setRuntimeScopedCache(scope, key, payload, options = {}) {
+  return !!window.AgentRuntimeCache?.set?.(scope, key, payload, options);
+}
+
+function buildToolResultDigest(toolName, text) {
+  const payload = String(text || '');
+  const head = payload.slice(0, 900).trimEnd();
+  const tail = payload.length > 1600 ? payload.slice(-500).trimStart() : '';
+  const signalLines = payload
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(line => /(error|warning|found|match|path|total|result|summary|status)/i.test(line))
+    .slice(0, 8);
+
+  const sections = [
+    '[tool_result_compacted]',
+    `Tool: ${toolName || 'unknown'}`,
+    `Original chars: ${payload.length}`,
+    '',
+    'Head preview:',
+    head || '(empty)',
+    signalLines.length ? `\nSignal lines:\n${signalLines.join('\n')}` : ''
+  ];
+
+  if (tail) {
+    sections.push('\nTail preview:', tail);
+  }
+
+  sections.push('\nUse narrower follow-up tool calls if full output is required.');
+  return sections.join('\n').trim();
+}
+
+function extractToolResultPayload(content) {
+  const match = String(content || '').match(/<tool_result([^>]*)>\s*([\s\S]*?)\s*<\/tool_result>/i);
+  if (!match) return null;
+  const attrs = String(match[1] || '');
+  const tool = attrs.match(/tool="([^"]+)"/i)?.[1] || 'unknown';
+  const body = String(match[2] || '');
+  return { tool, body };
+}
+
+function maybeExtractLongTermMemory(userMessage, assistantMessage) {
+  try {
+    return window.AgentMemory?.extractFromTurn?.({
+      userMessage,
+      assistantMessage
+    }) || null;
+  } catch {
+    return null;
+  }
+}
 
 function setStopButtonState(running) {
   const stopBtn = document.getElementById('btn-stop');
@@ -84,6 +170,12 @@ function resetRunGuards() {
     lastBeforeSize: 0,
     lastAfterSize: 0
   };
+  runPermissionDenials = [];
+  runToolUseSummaryState = { emitted: 0 };
+  runTimeBasedMicrocompactState = {
+    enabled: false,
+    inactivityGapMs: 0
+  };
 }
 
 function getToolCallSignature(call) {
@@ -116,6 +208,254 @@ function normalizeToolArgs(args) {
   return args && typeof args === 'object' && !Array.isArray(args) ? { ...args } : {};
 }
 
+function normalizePathInput(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^['"`]+|['"`]+$/g, '')
+    .trim();
+}
+
+function containsGlobPattern(value) {
+  return /[*?[\]{}]/.test(String(value || ''));
+}
+
+function containsVulnerableUncPathLight(value) {
+  const text = String(value || '');
+  if (!text) return false;
+  return text.startsWith('\\\\') || text.startsWith('//');
+}
+
+function hasSuspiciousWindowsPathPattern(value) {
+  const text = String(value || '');
+  if (!text) return false;
+
+  const firstColon = text.indexOf(':');
+  if (firstColon >= 0) {
+    const secondColon = text.indexOf(':', firstColon + 1);
+    if (secondColon !== -1) return true;
+  }
+  if (/~\d/.test(text)) return true;
+  if (text.startsWith('\\\\?\\') || text.startsWith('\\\\.\\') || text.startsWith('//?/') || text.startsWith('//./')) {
+    return true;
+  }
+  if (/[.\s]+$/.test(text)) return true;
+  if (/\.(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(text)) return true;
+  if (/(^|\/|\\)\.{3,}(\/|\\|$)/.test(text)) return true;
+  return false;
+}
+
+function isDangerousRemovalPath(pathValue) {
+  const normalized = String(pathValue || '')
+    .replace(/[\\/]+/g, '/')
+    .trim();
+
+  if (!normalized) return true;
+  if (normalized === '*' || normalized.endsWith('/*')) return true;
+
+  const withoutTrailingSlash = normalized === '/' ? normalized : normalized.replace(/\/$/, '');
+  if (withoutTrailingSlash === '/') return true;
+  if (/^[A-Za-z]:\/?$/.test(withoutTrailingSlash)) return true;
+
+  const parent =
+    withoutTrailingSlash.includes('/')
+      ? withoutTrailingSlash.slice(0, withoutTrailingSlash.lastIndexOf('/')) || '/'
+      : '';
+  if (parent === '/') return true;
+  if (/^[A-Za-z]:\/[^/]+$/.test(withoutTrailingSlash)) return true;
+
+  return false;
+}
+
+function getFilesystemOperationType(toolName) {
+  const tool = String(toolName || '').trim();
+  const writeTools = new Set([
+    'fs_write_file',
+    'file_write',
+    'write_file',
+    'file_edit',
+    'edit_file',
+    'fs_copy_file',
+    'fs_move_file',
+    'fs_delete_path',
+    'fs_rename_path',
+    'fs_mkdir',
+    'fs_touch',
+    'fs_save_upload'
+  ]);
+
+  if (writeTools.has(tool)) return 'write';
+  if (tool === 'fs_download_file') return 'create';
+  if (tool.startsWith('fs_') || tool === 'file_read' || tool === 'read_file' || tool === 'glob' || tool === 'grep') {
+    return 'read';
+  }
+  return 'none';
+}
+
+function extractFilesystemPathsFromArgs(toolName, args = {}) {
+  const tool = String(toolName || '').trim();
+  const normalizedArgs = normalizeToolArgs(args);
+  const values = [];
+  const push = (name, value) => {
+    const path = normalizePathInput(value);
+    if (!path) return;
+    values.push({ arg: name, path });
+  };
+
+  const generalKeys = [
+    'path',
+    'filePath',
+    'sourcePath',
+    'destinationPath',
+    'new_path',
+    'newPath',
+    'root',
+    'directory'
+  ];
+
+  for (const key of generalKeys) {
+    if (Object.prototype.hasOwnProperty.call(normalizedArgs, key)) {
+      push(key, normalizedArgs[key]);
+    }
+  }
+
+  if (tool === 'fs_rename_path' && normalizedArgs.newName) {
+    const sourcePath = normalizePathInput(normalizedArgs.path);
+    const parent = sourcePath.replace(/[\\/]+/g, '/').split('/').slice(0, -1).join('/');
+    const candidate = parent ? `${parent}/${normalizedArgs.newName}` : String(normalizedArgs.newName);
+    push('newName', candidate);
+  }
+
+  return values;
+}
+
+function validateFilesystemCallGuard(call) {
+  const operationType = getFilesystemOperationType(call?.tool);
+  if (operationType === 'none') return { allowed: true };
+
+  const paths = extractFilesystemPathsFromArgs(call?.tool, call?.args);
+  if (!paths.length && operationType !== 'read') {
+    return {
+      allowed: false,
+      reason: 'A valid filesystem path is required for this write operation.'
+    };
+  }
+
+  for (const item of paths) {
+    const path = item.path;
+
+    if (containsVulnerableUncPathLight(path)) {
+      return {
+        allowed: false,
+        reason: `UNC network path '${path}' requires explicit manual approval.`,
+        path
+      };
+    }
+
+    if (path.startsWith('~') && !/^~(?:\/|\\|$)/.test(path)) {
+      return {
+        allowed: false,
+        reason: `Tilde expansion variant in '${path}' requires manual approval.`,
+        path
+      };
+    }
+
+    if (path.includes('$') || path.includes('%') || path.startsWith('=')) {
+      return {
+        allowed: false,
+        reason: `Shell expansion syntax in '${path}' requires manual approval.`,
+        path
+      };
+    }
+
+    if (hasSuspiciousWindowsPathPattern(path)) {
+      return {
+        allowed: false,
+        reason: `Suspicious Windows path pattern detected in '${path}'.`,
+        path
+      };
+    }
+
+    if ((operationType === 'write' || operationType === 'create') && containsGlobPattern(path)) {
+      return {
+        allowed: false,
+        reason: `Glob patterns are blocked for write operations ('${path}'). Use an exact path.`,
+        path
+      };
+    }
+  }
+
+  if (String(call?.tool || '') === 'fs_delete_path') {
+    const target = normalizePathInput(call?.args?.path);
+    if (isDangerousRemovalPath(target)) {
+      return {
+        allowed: false,
+        reason: `Refusing dangerous delete target '${target || '(empty)'}'.`,
+        path: target
+      };
+    }
+  }
+
+  return { allowed: true };
+}
+
+function registerPermissionDenial(call, decision) {
+  const item = {
+    tool: String(call?.tool || 'unknown'),
+    args: normalizeToolArgs(call?.args),
+    reason: String(decision?.reason || 'permission denied'),
+    path: String(decision?.path || ''),
+    timestamp: new Date().toISOString()
+  };
+
+  runPermissionDenials.push(item);
+  if (runPermissionDenials.length > PERMISSION_DENIAL_LIMIT) {
+    runPermissionDenials = runPermissionDenials.slice(-PERMISSION_DENIAL_LIMIT);
+  }
+}
+
+function isPermissionDeniedResult(result) {
+  return /^ERROR:\s*PERMISSION_DENIED\b/i.test(String(result || ''));
+}
+
+function buildPermissionDenialContinuation() {
+  if (!runPermissionDenials.length) return '';
+  const recent = runPermissionDenials.slice(-3);
+  const lines = recent.map((item, index) => {
+    const pathPart = item.path ? ` path=${item.path}` : '';
+    return `${index + 1}. ${item.tool}${pathPart} - ${item.reason}`;
+  });
+  return [
+    '<permission_denials>',
+    ...lines,
+    '</permission_denials>',
+    'Do not retry denied operations. Choose a safer in-scope path or a different tool.'
+  ].join('\n');
+}
+
+function buildToolUseSummary(batchResults = []) {
+  if (!Array.isArray(batchResults) || !batchResults.length) return '';
+
+  const lines = [];
+  let errors = 0;
+  for (const item of batchResults) {
+    const call = item?.call || {};
+    const tool = String(call.tool || 'unknown');
+    const result = String(item?.result || '');
+    const ok = !/^ERROR\b/i.test(result);
+    if (!ok) errors += 1;
+    const preview = result.replace(/\s+/g, ' ').trim().slice(0, 120);
+    lines.push(`- ${tool}: ${ok ? 'ok' : 'error'}${preview ? ` (${preview})` : ''}`);
+  }
+
+  const successCount = Math.max(0, batchResults.length - errors);
+  runToolUseSummaryState.emitted += 1;
+  return [
+    '[TOOL_USE_SUMMARY]',
+    `Batch: ${runToolUseSummaryState.emitted}`,
+    `Tools: ${batchResults.length}, Success: ${successCount}, Errors: ${errors}`,
+    ...lines.slice(0, 6)
+  ].join('\n');
+}
 
 function recordToolFailure(call, result) {
   if (!/^ERROR\b/i.test(String(result || ''))) {
@@ -140,9 +480,13 @@ function recordToolFailure(call, result) {
 }
 
 function canAttemptCompaction(round, currentSize, ctxLimit) {
-  if (runCompactionState.consecutiveFailures >= 2) return false;
-  if (round - runCompactionState.lastCompactionRound < 2) return false;
-  if (currentSize < (ctxLimit * 0.8)) return false;
+  if (runCompactionState.consecutiveFailures >= CONTEXT_COMPACTION_POLICY.maxConsecutiveFailures) return false;
+  if (round - runCompactionState.lastCompactionRound < CONTEXT_COMPACTION_POLICY.minRoundGap) return false;
+  const threshold = Math.max(
+    Math.floor(ctxLimit * CONTEXT_COMPACTION_POLICY.thresholdRatio),
+    Math.max(1, ctxLimit - CONTEXT_COMPACTION_POLICY.reserveChars)
+  );
+  if (currentSize < threshold) return false;
   return true;
 }
 
@@ -299,6 +643,13 @@ async function executeTool(call) {
     return `ERROR: tool call '${tool}' was blocked to prevent repeated near-duplicate requests in this run.`;
   }
 
+  const filesystemGuard = validateFilesystemCallGuard(call);
+  if (!filesystemGuard.allowed) {
+    registerPermissionDenial(call, filesystemGuard);
+    runDisabledToolCalls.add(callSignature);
+    return `ERROR: PERMISSION_DENIED: ${filesystemGuard.reason}`;
+  }
+
   if (!enabledTools[tool]) {
     return `ERROR: tool '${tool}' is disabled in this environment.`;
   }
@@ -327,13 +678,30 @@ async function executeTool(call) {
     return `${cachedResult}\n\n[cache hit]`;
   }
 
+  const runtimeHotCache = getRuntimeScopedCache('tool_hot', callSignature);
+  if (runtimeHotCache) {
+    return `${runtimeHotCache}\n\n[cache hit/runtime]`;
+  }
+
+  const executionMeta = getToolExecutionMeta(tool);
   const result = await orchestrator.executeSkill(call, {
     localBackend,
     enabledTools,
     messages
   });
-  if (!/^ERROR\b/i.test(result)) {
+
+  const cacheableRuntimeResult =
+    !executionMeta.destructive &&
+    !isPermissionDeniedResult(result) &&
+    !/^ERROR\b/i.test(result);
+
+  if (cacheableRuntimeResult) {
     setCachedToolResult(call, result);
+    setRuntimeScopedCache('tool_hot', callSignature, result, {
+      ttlMs: executionMeta.readOnly ? 10 * 60 * 1000 : 60 * 1000,
+      maxEntries: executionMeta.readOnly ? 500 : 120,
+      maxBytes: 2_000_000
+    });
   }
   return result;
 }
@@ -371,6 +739,32 @@ function notifyIfHidden(summary) {
   });
 }
 
+function formatCompactSummaryOutput(summary) {
+  let text = String(summary || '').trim();
+  if (!text) return '';
+
+  text = text.replace(/<analysis>[\s\S]*?<\/analysis>/i, '').trim();
+  const summaryMatch = text.match(/<summary>([\s\S]*?)<\/summary>/i);
+  if (summaryMatch) {
+    text = String(summaryMatch[1] || '').trim();
+  }
+
+  text = text
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^\s*Summary:\s*/i, '')
+    .trim();
+
+  return text;
+}
+
+function buildCompactBoundaryMarker(meta = {}) {
+  const timestamp = new Date().toISOString();
+  const parts = [`[COMPACT_BOUNDARY]`, timestamp];
+  if (meta?.reason) parts.push(`Reason: ${meta.reason}`);
+  if (meta?.savedChars) parts.push(`Saved chars: ${meta.savedChars}`);
+  return parts.join('\n');
+}
+
 async function summarizeContext(userQuery) {
   assertRuntimeReady();
   const { orchestrator } = getRuntimeModules();
@@ -383,6 +777,18 @@ async function summarizeContext(userQuery) {
     .map(m => `[${m.role.toUpperCase()}]: ${m.content}`)
     .join('\n\n');
 
+  const summaryCacheKey = `${stableHashText(hist)}:${stableHashText(userQuery)}`;
+  const cachedSummaryText = getRuntimeScopedCache('context_summary', summaryCacheKey);
+  if (cachedSummaryText) {
+    const sysMsgFromCache = messages.find(m => m.role === 'system');
+    return [
+      sysMsgFromCache,
+      { role: 'assistant', content: buildCompactBoundaryMarker({ reason: 'cached_summary' }) },
+      { role: 'assistant', content: `[SUMMARISED CONTEXT]\n${String(cachedSummaryText)}` },
+      { role: 'user', content: userQuery }
+    ];
+  }
+
   const prompt = await orchestrator.buildSummaryPrompt(hist, userQuery);
 
   const sysMsg = messages.find(m => m.role === 'system');
@@ -394,16 +800,32 @@ async function summarizeContext(userQuery) {
   const summaryText = String(summary || '').trim();
   const looksLikeErrorJson = /^\{[\s\S]*"error"\s*:/i.test(summaryText);
   const looksLikeEndpointError = /Unexpected endpoint or method|no compatible endpoint|Local LLM:/i.test(summaryText);
-  if (!summaryText || looksLikeErrorJson || looksLikeEndpointError) {
+  if (
+    !summaryText ||
+    looksLikeErrorJson ||
+    looksLikeEndpointError ||
+    /<tool_call>[\s\S]*?<\/tool_call>/i.test(summaryText)
+  ) {
     throw new Error('Summarization returned an invalid backend payload.');
   }
 
-  const compactBoundary = `[COMPACT_BOUNDARY]\n${new Date().toISOString()}`;
+  const formattedSummary = formatCompactSummaryOutput(summaryText);
+  if (!formattedSummary) {
+    throw new Error('Summarization output was empty after formatting.');
+  }
+
+  setRuntimeScopedCache('context_summary', summaryCacheKey, formattedSummary, {
+    ttlMs: 6 * 60 * 60 * 1000,
+    maxEntries: 200,
+    maxBytes: 1_500_000
+  });
+
+  const compactBoundary = buildCompactBoundaryMarker({ reason: 'llm_summary' });
 
   return [
     sysMsg,
     { role: 'assistant', content: compactBoundary },
-    { role: 'assistant', content: `[SUMMARISED CONTEXT]\n${summaryText}` },
+    { role: 'assistant', content: `[SUMMARISED CONTEXT]\n${formattedSummary}` },
     { role: 'user', content: userQuery }
   ];
 }
@@ -435,23 +857,37 @@ function applyToolResultContextBudget(call, result) {
     return text;
   }
 
-  const preview = text.slice(0, TOOL_RESULT_CONTEXT_BUDGET.previewChars).trimEnd();
-  const compacted = [
-    '[tool_result_compacted]',
-    `Tool: ${call?.tool || 'unknown'}`,
-    `Original chars: ${text.length}`,
-    '',
-    'Preview:',
-    preview,
-    '',
-    'Use narrower follow-up tool calls if full output is required.'
-  ].join('\n');
+  const digestKey = `${call?.tool || 'unknown'}:${stableHashText(text)}`;
+  const cachedDigest = getRuntimeScopedCache('tool_result_digest', digestKey);
+  const compacted = cachedDigest || buildToolResultDigest(call?.tool || 'unknown', text);
+
+  if (!cachedDigest) {
+    setRuntimeScopedCache('tool_result_digest', digestKey, compacted, {
+      ttlMs: 24 * 60 * 60 * 1000,
+      maxEntries: 800,
+      maxBytes: 2_000_000
+    });
+  }
+
+  // Keep an archive copy for a short window so the loop can still recover details if needed.
+  setRuntimeScopedCache('tool_result_archive', `${signature}:${digestKey}`, text.slice(0, 40000), {
+    ttlMs: 24 * 60 * 60 * 1000,
+    maxEntries: 300,
+    maxBytes: 3_000_000
+  });
 
   runToolResultReplacementState.replacements.set(signature, compacted);
   return compacted;
 }
 
-function microcompactToolResultMessages(msgs, keepRecent = TOOL_RESULT_CONTEXT_BUDGET.keepRecentResults) {
+function microcompactToolResultMessages(msgs, options = {}) {
+  const keepRecent = Math.max(
+    1,
+    Number(options.keepRecent ?? TOOL_RESULT_CONTEXT_BUDGET.keepRecentResults) || TOOL_RESULT_CONTEXT_BUDGET.keepRecentResults
+  );
+  const clearOnly = options.clearOnly === true;
+  const clearedNotice = String(options.clearedNotice || '[Old tool result content cleared by microcompact]');
+  const compactedNotice = String(options.compactedNotice || '[Old tool result compacted by microcompact]');
   const toolResultIndexes = [];
   for (let i = 0; i < msgs.length; i += 1) {
     const msg = msgs[i];
@@ -473,12 +909,33 @@ function microcompactToolResultMessages(msgs, keepRecent = TOOL_RESULT_CONTEXT_B
     if (keepSet.has(index)) continue;
 
     const original = String(msgs[index]?.content || '');
-    if (original.includes('[Old tool result content cleared by microcompact]')) continue;
+    if (original.includes(clearedNotice) || original.includes(compactedNotice)) continue;
 
-    const compacted = original.replace(
-      /<tool_result([^>]*)>[\s\S]*?<\/tool_result>/gi,
-      '<tool_result$1>\n[Old tool result content cleared by microcompact]\n</tool_result>'
-    );
+    const extracted = extractToolResultPayload(original);
+    if (!extracted) continue;
+
+    if (clearOnly) {
+      const compacted = `<tool_result tool="${extracted.tool}">\n${clearedNotice}\n</tool_result>`;
+      if (compacted === original) continue;
+      clearedCount += 1;
+      savedChars += Math.max(0, original.length - compacted.length);
+      next[index] = { ...msgs[index], content: compacted };
+      continue;
+    }
+
+    const digestKey = `${extracted.tool}:${stableHashText(extracted.body)}`;
+    const digest = getRuntimeScopedCache('tool_result_digest', digestKey)
+      || buildToolResultDigest(extracted.tool, extracted.body);
+
+    if (!getRuntimeScopedCache('tool_result_digest', digestKey)) {
+      setRuntimeScopedCache('tool_result_digest', digestKey, digest, {
+        ttlMs: 24 * 60 * 60 * 1000,
+        maxEntries: 800,
+        maxBytes: 2_000_000
+      });
+    }
+
+    const compacted = `<tool_result tool="${extracted.tool}">\n${compactedNotice}\n${digest}\n</tool_result>`;
 
     if (compacted === original) continue;
     clearedCount += 1;
@@ -489,11 +946,48 @@ function microcompactToolResultMessages(msgs, keepRecent = TOOL_RESULT_CONTEXT_B
   return { messages: next, clearedCount, savedChars };
 }
 
+function armTimeBasedMicrocompactForTurn() {
+  runTimeBasedMicrocompactState = {
+    enabled: false,
+    inactivityGapMs: 0
+  };
+
+  if (typeof getActiveSession !== 'function') return;
+  const session = getActiveSession();
+  const updatedAt = session?.updatedAt;
+  const last = updatedAt ? Date.parse(String(updatedAt)) : NaN;
+  if (!Number.isFinite(last)) return;
+
+  const gapMs = Date.now() - last;
+  if (gapMs < TIME_BASED_MICROCOMPACT_POLICY.inactivityMs) return;
+
+  runTimeBasedMicrocompactState = {
+    enabled: true,
+    inactivityGapMs: gapMs
+  };
+}
+
 async function applyContextManagementPipeline({ round, userMessage, ctxLimit }) {
-  const microcompact = microcompactToolResultMessages(messages);
+  const microcompactOptions = runTimeBasedMicrocompactState.enabled
+    ? {
+        keepRecent: TIME_BASED_MICROCOMPACT_POLICY.keepRecentResults,
+        clearOnly: true,
+        clearedNotice: '[Old tool result content cleared after inactivity]'
+      }
+    : {};
+
+  const microcompact = microcompactToolResultMessages(messages, microcompactOptions);
   if (microcompact.clearedCount > 0) {
     messages = microcompact.messages;
-    addNotice(`Context manager: cleared ${microcompact.clearedCount} older tool result(s), saved ~${microcompact.savedChars} chars.`);
+    if (runTimeBasedMicrocompactState.enabled) {
+      const gapMinutes = Math.round(runTimeBasedMicrocompactState.inactivityGapMs / 60000);
+      addNotice(`Context manager: cleared ${microcompact.clearedCount} stale tool result(s) after ${gapMinutes}m inactivity, saved ~${microcompact.savedChars} chars.`);
+      runTimeBasedMicrocompactState.enabled = false;
+    } else {
+      addNotice(`Context manager: cleared ${microcompact.clearedCount} older tool result(s), saved ~${microcompact.savedChars} chars.`);
+    }
+  } else if (runTimeBasedMicrocompactState.enabled) {
+    runTimeBasedMicrocompactState.enabled = false;
   }
 
   const currentCtxSize = ctxSize(messages);
@@ -523,7 +1017,7 @@ async function applyContextManagementPipeline({ round, userMessage, ctxLimit }) 
     addNotice(`? Summarization failed: ${e.message}`);
     messages = fallbackCompressContext(userMessage);
     addNotice('Applied fallback context compression without LLM.');
-    if (runCompactionState.consecutiveFailures >= 2) {
+    if (runCompactionState.consecutiveFailures >= CONTEXT_COMPACTION_POLICY.maxConsecutiveFailures) {
       addNotice('Compaction disabled for this run after repeated failures.');
     }
   }
@@ -537,14 +1031,19 @@ async function agentLoop(userMessage) {
   const MAX_ROUNDS = getMaxRounds();
   const CTX_LIMIT  = getCtxLimit();
   const delay      = getDelay();
-  const enrichedMessage = await skills.buildInitialContext(userMessage);
+  armTimeBasedMicrocompactForTurn();
+  const enrichedMessage = await skills.buildInitialContext(userMessage, { messages });
+  const memoryContextBlock = window.AgentMemory?.buildContextBlock?.(userMessage, messages) || '';
+  const turnInputMessage = memoryContextBlock
+    ? `${memoryContextBlock}\n\n${enrichedMessage}`
+    : enrichedMessage;
   throwIfStopRequested();
 
   // Init messages for this turn
   messages = [
     { role: 'system', content: await buildSystemPrompt(userMessage) },
     ...messages.filter(m => m.role !== 'system').slice(-20), // keep last 20 non-system
-    { role: 'user', content: enrichedMessage }
+    { role: 'user', content: turnInputMessage }
   ];
 
   let round = 0;
@@ -618,6 +1117,10 @@ async function agentLoop(userMessage) {
 
       addMessage('agent', finalMarkdown, round, false, false, []);
       messages.push({ role: 'assistant', content: finalMarkdown });
+      const memoryDelta = maybeExtractLongTermMemory(userMessage, finalMarkdown);
+      if (memoryDelta?.saved) {
+        addNotice(`Memory manager: stored ${memoryDelta.saved} durable memory item(s).`);
+      }
       syncSessionState();
       setStatus('ok', `done in ${round} round${round>1?'s':''}`);
       notifyIfHidden(finalMarkdown);
@@ -698,6 +1201,7 @@ async function agentLoop(userMessage) {
         }
       }
 
+      let sawPermissionDenied = false;
       for (const { call: toolCall, result } of batchResults) {
         throwIfStopRequested();
         addMessage('tool', `? ${result}`, round, false, true);
@@ -711,6 +1215,10 @@ async function agentLoop(userMessage) {
         }
 
         const failureState = recordToolFailure(toolCall, result);
+        if (isPermissionDeniedResult(result)) {
+          sawPermissionDenied = true;
+          addNotice(`Permission guard blocked ${toolCall.tool}. The loop will pivot to a different approach.`);
+        }
         const contextSafeResult = applyToolResultContextBudget(toolCall, result);
         if (contextSafeResult !== String(result || '')) {
           const signature = getToolCallSignature(toolCall);
@@ -730,6 +1238,18 @@ async function agentLoop(userMessage) {
           addNotice(`Repeated failure on ${getToolCallSignature(toolCall)}. Disabled this call pattern for this run.`);
         }
       }
+
+      const toolSummary = buildToolUseSummary(batchResults);
+      if (toolSummary) {
+        messages.push({ role: 'assistant', content: toolSummary });
+      }
+
+      if (sawPermissionDenied) {
+        const denialContinuation = buildPermissionDenialContinuation();
+        if (denialContinuation) {
+          messages.push({ role: 'user', content: denialContinuation });
+        }
+      }
     }
 
     await applyContextManagementPipeline({ round, userMessage, ctxLimit: CTX_LIMIT });
@@ -743,7 +1263,13 @@ async function agentLoop(userMessage) {
   const noEvidenceWarning = runSuccessfulToolCount === 0
     ? 'No successful tool evidence was gathered in this run. Do not fabricate facts; clearly state uncertainty and what could not be verified.'
     : 'Use only the verified tool evidence already gathered in this run.';
-  messages.push({ role: 'user', content: `Answer now with what you know so far. Return the final answer in Markdown only. ${noEvidenceWarning}` });
+  const denialWarning = runPermissionDenials.length
+    ? `Permission denials occurred for some attempted actions (${runPermissionDenials.slice(-2).map(item => item.tool).join(', ')}). Respect those constraints in the final answer.`
+    : '';
+  messages.push({
+    role: 'user',
+    content: `Answer now with what you know so far. Return the final answer in Markdown only. ${noEvidenceWarning} ${denialWarning}`.trim()
+  });
   showThinking('forcing final answer…');
   try {
     throwIfStopRequested();
@@ -756,6 +1282,10 @@ async function agentLoop(userMessage) {
     hideThinking();
     addMessage('agent', finalMarkdown, MAX_ROUNDS, false, false, []);
     messages.push({ role: 'assistant', content: finalMarkdown });
+    const memoryDelta = maybeExtractLongTermMemory(userMessage, finalMarkdown);
+    if (memoryDelta?.saved) {
+      addNotice(`Memory manager: stored ${memoryDelta.saved} durable memory item(s).`);
+    }
     syncSessionState();
     notifyIfHidden(finalMarkdown || 'Response ready. Check the latest result.');
   } catch (e) {
@@ -1025,10 +1555,3 @@ document.addEventListener('DOMContentLoaded', () => {
   probeLocal();
   setStopButtonState(false);
 });
-
-
-
-
-
-
-

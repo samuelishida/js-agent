@@ -71,8 +71,8 @@
 
 /* SEND BUTTON */
 .btn-send {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   background: var(--accent-primary);
   border: none;
   border-radius: var(--radius-md);
@@ -84,8 +84,8 @@
   transition: all var(--transition-fast);
   font-size: 14px;
   flex-shrink: 0;
-  min-width: 36px;
-  min-height: 36px;
+  min-width: 34px;
+  min-height: 34px;
 }
 
 .btn-send:hover {
@@ -116,13 +116,13 @@
 
 /* STOP BUTTON */
 .btn-stop {
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   background: var(--red);
   border: none;
   border-radius: var(--radius-md);
   color: white;
-  font-size: 14px;
+  font-size: 13px;
   cursor: pointer;
   display: flex;
   align-items: center;

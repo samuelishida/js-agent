@@ -31,7 +31,10 @@
       })
     ]);
 
-    return `${policy}\n\n${systemPrompt}`;
+    const snapshotAddendum = window.AgentClaudeSnapshot?.getPromptAddendum?.() || '';
+    return snapshotAddendum
+      ? `${policy}\n\n${systemPrompt}\n\n${snapshotAddendum}`
+      : `${policy}\n\n${systemPrompt}`;
   }
 
   async function buildRepairPrompt(userMessage) {
@@ -112,7 +115,12 @@
       tasklist: 'task_list',
       taskupdate: 'task_update',
       askuserquestion: 'ask_user_question',
-      toolsearch: 'tool_search'
+      memorywrite: 'memory_write',
+      memorysearch: 'memory_search',
+      memorylist: 'memory_list',
+      toolsearch: 'tool_search',
+      skillcatalog: 'snapshot_skill_catalog',
+      snapshotskillcatalog: 'snapshot_skill_catalog'
     };
 
     if (aliasMap[requested] && registry[aliasMap[requested]]) {

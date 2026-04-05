@@ -60,7 +60,12 @@
   }
 
   function detectProjectSkillsIntent(text) {
-    return /(explain|explique|skills|habilidades|capabilities|capacidades).*(project|projeto|repo|codebase)|((project|projeto|repo|codebase).*(skills|habilidades|capabilities))/i.test(String(text || ''));
+    const value = String(text || '');
+    if (/(agentic loop|agent loop|orchestrator|tool loop|runtime loop|max_rounds|context manager|execution loop)/i.test(value)) {
+      return true;
+    }
+
+    return /(explain|explique|skills|habilidades|capabilities|capacidades).*(project|projeto|repo|codebase)|((project|projeto|repo|codebase).*(skills|habilidades|capabilities))/i.test(value);
   }
 
   function detectSaveIntent(text) {

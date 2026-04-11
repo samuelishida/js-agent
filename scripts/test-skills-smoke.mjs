@@ -97,8 +97,8 @@ async function main() {
     'src/app/runtime-memory.js',
     'src/skills/core/intents.js',
     'src/skills/core/tool-meta.js',
-    'src/skills/generated/claude-snapshot-data.js',
-    'src/skills/claude-snapshot-adapter.js',
+    'src/skills/generated/clawd-snapshot-data.js',
+    'src/skills/clawd-snapshot-adapter.js',
     'src/skills/modules/filesystem-runtime.js',
     'src/skills/modules/data-runtime.js',
     'src/skills/modules/registry-runtime.js',
@@ -116,7 +116,7 @@ async function main() {
   assert.ok(runtime.skillGroups, 'skill groups are missing');
 
   const registry = runtime.registry;
-  const snapshotManifest = globalThis.window.AgentClaudeSnapshot?.getManifest?.();
+  const snapshotManifest = globalThis.window.AgentClawdSnapshot?.getManifest?.();
   assert.ok(snapshotManifest, 'snapshot manifest is missing');
   assert.ok(
     Number(snapshotManifest?.stats?.bundledSkills || 0) > 0,

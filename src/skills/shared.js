@@ -21,6 +21,10 @@
   const AGENT_CHANNEL = 'loopagent-v1';
   const TASKS_STORAGE_KEY = 'agent_tasks_v1';
   const TODOS_STORAGE_KEY = 'agent_todos_v1';
+  const WORKER_RUNS_STORAGE_KEY = 'agent_worker_runs_v1';
+  const WORKER_RUNS_LIMIT = 40;
+  const CLAWD_MEMORY_GLOBAL_KEY = 'clawd_memory_global_v1';
+  const CLAWD_MEMORY_PROJECT_PREFIX = 'clawd_memory_project_v1';
   let broadcastChannel = null;
   const broadcastListeners = new Map();
 
@@ -366,6 +370,11 @@
       hints.push('Multi-tab coordination intent detected: use tab_broadcast to publish results and tab_listen to wait for another tab.');
     }
 
+    if (/(multi\s*-?agent|sub\s*-?agent|workers?|parallel(?:ize|\s+run)?|delegat(?:e|ion)|batch\s+workers?)/i.test(text)) {
+      plan.push('worker_batch', 'worker_list', 'worker_get');
+      hints.push('Parallel worker intent detected: use worker_batch for bounded concurrent worker prompts, then inspect outcomes via worker_list/worker_get.');
+    }
+
     if (!plan.length) {
       hints.push('No strong preflight intent detected. Use the most specific tool available.');
     }
@@ -687,6 +696,223 @@
   const taskUpdate = dataRuntime.taskUpdate || missingDataRuntime('taskUpdate');
   const askUserQuestion = dataRuntime.askUserQuestion || missingDataRuntime('askUserQuestion');
 
+  function loadWorkerRuns() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(WORKER_RUNS_STORAGE_KEY) || '[]');
+      return Array.isArray(stored) ? stored : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveWorkerRuns(runs) {
+    const normalized = Array.isArray(runs) ? runs.slice(0, WORKER_RUNS_LIMIT) : [];
+    localStorage.setItem(WORKER_RUNS_STORAGE_KEY, JSON.stringify(normalized));
+  }
+
+  function getWorkerLlm() {
+    const llm = typeof window.callLLM === 'function'
+      ? window.callLLM
+      : (typeof callLLM === 'function' ? callLLM : null);
+    if (!llm) {
+      throw new Error('worker_batch requires the runtime LLM function to be available.');
+    }
+    return llm;
+  }
+
+  function normalizeWorkerTasks(args = {}) {
+    const source = Array.isArray(args.tasks)
+      ? args.tasks
+      : (Array.isArray(args.prompts) ? args.prompts : String(args.text || '').split(/\r?\n/));
+
+    const tasks = source
+      .map(item => String(item || '').trim())
+      .filter(Boolean)
+      .slice(0, 10);
+
+    return tasks;
+  }
+
+  function buildWorkerContextSnippet(context = {}) {
+    const history = Array.isArray(context?.messages) ? context.messages : [];
+    const useful = history
+      .filter(msg => msg && msg.role !== 'system')
+      .slice(-8)
+      .map(msg => `${String(msg.role || 'user').toUpperCase()}: ${stripAgentTags(msg.content || '')}`)
+      .filter(Boolean);
+
+    const joined = useful.join('\n').slice(0, 2400).trim();
+    if (!joined) return '';
+    return `Recent conversation context:\n${joined}`;
+  }
+
+  async function runWorkerTask({
+    workerId,
+    goal,
+    task,
+    includeContext,
+    contextSnippet,
+    maxTokens,
+    temperature
+  }) {
+    const llm = getWorkerLlm();
+    const userPrompt = [
+      goal ? `Overall goal: ${goal}` : '',
+      `Worker ${workerId} task: ${task}`,
+      includeContext && contextSnippet ? contextSnippet : '',
+      'Return concise Markdown with: summary, concrete findings, and next action.'
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    const raw = await llm([
+      {
+        role: 'system',
+        content: 'You are a focused autonomous worker. Execute only the assigned subtask and keep output concise.'
+      },
+      { role: 'user', content: userPrompt }
+    ], {
+      timeoutMs: 30000,
+      retries: 1,
+      maxTokens: Math.max(256, Number(maxTokens) || 900),
+      temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.2
+    });
+
+    const parsed = typeof splitModelReply === 'function'
+      ? splitModelReply(raw)
+      : { visible: String(raw || '') };
+
+    return String(parsed?.visible || raw || '').trim();
+  }
+
+  async function workerBatch(args = {}, context = {}) {
+    const goal = String(args.goal || args.objective || '').trim();
+    const tasks = normalizeWorkerTasks(args);
+    if (!tasks.length && !goal) {
+      throw new Error('worker_batch requires at least one task or a goal.');
+    }
+
+    const taskList = tasks.length ? tasks : [goal];
+    const workerCount = Math.max(1, Math.min(4, Number(args.max_workers) || 3));
+    const includeContext = args.include_context !== false;
+    const contextSnippet = buildWorkerContextSnippet(context);
+    const maxTokens = Number(args.max_tokens) || 900;
+    const temperature = Number.isFinite(Number(args.temperature)) ? Number(args.temperature) : 0.2;
+    const runId = `worker_run_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const createdAt = new Date().toISOString();
+
+    const workers = taskList.map((task, index) => ({
+      id: `w${index + 1}`,
+      task,
+      status: 'pending',
+      output: '',
+      error: ''
+    }));
+
+    for (let i = 0; i < workers.length; i += workerCount) {
+      const chunk = workers.slice(i, i + workerCount);
+      const settled = await Promise.allSettled(chunk.map(async worker => {
+        const output = await runWorkerTask({
+          workerId: worker.id,
+          goal,
+          task: worker.task,
+          includeContext,
+          contextSnippet,
+          maxTokens,
+          temperature
+        });
+        return { workerId: worker.id, output };
+      }));
+
+      settled.forEach((item, offset) => {
+        const worker = chunk[offset];
+        if (!worker) return;
+        if (item.status === 'fulfilled') {
+          worker.status = 'done';
+          worker.output = String(item.value?.output || '').slice(0, 5000);
+          return;
+        }
+        worker.status = 'failed';
+        worker.error = String(item.reason?.message || 'unknown worker failure').slice(0, 300);
+      });
+    }
+
+    const done = workers.filter(worker => worker.status === 'done').length;
+    const failed = workers.length - done;
+    const runRecord = {
+      id: runId,
+      createdAt,
+      goal,
+      workerCount,
+      done,
+      failed,
+      workers: workers.map(worker => ({
+        id: worker.id,
+        task: worker.task,
+        status: worker.status,
+        output: worker.output,
+        error: worker.error
+      }))
+    };
+
+    const existing = loadWorkerRuns().filter(item => item?.id !== runId);
+    existing.unshift(runRecord);
+    saveWorkerRuns(existing);
+
+    const lines = [
+      `Run: ${runId}`,
+      `Workers: ${workers.length}, Done: ${done}, Failed: ${failed}`,
+      '',
+      ...workers.map(worker => `${worker.id} | ${worker.status.toUpperCase()} | ${worker.task}`),
+      '',
+      'Use worker_get(run_id) to inspect full outputs.'
+    ];
+
+    return formatToolResult('worker_batch', lines.join('\n'));
+  }
+
+  async function workerList({ limit = 10 } = {}) {
+    const max = Math.max(1, Math.min(40, Number(limit) || 10));
+    const runs = loadWorkerRuns().slice(0, max);
+    if (!runs.length) {
+      return formatToolResult('worker_list', '(no worker runs)');
+    }
+
+    const body = runs
+      .map((run, index) => `${index + 1}. ${run.id} | workers=${run.workerCount} | done=${run.done} | failed=${run.failed} | ${run.createdAt}`)
+      .join('\n');
+
+    return formatToolResult('worker_list', body);
+  }
+
+  async function workerGet({ run_id, id }) {
+    const target = String(run_id || id || '').trim();
+    if (!target) {
+      throw new Error('worker_get requires run_id (or id).');
+    }
+
+    const run = loadWorkerRuns().find(item => String(item?.id || '') === target);
+    if (!run) {
+      throw new Error(`worker_get: run not found (${target}).`);
+    }
+
+    const details = [
+      `Run: ${run.id}`,
+      `Created: ${run.createdAt}`,
+      `Workers: ${run.workerCount}, Done: ${run.done}, Failed: ${run.failed}`,
+      run.goal ? `Goal: ${run.goal}` : '',
+      '',
+      ...((Array.isArray(run.workers) ? run.workers : []).map(worker => [
+        `## ${worker.id} (${worker.status})`,
+        `Task: ${worker.task}`,
+        worker.error ? `Error: ${worker.error}` : '',
+        worker.output ? `Output:\n${worker.output}` : ''
+      ].filter(Boolean).join('\n')))
+    ].filter(Boolean).join('\n\n');
+
+    return formatToolResult('worker_get', details.slice(0, 12000));
+  }
+
   let notificationPermissionState = ('Notification' in window && window.Notification?.permission) || 'unsupported';
 
   function notificationsSupported() {
@@ -826,6 +1052,10 @@
 
   async function buildInitialContext(userMessage, context = {}) {
     const blocks = [];
+    const compatContext = buildClawdCompatContextBlock();
+    if (compatContext) {
+      blocks.push(compatContext);
+    }
     const baselinePreflight = buildPreflightPlan(userMessage, context?.messages || []);
     let preflight = baselinePreflight;
 
@@ -895,6 +1125,60 @@
   const walkPaths = fsRuntime.walkPaths || missingFsRuntime('walkPaths');
   const savePickedUpload = fsRuntime.savePickedUpload || missingFsRuntime('savePickedUpload');
   const pickDirectory = fsRuntime.pickDirectory || missingFsRuntime('pickDirectory');
+  const searchCode = fsRuntime.searchCode || missingFsRuntime('searchCode');
+  const multiEditFiles = fsRuntime.multiEditFiles || missingFsRuntime('multiEditFiles');
+
+  function getClawdProjectMemoryKey() {
+    const rootId = String(state.defaultRootId || 'default').trim().toLowerCase();
+    return `${CLAWD_MEMORY_PROJECT_PREFIX}:${rootId || 'default'}`;
+  }
+
+  function readClawdScopedMemory(scope = 'all') {
+    const globalMemory = String(localStorage.getItem(CLAWD_MEMORY_GLOBAL_KEY) || '').trim();
+    const projectMemory = String(localStorage.getItem(getClawdProjectMemoryKey()) || '').trim();
+
+    if (scope === 'global') return globalMemory;
+    if (scope === 'project') return projectMemory;
+
+    return [
+      globalMemory ? `## Global Memory\n${globalMemory}` : '',
+      projectMemory ? `## Project Memory\n${projectMemory}` : ''
+    ].filter(Boolean).join('\n\n');
+  }
+
+  function writeClawdScopedMemory({ topic = '', content = '', scope = 'global', replace = false } = {}) {
+    const targetKey = scope === 'project' ? getClawdProjectMemoryKey() : CLAWD_MEMORY_GLOBAL_KEY;
+    const trimmedContent = String(content || '').trim();
+    if (!trimmedContent) {
+      throw new Error('clawd_memoryWrite requires content.');
+    }
+
+    const heading = String(topic || 'memory').trim();
+    const block = heading ? `## ${heading}\n${trimmedContent}` : trimmedContent;
+    const existing = String(localStorage.getItem(targetKey) || '').trim();
+    const next = replace || !existing ? block : `${existing}\n\n${block}`.trim();
+    localStorage.setItem(targetKey, next);
+    return next;
+  }
+
+  async function callLocalCompatApi(path, payload = {}) {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(text || `HTTP ${response.status}`);
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { ok: true, result: text };
+    }
+  }
 
   async function toolSearch({ query = '', limit = 30 }) {
     const terms = String(query || '').toLowerCase().trim();
@@ -906,7 +1190,8 @@
       return hay.includes(terms);
     });
 
-    const snapshotMatches = window.AgentClaudeSnapshot?.searchBundledSkills?.({
+    const snapshotApi = window.AgentClawdSnapshot;
+    const snapshotMatches = snapshotApi?.searchBundledSkills?.({
       query: terms,
       limit: max
     }) || [];
@@ -931,9 +1216,10 @@
   }
 
   async function snapshotSkillCatalog({ query = '', limit = 30 } = {}) {
-    const formatted = window.AgentClaudeSnapshot?.formatSkillCatalogForTool?.({ query, limit });
+    const snapshotApi = window.AgentClawdSnapshot;
+    const formatted = snapshotApi?.formatSkillCatalogForTool?.({ query, limit });
     if (!formatted) {
-      throw new Error('Snapshot skill catalog is unavailable. Run npm run build:claude-snapshot first.');
+      throw new Error('Snapshot skill catalog is unavailable. Run npm run build:clawd-snapshot first.');
     }
     return formatToolResult('snapshot_skill_catalog', formatted);
   }
@@ -964,6 +1250,174 @@
   async function memoryList({ limit = 30 } = {}) {
     const entries = window.AgentMemory?.list?.({ limit }) || [];
     return formatToolResult('memory_list', window.AgentMemory?.formatList?.(entries) || '(no memories)');
+  }
+
+  async function clawdReadFile(args = {}, context = {}) {
+    return readLocalFile(deriveFilesystemPathArg(args, context, 'clawd_readFile'));
+  }
+
+  async function clawdWriteFile(args = {}) {
+    return writeTextFile({
+      path: args.path,
+      content: args.content
+    });
+  }
+
+  async function clawdEditFile(args = {}) {
+    return editLocalFile({
+      path: args.path,
+      oldText: args.oldString ?? args.oldText,
+      newText: args.newString ?? args.newText,
+      replaceAll: args.replaceAll === true
+    });
+  }
+
+  async function clawdMultiEdit(args = {}) {
+    return multiEditFiles({
+      edits: Array.isArray(args.edits) ? args.edits : []
+    });
+  }
+
+  async function clawdListDir(args = {}, context = {}) {
+    return listDirectory(deriveFilesystemPathArg(args, context, 'clawd_listDir'));
+  }
+
+  async function clawdGlob(args = {}) {
+    return globPaths({
+      path: args.path,
+      pattern: args.pattern,
+      includeDirectories: args.includeDirectories,
+      maxResults: args.maxResults
+    });
+  }
+
+  async function clawdSearchCode(args = {}, context = {}) {
+    const resolved = deriveFilesystemPathArg(args, context, 'clawd_searchCode');
+    return searchCode({
+      path: resolved.path,
+      query: resolved.query,
+      glob: resolved.glob,
+      isRegex: resolved.isRegex,
+      caseSensitive: resolved.caseSensitive,
+      contextLines: resolved.contextLines,
+      maxResults: resolved.maxResults
+    });
+  }
+
+  async function clawdRunTerminal({ command = '', cwd = '' } = {}) {
+    const payload = await callLocalCompatApi('/api/terminal', {
+      command: String(command || ''),
+      cwd: String(cwd || '')
+    });
+    return formatToolResult('clawd_runTerminal', String(payload?.result || payload?.output || ''));
+  }
+
+  async function clawdWebFetch({ url } = {}) {
+    const text = await fetchReadablePage(String(url || '').trim());
+    return formatToolResult('clawd_webFetch', text);
+  }
+
+  async function clawdGetDiagnostics({ path = '', severity = 'all' } = {}) {
+    try {
+      const payload = await callLocalCompatApi('/api/diagnostics', {
+        path: String(path || ''),
+        severity: String(severity || 'all')
+      });
+      return formatToolResult('clawd_getDiagnostics', String(payload?.result || '(no diagnostics)'));
+    } catch (error) {
+      return formatToolResult(
+        'clawd_getDiagnostics',
+        `Diagnostics endpoint unavailable in this browser runtime. ${String(error?.message || error)}`
+      );
+    }
+  }
+
+  async function clawdTodoWrite(args = {}) {
+    return todoWrite({
+      todos: args.todos,
+      items: args.items,
+      text: args.text
+    });
+  }
+
+  async function clawdMemoryRead({ scope = 'all' } = {}) {
+    const normalizedScope = ['all', 'global', 'project'].includes(String(scope || '').trim())
+      ? String(scope || 'all').trim()
+      : 'all';
+    const text = readClawdScopedMemory(normalizedScope);
+    return formatToolResult('clawd_memoryRead', text || '(no memory stored)');
+  }
+
+  async function clawdMemoryWrite({ topic = '', content = '', replace = false, scope = 'global' } = {}) {
+    const normalizedScope = String(scope || 'global').trim() === 'project' ? 'project' : 'global';
+    const stored = writeClawdScopedMemory({
+      topic,
+      content,
+      replace,
+      scope: normalizedScope
+    });
+
+    if (normalizedScope === 'global') {
+      try {
+        window.AgentMemory?.write?.({
+          text: `${topic ? `${topic}: ` : ''}${String(content || '').trim()}`,
+          tags: ['clawd_compat', normalizedScope],
+          source: 'tool',
+          importance: 0.7
+        });
+      } catch {}
+    }
+
+    return formatToolResult(
+      'clawd_memoryWrite',
+      `Saved ${normalizedScope} memory.${stored ? `\n\n${stored.slice(0, 4000)}` : ''}`
+    );
+  }
+
+  async function clawdLsp(args = {}) {
+    return formatToolResult(
+      'clawd_lsp',
+      [
+        `Requested action: ${String(args.action || '').trim() || '(missing)'}`,
+        'LSP semantic navigation is not available in the standalone browser runtime.',
+        'Use clawd_searchCode, clawd_glob, and clawd_readFile as fallbacks.'
+      ].join('\n')
+    );
+  }
+
+  async function clawdSpawnAgent(args = {}, context = {}) {
+    const task = String(args.task || '').trim();
+    if (!task) {
+      throw new Error('clawd_spawnAgent requires task.');
+    }
+
+    const output = await runWorkerTask({
+      workerId: 'sub1',
+      goal: '',
+      task,
+      includeContext: true,
+      contextSnippet: buildWorkerContextSnippet(context),
+      maxTokens: Math.max(300, Number(args.maxTokens || 900)),
+      temperature: 0.2
+    });
+
+    return formatToolResult('clawd_spawnAgent', `Task: ${task}\n\n${output}`);
+  }
+
+  function buildClawdCompatContextBlock() {
+    const globalMemory = readClawdScopedMemory('global');
+    const projectMemory = readClawdScopedMemory('project');
+    const rootSummary = state.defaultRootId
+      ? `Authorized workspace root: ${state.defaultRootId}`
+      : 'No workspace root authorized yet.';
+
+    const sections = [
+      rootSummary,
+      globalMemory ? `## Global Memory\n${globalMemory}` : '',
+      projectMemory ? `## Project Memory\n${projectMemory}` : ''
+    ].filter(Boolean);
+
+    return sections.length ? `<clawd_compat_context>\n${sections.join('\n\n')}\n</clawd_compat_context>` : '';
   }
 
   const registryModuleFactory = window.AgentSkillModules?.createRegistryRuntime;
@@ -1028,6 +1482,9 @@
         task_get: args => taskGet(args),
         task_list: args => taskList(args),
         task_update: args => taskUpdate(args),
+        worker_batch: (args, context = {}) => workerBatch(args, context),
+        worker_list: args => workerList(args),
+        worker_get: args => workerGet(args),
         ask_user_question: args => askUserQuestion(args),
         memory_write: args => memoryWrite(args),
         memory_search: args => memorySearch(args),
@@ -1043,8 +1500,125 @@
   const registry = registryRuntime.registry || {};
   const skillGroups = registryRuntime.skillGroups || {};
 
+  function registerCompatTool({ name, signature, description, run, retries = 1 }) {
+    if (registry[name]) return;
+    registry[name] = {
+      name,
+      description,
+      retries,
+      run
+    };
+
+    if (!skillGroups.clawd_compat) {
+      skillGroups.clawd_compat = {
+        label: 'Clawd Compat',
+        tools: []
+      };
+    }
+
+    skillGroups.clawd_compat.tools.push({ name, signature });
+
+    if (typeof enabledTools === 'object' && enabledTools && !Object.prototype.hasOwnProperty.call(enabledTools, name)) {
+      enabledTools[name] = true;
+    }
+  }
+
+  [
+    {
+      name: 'clawd_readFile',
+      signature: 'clawd_readFile(path, startLine?, endLine?)',
+      description: 'Reads a file with optional 1-based line range.',
+      run: clawdReadFile
+    },
+    {
+      name: 'clawd_writeFile',
+      signature: 'clawd_writeFile(path, content)',
+      description: 'Creates or overwrites a file with complete content.',
+      run: clawdWriteFile
+    },
+    {
+      name: 'clawd_editFile',
+      signature: 'clawd_editFile(path, oldString, newString, replaceAll?)',
+      description: 'Performs a surgical string replacement in a file.',
+      run: clawdEditFile
+    },
+    {
+      name: 'clawd_multiEdit',
+      signature: 'clawd_multiEdit(edits[])',
+      description: 'Applies multiple validated file edits atomically.',
+      run: clawdMultiEdit
+    },
+    {
+      name: 'clawd_listDir',
+      signature: 'clawd_listDir(path)',
+      description: 'Lists files and directories.',
+      run: clawdListDir
+    },
+    {
+      name: 'clawd_glob',
+      signature: 'clawd_glob(pattern, exclude?)',
+      description: 'Finds files matching a glob pattern.',
+      run: clawdGlob
+    },
+    {
+      name: 'clawd_searchCode',
+      signature: 'clawd_searchCode(query, glob?, isRegex?, caseSensitive?, contextLines?, maxResults?)',
+      description: 'Searches code/text files with optional glob and context.',
+      run: clawdSearchCode
+    },
+    {
+      name: 'clawd_runTerminal',
+      signature: 'clawd_runTerminal(command, cwd?)',
+      description: 'Runs a terminal command through the local dev server bridge.',
+      run: clawdRunTerminal
+    },
+    {
+      name: 'clawd_webFetch',
+      signature: 'clawd_webFetch(url)',
+      description: 'Fetches a URL and returns readable text.',
+      run: clawdWebFetch
+    },
+    {
+      name: 'clawd_getDiagnostics',
+      signature: 'clawd_getDiagnostics(path?, severity?)',
+      description: 'Gets diagnostics from the local dev server bridge when available.',
+      run: clawdGetDiagnostics
+    },
+    {
+      name: 'clawd_todoWrite',
+      signature: 'clawd_todoWrite(todos)',
+      description: 'Persists a structured todo list.',
+      run: clawdTodoWrite
+    },
+    {
+      name: 'clawd_memoryRead',
+      signature: 'clawd_memoryRead(scope?)',
+      description: 'Reads compatibility memory with global/project scopes.',
+      run: clawdMemoryRead
+    },
+    {
+      name: 'clawd_memoryWrite',
+      signature: 'clawd_memoryWrite(topic?, content, replace?, scope?)',
+      description: 'Writes compatibility memory with global/project scopes.',
+      run: clawdMemoryWrite
+    },
+    {
+      name: 'clawd_lsp',
+      signature: 'clawd_lsp(action, path?, line?, col?, query?)',
+      description: 'LSP compatibility placeholder for the browser runtime.',
+      run: clawdLsp
+    },
+    {
+      name: 'clawd_spawnAgent',
+      signature: 'clawd_spawnAgent(task, tools?, maxIterations?)',
+      description: 'Runs a focused sub-agent task using the worker runtime.',
+      run: clawdSpawnAgent
+    }
+  ].forEach(registerCompatTool);
+
   function registerSnapshotTools() {
-    const importedSkills = window.AgentClaudeSnapshot?.getBundledSkills?.() || [];
+    const snapshotApi = window.AgentClawdSnapshot;
+    const importedSkills = snapshotApi?.getBundledSkills?.() || [];
     if (!importedSkills.length) return;
 
     if (!skillGroups.snapshot) {
@@ -1055,7 +1629,7 @@
     }
 
     for (const skill of importedSkills) {
-      const toolName = window.AgentClaudeSnapshot?.toSnapshotToolName?.(skill.name)
+      const toolName = snapshotApi?.toSnapshotToolName?.(skill.name)
         || `snapshot_skill_${String(skill.name || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
 
       if (registry[toolName]) continue;

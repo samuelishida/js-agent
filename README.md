@@ -1,6 +1,6 @@
 # JS Agent
 
-Browser-first multi-step agent with hosted/local LLM routing, modular skill runtime, context-aware tool orchestration, and persistent session memory in local storage.
+Browser-first multi-step agent with hosted/local LLM routing, modular skill runtime, Clawd-style prompt composition, context-aware orchestration, and durable memory/cache layers in local storage.
 
 ## Agent Loop Architecture
 
@@ -11,8 +11,9 @@ The runtime executes an explicit, bounded agentic loop:
 3. Parse and normalize one or more tool calls
 4. Execute tool batches (parallel only when concurrency-safe)
 5. Apply tool-result context budget before persisting to history
-6. Run context manager pipeline (microcompact old tool results, summarize only when needed)
-7. Repeat until final answer or round limit
+6. Inject runtime continuation reminders (`<system-reminder>`, tool summary, denial constraints, compaction notes)
+7. Run context manager pipeline (microcompact old tool results, summarize only when needed)
+8. Repeat until final answer or round limit
 
 ```mermaid
 flowchart TD
@@ -23,13 +24,14 @@ flowchart TD
    T -- No --> A[Return final answer]
    T -- Yes --> X[Execute tool batches]
    X --> B[Apply tool-result budget]
-   B --> M[Microcompact older tool results]
+   B --> N[Inject runtime reminders]
+   N --> M[Microcompact older tool results]
    M --> C{Context over limit}
    C -- No --> L
    C -- Yes --> S[Summarize context]
-   S --> R{Summary succeeded}
-   R -- Yes --> L
-   R -- No --> F[Fallback tail compression]
+   S --> Q{Summary succeeded}
+   Q -- Yes --> L
+   Q -- No --> F[Fallback tail compression]
    F --> L
 ```
 
@@ -38,6 +40,9 @@ flowchart TD
 - Preflight and enrichment:
    - Rule-based intent detection and optional short-timeout planner LLM call for optimized query/tool hints
    - Deferred prefetches for likely high-value context
+- Clawd-style prompt composer:
+   - Sectioned prompt assembly with static and dynamic boundaries in `src/core/orchestrator.js`
+   - Runtime continuation prompt injection for tool summaries, permission denials, compaction signals, and safety reminders
 - Tool selection and execution:
    - Registry-driven tool definitions with execution metadata (risk, read-only, concurrency-safe)
    - Safe batching for read-only concurrent tools
@@ -50,12 +55,15 @@ flowchart TD
    - Stable tool-result budgeting for large outputs
    - Lightweight microcompact of older `<tool_result>` blocks
    - LLM summarization with deterministic fallback compression and cooldown guard
+   - Time-based stale-result clearing after inactivity windows
 - Loop guardrails:
    - Semantic near-duplicate detection for repeated `web_search` calls
    - Repeated-failure tool-call disablement
+   - Prompt-injection signal detection from tool outputs with safe continuation warnings
    - Max rounds and forced final-answer path with evidence warning
 - Memory and persistence:
    - Session history, stats, tool cache, UI preferences, task/todo stores in `localStorage`
+   - Long-term memory extraction/retrieval for cross-turn personalization and continuity
    - Cross-tab cache and busy-state synchronization via `BroadcastChannel`
 
 ## Project Structure
@@ -102,7 +110,7 @@ Agent/
 
 Supported lanes:
 
-- Cloud providers from Settings (`gemini/*`, `openai/*`, `claude/*`, `azure/*`, `ollama/*`)
+- Cloud providers from Settings (`gemini/*`, `openai/*`, `clawd/*`, `azure/*`, `ollama/*`)
 - Local OpenAI-compatible endpoints (LM Studio, Ollama-style, or custom)
 
 Behavior highlights:
@@ -122,19 +130,19 @@ Primary families:
 - Filesystem: roots, authorization flow, list/read/write/search/tree/walk/stat/copy/move/delete/rename
 - Data/planning: parse JSON/CSV, todos, tasks, question prompts, tool search
 
-## Claude Snapshot Integration
+## Clawd Snapshot Integration
 
-This repo now includes a Claude snapshot adapter pipeline:
+This repo now includes a Clawd snapshot adapter pipeline:
 
-- Source input: `claude-code-main/src`
-- Transpiled output: `dist/claude-code-main/src` (TS/TSX -> JS)
-- Generated manifest: `dist/claude-code-main/adapter/claude-snapshot-manifest.json`
-- Runtime data bridge: `src/skills/generated/claude-snapshot-data.js`
+- Source input: `clawd-code-main/src` (workspace snapshot source folder)
+- Transpiled output: `dist/clawd-code-main/src`
+- Generated manifest: `dist/clawd-code-main/adapter/clawd-snapshot-manifest.json`
+- Runtime data bridge: `src/skills/generated/clawd-snapshot-data.js`
 
 Build command:
 
 ```bash
-npm run build:claude-snapshot
+npm run build:clawd-snapshot
 ```
 
 Runtime effects after build:
@@ -143,18 +151,38 @@ Runtime effects after build:
 - Registers per-skill pseudo-tools (`snapshot_skill_*`) backed by sanitized prompt templates
 - Extends `tool_search` with imported snapshot skill hits
 - Appends sanitized snapshot prompt guidance into system prompt assembly
-- Sanitizes Anthropic/Claude brand mentions inside extracted prompt/skill text
+- Reuses extracted prompt snippets (`DEFAULT_AGENT_PROMPT`, action safety, hooks, reminders, function-result-clearing, summarize-tool-results)
+- Sanitizes provider/Clawd brand mentions inside extracted prompt/skill text
 
 ## Memory + Compaction + Cache
 
-Claude-style runtime upgrades now included:
+Clawd-style runtime upgrades now included:
 
 - Long-term memory manager (`AgentMemory`) with durable write/search/list and auto-extraction from completed turns
 - Memory tools in runtime: `memory_write`, `memory_search`, `memory_list`
 - Context compaction improvements:
   - cached summary reuse (`context_summary` scoped cache)
   - stronger tool-result digests used by microcompact for older `<tool_result>` blocks
+  - runtime continuation notes to keep loop state coherent after compaction
 - Multi-scope retention cache (`AgentRuntimeCache`) with TTL + max entries + max bytes policy per scope
+
+## Safety + Prompt Injection
+
+- Tool outputs are treated as untrusted data.
+- The loop records likely prompt-injection payload patterns in tool results.
+- Continuation reminders are injected so the model keeps following system policy after suspicious tool output.
+- Permission denial history is persisted inside the active run and converted into structured continuation constraints.
+
+## Verification
+
+Useful commands after changes:
+
+```bash
+npm run build:clawd-snapshot
+npm run test:skills-smoke
+node --check src/core/orchestrator.js
+node --check src/app/agent.js
+```
 
 ## Running
 

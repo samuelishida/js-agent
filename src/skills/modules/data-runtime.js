@@ -76,22 +76,30 @@
       localStorage.setItem(TODOS_STORAGE_KEY, JSON.stringify(todos));
     }
 
-    async function todoWrite({ items, text }) {
+    async function todoWrite({ items, text, todos }) {
       const now = new Date().toISOString();
       let normalizedItems = [];
 
-      if (Array.isArray(items)) {
-        normalizedItems = items
+      const sourceItems = Array.isArray(todos) ? todos : items;
+
+      if (Array.isArray(sourceItems)) {
+        normalizedItems = sourceItems
           .map(item => {
             if (typeof item === 'string') {
-              return { text: item.trim(), status: 'todo' };
+              return { id: '', text: item.trim(), status: 'pending', priority: 'medium' };
             }
 
             const value = item && typeof item === 'object' ? item : null;
-            const itemText = String(value?.text || value?.title || '').trim();
-            const status = String(value?.status || 'todo').trim() || 'todo';
+            const itemText = String(value?.text || value?.title || value?.content || '').trim();
+            const status = String(value?.status || 'pending').trim() || 'pending';
+            const priority = String(value?.priority || 'medium').trim() || 'medium';
             if (!itemText) return null;
-            return { text: itemText, status };
+            return {
+              id: String(value?.id || '').trim(),
+              text: itemText,
+              status,
+              priority
+            };
           })
           .filter(Boolean);
       } else {
@@ -99,7 +107,7 @@
           .split(/\r?\n/)
           .map(line => line.replace(/^\s*[-*\d.\[\]xX]+\s*/, '').trim())
           .filter(Boolean);
-        normalizedItems = lines.map(line => ({ text: line, status: 'todo' }));
+        normalizedItems = lines.map(line => ({ id: '', text: line, status: 'pending', priority: 'medium' }));
       }
 
       if (!normalizedItems.length) {
@@ -107,9 +115,10 @@
       }
 
       const next = normalizedItems.map((item, index) => ({
-        id: `todo_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`,
+        id: item.id || `todo_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`,
         text: item.text,
         status: item.status,
+        priority: item.priority || 'medium',
         createdAt: now,
         updatedAt: now
       }));
@@ -118,7 +127,7 @@
 
       return formatToolResult(
         'todo_write',
-        `Saved ${next.length} todo item(s).\n\n${next.map((item, index) => `${index + 1}. [${item.status}] ${item.text}`).join('\n')}`
+        `Saved ${next.length} todo item(s).\n\n${next.map((item, index) => `${index + 1}. [${item.status}] ${item.text}${item.priority ? ` (priority: ${item.priority})` : ''}`).join('\n')}`
       );
     }
 

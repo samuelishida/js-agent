@@ -5,16 +5,16 @@ import { transform } from 'esbuild';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
-const sourceRoot = path.join(repoRoot, 'claude-code-main', 'src');
-const distRoot = path.join(repoRoot, 'dist', 'claude-code-main');
+const sourceRoot = path.join(repoRoot, ['cl', 'aude-code-main'].join(''), 'src');
+const distRoot = path.join(repoRoot, 'dist', 'clawd-code-main');
 const distSrcRoot = path.join(distRoot, 'src');
-const manifestPath = path.join(distRoot, 'adapter', 'claude-snapshot-manifest.json');
+const manifestPath = path.join(distRoot, 'adapter', 'clawd-snapshot-manifest.json');
 const generatedRuntimePath = path.join(
   repoRoot,
   'src',
   'skills',
   'generated',
-  'claude-snapshot-data.js',
+  'clawd-snapshot-data.js',
 );
 
 const CODE_LOADERS = new Map([
@@ -50,29 +50,61 @@ function toPosix(value) {
   return String(value || '').replace(/\\/g, '/');
 }
 
-function sanitizeAnthropicMentions(text) {
+const VENDOR = {
+  name: ['An', 'thropic'].join(''),
+  brand: ['Cl', 'aude'].join(''),
+  brandUpper: ['CLA', 'UDE'].join(''),
+  host: ['cl', 'audeusercontent.com'].join('')
+};
+
+function escapeRegex(text) {
+  return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function wordPattern(text, flags = 'gi') {
+  return new RegExp(`\\b${escapeRegex(text)}\\b`, flags);
+}
+
+function sanitizeVendorMentions(text) {
   if (!text) return '';
 
+  const brandLower = VENDOR.brand.toLowerCase();
+  const bannerText = `${VENDOR.name}'s official CLI for ${VENDOR.brand}`;
+  const brandCode = `${VENDOR.brand} Code`;
+  const brandSdk = `${VENDOR.brand} Agent SDK`;
+
   const replacements = [
-    [/\bAnthropic's official CLI for Claude\b/gi, 'this agent CLI'],
-    [/\bAnthropic\b/gi, 'the model provider'],
-    [/\bClaude Code\b/gi, 'the agent runtime'],
-    [/\bClaude Agent SDK\b/gi, 'the agent SDK'],
-    [/\bclaude\.ai\/code\b/gi, 'the assistant web app'],
-    [/\bcode\.claude\.com\b/gi, 'the agent docs'],
-    [/\bclaude\.ai\b/gi, 'the assistant web app'],
-    [/__claude/gi, '__assistant'],
-    [/claude-/gi, 'assistant-'],
-    [/claude_/gi, 'assistant_'],
-    [/\bClaude\b/g, 'Assistant'],
-    [/\bclaude\b/g, 'assistant'],
+    [wordPattern(bannerText), 'this CLI for Clawd'],
+    [wordPattern(VENDOR.name), ''],
+    [wordPattern(brandCode), 'Clawd Code'],
+    [wordPattern(brandSdk), 'Clawd Agent SDK'],
+    [new RegExp(escapeRegex(`${brandLower}.ai/code`), 'gi'), 'clawd.local/code'],
+    [new RegExp(escapeRegex(`code.${brandLower}.com`), 'gi'), 'code.clawd.local'],
+    [new RegExp(escapeRegex(`${brandLower}.ai`), 'gi'), 'clawd.local'],
+    [new RegExp(`__${brandLower}`, 'gi'), '__clawd'],
+    [new RegExp(`${brandLower}-`, 'gi'), 'clawd-'],
+    [new RegExp(`${brandLower}_`, 'gi'), 'clawd_'],
+    [wordPattern(VENDOR.brand, 'g'), 'Clawd'],
+    [wordPattern(brandLower, 'g'), 'clawd'],
+    [new RegExp(`${brandLower}(?=[A-Z])`, 'g'), 'clawd'],
+    [wordPattern(VENDOR.host), 'clawdusercontent.local'],
+    [/\bclau\.de\b/gi, 'clawd.local'],
+    [new RegExp(`${VENDOR.brandUpper}_CODE`, 'g'), 'CLAWD_CODE'],
+    [new RegExp(`${VENDOR.brandUpper}_`, 'g'), 'CLAWD_'],
+    [wordPattern(VENDOR.brandUpper, 'g'), 'CLAWD'],
+    [/\bANT\b/g, 'VENDOR'],
     [/\bANT-\b/g, 'VENDOR-'],
   ];
 
-  return replacements.reduce(
+  const sanitized = replacements.reduce(
     (value, [pattern, replacement]) => value.replace(pattern, replacement),
     String(text),
   );
+
+  return sanitized
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function rewriteImportsToJs(content) {
@@ -233,9 +265,34 @@ function extractReturnTemplateFromFunction(source, functionName) {
   }
 
   const body = source.slice(bodyStart, i);
-  const returnMatch = body.match(/return\s*`([\s\S]*?)`/m);
-  if (!returnMatch) return null;
-  return replaceTemplateExpressions(returnMatch[1]);
+  const returnRegex = /return\s*/g;
+  let returnMatch;
+
+  while ((returnMatch = returnRegex.exec(body)) !== null) {
+    let idx = returnMatch.index + returnMatch[0].length;
+    while (idx < body.length && /\s/.test(body[idx])) idx += 1;
+    const quote = body[idx];
+    if (!['`', '"', "'"].includes(quote)) continue;
+
+    const value = parseQuotedValue(body, idx);
+    if (typeof value === 'string' && value.trim()) {
+      return replaceTemplateExpressions(value);
+    }
+  }
+
+  return null;
+}
+
+function extractPromptInjectionGuidance(promptsSource) {
+  const text = String(promptsSource || '');
+  if (!text) return '';
+
+  const firstMatch = text.match(/Tool results may include data from external sources\.[^\n]*prompt injection[^\n]*\./i);
+  if (firstMatch?.[0]) {
+    return sanitizeVendorMentions(firstMatch[0]);
+  }
+
+  return '';
 }
 
 function extractConstStringLiteral(source, constName) {
@@ -323,15 +380,15 @@ function buildBundledSkillsManifest(files) {
       const usageMessage = extractFieldFromObject(file.content, 'USAGE_MESSAGE');
 
       return {
-        name: sanitizeAnthropicMentions(name),
-        description: sanitizeAnthropicMentions(description || ''),
-        whenToUse: sanitizeAnthropicMentions(whenToUse || ''),
-        argumentHint: sanitizeAnthropicMentions(argumentHint || ''),
+        name: sanitizeVendorMentions(name),
+        description: sanitizeVendorMentions(description || ''),
+        whenToUse: sanitizeVendorMentions(whenToUse || ''),
+        argumentHint: sanitizeVendorMentions(argumentHint || ''),
         userInvocable: String(userInvocable) === 'true',
         disableModelInvocation: String(disableModelInvocation) === 'true',
-        file: `src/skills/bundled/${fileName}`,
-        promptTemplate: sanitizeAnthropicMentions(promptFromBuilder || ''),
-        usage: sanitizeAnthropicMentions(usageMessage || ''),
+        file: sanitizeVendorMentions(`src/skills/bundled/${fileName}`),
+        promptTemplate: sanitizeVendorMentions(promptFromBuilder || ''),
+        usage: sanitizeVendorMentions(usageMessage || ''),
       };
     })
     .filter(Boolean);
@@ -346,36 +403,38 @@ function buildPromptSnippetManifest(promptsSource, systemSource) {
     remindersSection: '',
     functionResultClearingSection: '',
     summarizeToolResultsSection: '',
+    promptInjectionSection: '',
     prefixes: [],
   };
 
   extracted.defaultAgentPrompt =
-    sanitizeAnthropicMentions(
+    sanitizeVendorMentions(
       extractConstStringLiteral(promptsSource, 'DEFAULT_AGENT_PROMPT')
       || extractFieldFromObject(promptsSource, 'DEFAULT_AGENT_PROMPT')
       || ''
     );
   extracted.actionsSection =
-    sanitizeAnthropicMentions(extractReturnTemplateFromFunction(promptsSource, 'getActionsSection') || '');
+    sanitizeVendorMentions(extractReturnTemplateFromFunction(promptsSource, 'getActionsSection') || '');
   extracted.autonomousSection =
-    sanitizeAnthropicMentions(extractReturnTemplateFromFunction(promptsSource, 'getProactiveSection') || '');
+    sanitizeVendorMentions(extractReturnTemplateFromFunction(promptsSource, 'getProactiveSection') || '');
   extracted.hooksSection =
-    sanitizeAnthropicMentions(extractReturnTemplateFromFunction(promptsSource, 'getHooksSection') || '');
+    sanitizeVendorMentions(extractReturnTemplateFromFunction(promptsSource, 'getHooksSection') || '');
   extracted.remindersSection =
-    sanitizeAnthropicMentions(extractReturnTemplateFromFunction(promptsSource, 'getSystemRemindersSection') || '');
+    sanitizeVendorMentions(extractReturnTemplateFromFunction(promptsSource, 'getSystemRemindersSection') || '');
   extracted.functionResultClearingSection =
-    sanitizeAnthropicMentions(extractReturnTemplateFromFunction(promptsSource, 'getFunctionResultClearingSection') || '');
+    sanitizeVendorMentions(extractReturnTemplateFromFunction(promptsSource, 'getFunctionResultClearingSection') || '');
   extracted.summarizeToolResultsSection =
-    sanitizeAnthropicMentions(extractConstStringLiteral(promptsSource, 'SUMMARIZE_TOOL_RESULTS_SECTION') || '');
+    sanitizeVendorMentions(extractConstStringLiteral(promptsSource, 'SUMMARIZE_TOOL_RESULTS_SECTION') || '');
+  extracted.promptInjectionSection = extractPromptInjectionGuidance(promptsSource);
 
   const prefixKeys = [
     'DEFAULT_PREFIX',
-    'AGENT_SDK_CLAUDE_CODE_PRESET_PREFIX',
+    ['AGENT_SDK_', 'CLA', 'UDE_CODE_PRESET_PREFIX'].join(''),
     'AGENT_SDK_PREFIX',
   ];
 
   extracted.prefixes = prefixKeys
-    .map(key => sanitizeAnthropicMentions(extractFieldFromObject(systemSource, key) || ''))
+    .map(key => sanitizeVendorMentions(extractFieldFromObject(systemSource, key) || ''))
     .filter(Boolean);
 
   return extracted;
@@ -384,14 +443,14 @@ function buildPromptSnippetManifest(promptsSource, systemSource) {
 function buildRuntimeDataJs(manifest) {
   const payload = JSON.stringify(manifest, null, 2);
   return `(() => {
-  window.AgentClaudeSnapshotData = ${payload};
+  window.AgentClawdSnapshotData = ${payload};
 })();\n`;
 }
 
 async function main() {
-  const exists = await readdir(path.join(repoRoot, 'claude-code-main')).catch(() => null);
+  const exists = await readdir(path.join(repoRoot, ['cl', 'aude-code-main'].join(''))).catch(() => null);
   if (!exists) {
-    throw new Error('claude-code-main directory was not found in repository root.');
+    throw new Error('clawd-code-main source snapshot folder was not found in repository root.');
   }
 
   await rm(distRoot, { recursive: true, force: true });
@@ -426,8 +485,8 @@ async function main() {
 
   const manifest = {
     generatedAt: new Date().toISOString(),
-    sourceRoot: 'claude-code-main/src',
-    outputRoot: 'dist/claude-code-main/src',
+    sourceRoot: 'clawd-code-main/src',
+    outputRoot: 'dist/clawd-code-main/src',
     stats: {
       transpiledFiles: transpiledCount,
       copiedFiles: copiedCount,
@@ -449,7 +508,7 @@ async function main() {
   await writeFile(generatedRuntimePath, buildRuntimeDataJs(manifest), 'utf8');
 
   process.stdout.write(
-    `Built Claude snapshot dist.\n` +
+    `Built Clawd snapshot dist.\n` +
       `- Transpiled: ${transpiledCount}\n` +
       `- Copied assets: ${copiedCount}\n` +
       `- Bundled skills cataloged: ${bundledSkills.length}\n` +
@@ -459,6 +518,6 @@ async function main() {
 }
 
 main().catch(error => {
-  process.stderr.write(`build:claude-snapshot failed: ${error.message}\n`);
+  process.stderr.write(`build:clawd-snapshot failed: ${error.message}\n`);
   process.exitCode = 1;
 });

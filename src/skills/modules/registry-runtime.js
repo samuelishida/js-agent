@@ -419,6 +419,24 @@
             run: handlers.task_update
           }),
           defineTool({
+            name: 'worker_batch',
+            signature: 'worker_batch(goal?, tasks?, max_workers?, include_context?, max_tokens?, temperature?)',
+            description: 'Runs bounded parallel worker prompts using the active LLM lane and stores run history.',
+            run: handlers.worker_batch
+          }),
+          defineTool({
+            name: 'worker_list',
+            signature: 'worker_list(limit?)',
+            description: 'Lists recent worker_batch runs and aggregate status.',
+            run: handlers.worker_list
+          }),
+          defineTool({
+            name: 'worker_get',
+            signature: 'worker_get(run_id | id)',
+            description: 'Retrieves details and outputs for a specific worker run.',
+            run: handlers.worker_get
+          }),
+          defineTool({
             name: 'ask_user_question',
             signature: 'ask_user_question(question, options?)',
             description: 'Asks the user for clarification in chat-friendly format.',
@@ -451,7 +469,7 @@
           defineTool({
             name: 'snapshot_skill_catalog',
             signature: 'snapshot_skill_catalog(query?, limit?)',
-            description: 'Lists imported bundled skills extracted from claude-code-main.',
+            description: 'Lists imported bundled skills extracted from clawd-code-main.',
             run: handlers.snapshot_skill_catalog
           })
         ]

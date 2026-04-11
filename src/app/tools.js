@@ -25,8 +25,56 @@ function isLocalModeActive() {
   return localBackend.enabled && !!localBackend.url;
 }
 
+function getSelectedCloudProvider() {
+  const raw = String(document.getElementById('model-select')?.value || '').trim().toLowerCase();
+  if (!raw) return 'gemini';
+  const match = raw.match(/^([a-z0-9_-]+)\//i);
+  return match ? String(match[1] || 'gemini').toLowerCase() : 'gemini';
+}
+
+function getCloudReadiness() {
+  const provider = getSelectedCloudProvider();
+
+  if (provider === 'ollama') {
+    const endpoint = String(localStorage.getItem('agent_ollama_cloud_endpoint') || '').trim();
+    // Ollama can run keyless when endpoint is same-origin proxy or left empty (auto proxy first).
+    if (apiKey || !endpoint || endpoint.startsWith('/')) {
+      return { ready: true, reason: '' };
+    }
+
+    return {
+      ready: false,
+      reason: 'Ollama Cloud direct endpoints require an API key. Set API key, or use a same-origin proxy endpoint like /api/ollama/v1.'
+    };
+  }
+
+  if (provider === 'azure') {
+    if (!apiKey) {
+      return { ready: false, reason: 'Azure OpenAI requires an API key. Enter your key and click Save.' };
+    }
+
+    const endpoint = String(localStorage.getItem('agent_azure_openai_endpoint') || '').trim();
+    const deployment = String(localStorage.getItem('agent_azure_openai_deployment') || '').trim();
+    if (!endpoint || !deployment) {
+      return {
+        ready: false,
+        reason: 'Azure OpenAI configuration missing. Set localStorage keys: agent_azure_openai_endpoint and agent_azure_openai_deployment.'
+      };
+    }
+
+    return { ready: true, reason: '' };
+  }
+
+  if (!apiKey) {
+    const providerLabel = provider === 'openai' ? 'OpenAI' : provider === 'clawd' ? 'Clawd' : 'Cloud';
+    return { ready: false, reason: `${providerLabel} requires an API key. Enter your key and click Save.` };
+  }
+
+  return { ready: true, reason: '' };
+}
+
 function canUseCloud() {
-  return !!apiKey;
+  return getCloudReadiness().ready;
 }
 
 function canUseGemini() {

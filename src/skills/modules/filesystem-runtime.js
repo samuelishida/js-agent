@@ -178,9 +178,32 @@
       return formatToolResult('fs_list_dir', `Root: ${rootId}\nPath: ${path || '/'}\n${entries.map(item => `${item.kind}: ${item.name}`).join('\n') || '(empty)'}`);
     }
 
-    async function readLocalFile({ path, offset = 0, length = 12000 }) {
+    async function readLocalFile({ path, offset = 0, length = 12000, startLine = 0, endLine = 0 }) {
       const { handle } = await resolveFile(path, false);
       const text = await readFileAsText(handle);
+      const safeStartLineArg = Number.isFinite(Number(startLine)) ? Math.max(1, Number(startLine)) : 0;
+      const safeEndLineArg = Number.isFinite(Number(endLine)) ? Math.max(safeStartLineArg || 1, Number(endLine)) : 0;
+
+      if (safeStartLineArg || safeEndLineArg) {
+        const lines = String(text || '').split(/\r?\n/);
+        const safeStartLine = safeStartLineArg || 1;
+        const safeEndLine = safeEndLineArg || Math.min(lines.length, safeStartLine + 199);
+        const chunk = lines.slice(safeStartLine - 1, safeEndLine).join('\n');
+
+        return formatToolResult(
+          `fs_read_file ${path}`,
+          [
+            `Path: ${path}`,
+            `Start line: ${safeStartLine}`,
+            `End line: ${Math.min(safeEndLine, lines.length)}`,
+            `Returned lines: ${Math.max(0, Math.min(safeEndLine, lines.length) - safeStartLine + 1)}`,
+            `Total lines: ${lines.length}`,
+            '',
+            chunk
+          ].join('\n')
+        );
+      }
+
       const safeOffset = Math.max(0, Number(offset) || 0);
       const safeLength = Math.min(20000, Math.max(500, Number(length) || 12000));
       const chunk = text.slice(safeOffset, safeOffset + safeLength);
@@ -377,14 +400,14 @@
       );
     }
 
-    async function editLocalFile({ path, oldText, newText, replaceAll = false }) {
+    async function editLocalFile({ path, oldText, newText, oldString, newString, replaceAll = false }) {
       const targetPath = String(path || '').trim();
       if (!targetPath) throw new Error('file_edit requires a path.');
 
-      const before = String(oldText ?? '');
+      const before = String(oldText ?? oldString ?? '');
       if (!before.length) throw new Error('file_edit requires oldText.');
 
-      const replacement = String(newText ?? '');
+      const replacement = String(newText ?? newString ?? '');
       const { handle } = await resolveFile(targetPath, false);
       const content = await readFileAsText(handle);
       if (!String(content).includes(before)) {
@@ -400,6 +423,141 @@
       return formatToolResult(
         'file_edit',
         `Edited file: ${targetPath}\nReplace all: ${replaceAll ? 'yes' : 'no'}\nOld length: ${before.length}\nNew length: ${replacement.length}`
+      );
+    }
+
+    function countOccurrences(text, needle) {
+      if (!needle) return 0;
+      let count = 0;
+      let index = 0;
+      while (index !== -1) {
+        index = String(text).indexOf(needle, index);
+        if (index === -1) break;
+        count += 1;
+        index += Math.max(needle.length, 1);
+      }
+      return count;
+    }
+
+    async function multiEditFiles({ edits }) {
+      if (!Array.isArray(edits) || !edits.length) {
+        throw new Error('clawd_multiEdit requires a non-empty edits array.');
+      }
+
+      const workingCopies = new Map();
+      const orderedPaths = [];
+
+      for (const rawEdit of edits) {
+        const edit = rawEdit && typeof rawEdit === 'object' ? rawEdit : {};
+        const targetPath = String(edit.path || '').trim();
+        const oldValue = String(edit.oldString ?? edit.oldText ?? '');
+        const newValue = String(edit.newString ?? edit.newText ?? '');
+        const replaceAll = edit.replaceAll === true;
+
+        if (!targetPath) throw new Error('clawd_multiEdit: each edit requires path.');
+        if (!oldValue) throw new Error(`clawd_multiEdit: edit for ${targetPath} requires oldString.`);
+
+        if (!workingCopies.has(targetPath)) {
+          const { handle } = await resolveFile(targetPath, false);
+          workingCopies.set(targetPath, {
+            handle,
+            content: await readFileAsText(handle),
+            applied: 0
+          });
+          orderedPaths.push(targetPath);
+        }
+
+        const entry = workingCopies.get(targetPath);
+        const occurrenceCount = countOccurrences(entry.content, oldValue);
+        if (!occurrenceCount) {
+          throw new Error(`clawd_multiEdit: oldString not found in "${targetPath}". Re-read the file and include exact context.`);
+        }
+        if (!replaceAll && occurrenceCount > 1) {
+          throw new Error(`clawd_multiEdit: oldString appears ${occurrenceCount} times in "${targetPath}". Add more context or set replaceAll:true.`);
+        }
+
+        entry.content = replaceAll
+          ? entry.content.split(oldValue).join(newValue)
+          : entry.content.replace(oldValue, newValue);
+        entry.applied += 1;
+      }
+
+      for (const targetPath of orderedPaths) {
+        const entry = workingCopies.get(targetPath);
+        await writeFile(entry.handle, entry.content);
+      }
+
+      return formatToolResult(
+        'clawd_multiEdit',
+        orderedPaths.map(path => {
+          const entry = workingCopies.get(path);
+          return `Edited ${path} (${entry.applied} change${entry.applied === 1 ? '' : 's'})`;
+        }).join('\n')
+      );
+    }
+
+    async function searchCode({
+      query,
+      path = '',
+      glob = '**/*',
+      isRegex = false,
+      caseSensitive = false,
+      contextLines = 0,
+      maxResults = 200
+    } = {}) {
+      const rawQuery = String(query || '').trim();
+      if (!rawQuery) {
+        throw new Error('clawd_searchCode requires query.');
+      }
+
+      const flags = caseSensitive ? 'g' : 'gi';
+      const matcher = new RegExp(isRegex ? rawQuery : escapeRegexLiteral(rawQuery), flags);
+      const globMatcher = glob ? globPatternToRegExp(glob) : null;
+      const contextRadius = Math.max(0, Math.min(5, Number(contextLines) || 0));
+      const limit = Math.max(1, Math.min(500, Number(maxResults) || 200));
+      const { handle } = await resolveDirectory(path, false);
+      const entries = await walkDirectory(handle, path || '');
+      const results = [];
+
+      for (const entry of entries) {
+        if (entry.kind !== 'file' || !supportsTextPreview(entry.handle.name)) continue;
+        const normalizedPath = String(entry.path || '').replace(/\\/g, '/').replace(/^\/+/, '');
+        if (globMatcher && !globMatcher.test(normalizedPath)) continue;
+
+        const text = await readFileAsText(entry.handle);
+        const lines = String(text || '').split(/\r?\n/);
+
+        for (let i = 0; i < lines.length; i += 1) {
+          const line = lines[i];
+          matcher.lastIndex = 0;
+          if (!matcher.test(line)) continue;
+
+          const start = Math.max(0, i - contextRadius);
+          const end = Math.min(lines.length - 1, i + contextRadius);
+          for (let j = start; j <= end; j += 1) {
+            const prefix = j === i ? '>' : ' ';
+            results.push(`${prefix} ${entry.path}:${j + 1}: ${String(lines[j] || '').slice(0, 240)}`);
+            if (results.length >= limit) break;
+          }
+
+          if (results.length >= limit) break;
+        }
+
+        if (results.length >= limit) break;
+      }
+
+      return formatToolResult(
+        'clawd_searchCode',
+        [
+          `Path: ${path || '/'}`,
+          `Query: ${rawQuery}`,
+          `Glob: ${glob || '**/*'}`,
+          `Regex: ${isRegex ? 'yes' : 'no'}`,
+          `Case-sensitive: ${caseSensitive ? 'yes' : 'no'}`,
+          `Matches: ${results.length}`,
+          '',
+          results.join('\n') || '(no matches)'
+        ].join('\n')
       );
     }
 
@@ -648,7 +806,9 @@
       searchByContent,
       globPaths,
       grepPaths,
+      searchCode,
       editLocalFile,
+      multiEditFiles,
       writeTextFile,
       copyFile,
       deletePath,

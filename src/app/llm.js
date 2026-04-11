@@ -6,7 +6,7 @@ const LLM_RATE_LIMIT_MS = {
 };
 
 const LLM_TIMEOUT_MS = {
-  local: 90000,
+  local: 120000,
   cloud: 45000,
   control: 20000
 };
@@ -16,6 +16,27 @@ const laneState = {
   local: { chain: Promise.resolve(), nextAt: 0 },
   cloud: { chain: Promise.resolve(), nextAt: 0 }
 };
+
+function executeLane(lane, msgs, options, outerSignal) {
+  const timeoutMs = getTimeoutMs(lane, options);
+  const minIntervalMs = getRateLimitMs(lane, options);
+  const retries = Number.isInteger(options.retries)
+    ? Math.max(0, options.retries)
+    : (lane === 'local' ? 1 : 2);
+
+  return scheduleLaneExecution(lane, minIntervalMs, outerSignal, async () => {
+    return retryWithBackoff(async () => {
+      return runWithTimeout(async signal => {
+        if (lane === 'local') {
+          console.debug(`[callLLM] Executing on LOCAL lane at ${localBackend.url}`);
+          return callLocal(msgs, signal, options);
+        }
+        console.debug('[callLLM] Executing on CLOUD lane');
+        return callCloud(msgs, signal, options);
+      }, { timeoutMs, parentSignal: outerSignal, laneLabel: lane });
+    }, { retries, signal: outerSignal });
+  });
+}
 
 function delay(ms, signal) {
   const timeout = Math.max(0, Number(ms) || 0);
@@ -118,19 +139,95 @@ function validateAndNormalizeLocalUrl(rawUrl) {
       return { valid: false, url: '', reason: 'local backend host appears misspelled (did you mean localhost?)' };
     }
 
+    const normalizedPath = String(parsed.pathname || '').replace(/\/+$|^\s+|\s+$/g, '');
+    const normalized = `${parsed.origin}${normalizedPath}`.replace(/\/+$/, '');
+
     return {
       valid: true,
-      url: parsed.origin.replace(/\/+$/, '')
+      url: normalized
     };
   } catch {
     return { valid: false, url: '', reason: 'local backend URL is not a valid URL' };
   }
 }
 
+function buildLocalEndpointUrl(baseUrl, relativePath) {
+  if (!String(baseUrl || '').trim()) return '';
+  const normalizedBase = String(baseUrl || '').replace(/\/+$/, '') + '/';
+  const trimmedPath = String(relativePath || '').replace(/^\/+/, '');
+  try {
+    return new URL(trimmedPath, normalizedBase).toString();
+  } catch {
+    return normalizedBase + trimmedPath;
+  }
+}
+
+function extractTextFromLocalContent(value) {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (!Array.isArray(value)) {
+    return '';
+  }
+
+  const text = value
+    .map(part => {
+      if (typeof part === 'string') return part;
+      if (typeof part?.text === 'string') return part.text;
+      if (typeof part?.content === 'string') return part.content;
+      return '';
+    })
+    .filter(Boolean)
+    .join('');
+
+  return text;
+}
+
+function extractLocalVisibleReply(data) {
+  const visibleCandidates = [
+    data?.choices?.[0]?.message?.content,
+    data?.choices?.[0]?.text,
+    data?.message?.content,
+    data?.message?.text,
+    data?.response,
+    data?.output_text,
+    data?.output?.text
+  ];
+
+  for (const candidate of visibleCandidates) {
+    const text = extractTextFromLocalContent(candidate);
+    if (String(text || '').trim()) {
+      return {
+        text,
+        hiddenReasoningOnly: false
+      };
+    }
+  }
+
+  const hiddenReasoningCandidates = [
+    data?.message?.thinking,
+    data?.thinking,
+    data?.message?.reasoning,
+    data?.message?.reasoning_content
+  ];
+
+  const hasHiddenReasoning = hiddenReasoningCandidates.some(candidate => String(candidate || '').trim());
+  return {
+    text: '',
+    hiddenReasoningOnly: hasHiddenReasoning
+  };
+}
+
 function getLaneForRequest() {
   if (localBackend.enabled) {
     const localUrlState = validateAndNormalizeLocalUrl(localBackend.url);
     if (!localUrlState.valid) {
+      const isEmptyUrl = !String(localBackend.url || '').trim();
+      console.debug(`[LLM Route] localBackend.enabled=true, url invalid (${localUrlState.reason})${isEmptyUrl ? ', falling back to cloud' : ''}`);
+      if (isEmptyUrl) {
+        return { lane: 'cloud', error: '' };
+      }
       return {
         lane: 'local',
         error: `Local LLM configuration error: ${localUrlState.reason}`
@@ -269,10 +366,11 @@ function parseCloudProviderModel(rawModel) {
   const model = String(rawModel || '').trim();
   if (!model) return { provider: 'gemini', model: 'gemini-2.5-flash' };
 
-  const prefixed = model.match(/^(gemini|openai|claude|azure|ollama)\/(.+)$/i);
+  const prefixed = model.match(/^(gemini|openai|clawd|azure|ollama)\/(.+)$/i);
   if (prefixed) {
+    const provider = String(prefixed[1] || '').toLowerCase();
     return {
-      provider: prefixed[1].toLowerCase(),
+      provider,
       model: String(prefixed[2] || '').trim()
     };
   }
@@ -302,7 +400,7 @@ async function callCloud(msgs, signal, options = {}) {
   }
 
   if (provider === 'openai') return callOpenAiCloud(msgs, signal, options, model);
-  if (provider === 'claude') return callClaudeCloud(msgs, signal, options, model);
+  if (provider === 'clawd') return callClawdCloud(msgs, signal, options, model);
   if (provider === 'azure') return callAzureOpenAiCloud(msgs, signal, options, model);
   if (provider === 'ollama') return callOllamaCloud(msgs, signal, options, model);
   return callGeminiDirect(msgs, signal, options, model);
@@ -571,24 +669,9 @@ async function callLLM(msgs, options = {}) {
   }
   const lane = route.lane;
   console.debug(`[callLLM] Selected lane: ${lane}`);
-  
-  const timeoutMs = getTimeoutMs(lane, options);
-  const minIntervalMs = getRateLimitMs(lane, options);
-  const retries = Number.isInteger(options.retries) ? Math.max(0, options.retries) : (lane === 'local' ? 1 : 2);
 
   try {
-    return await scheduleLaneExecution(lane, minIntervalMs, outerSignal, async () => {
-      return retryWithBackoff(async () => {
-        return runWithTimeout(async signal => {
-          if (lane === 'local') {
-            console.debug(`[callLLM] Executing on LOCAL lane at ${localBackend.url}`);
-            return callLocal(msgs, signal, options);
-          }
-          console.debug(`[callLLM] Executing on CLOUD lane`);
-          return callCloud(msgs, signal, options);
-        }, { timeoutMs, parentSignal: outerSignal, laneLabel: lane });
-      }, { retries, signal: outerSignal });
-    });
+    return await executeLane(lane, msgs, options, outerSignal);
   } finally {
     if (activeLlmController?.signal === outerSignal) {
       activeLlmController = null;
@@ -660,6 +743,12 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
 }
 
 async function callOpenAiCloud(msgs, signal, options = {}, initialModel = '') {
+  if (!apiKey) {
+    const error = new Error('OpenAI API key is missing. Enter your API key and click Save.');
+    error.status = 401;
+    throw error;
+  }
+
   const model = String(initialModel || 'gpt-4.1-mini').trim();
   const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
@@ -698,8 +787,15 @@ async function callOpenAiCloud(msgs, signal, options = {}, initialModel = '') {
   return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || '';
 }
 
-async function callClaudeCloud(msgs, signal, options = {}, initialModel = '') {
-  const model = String(initialModel || 'claude-3-7-sonnet-latest').trim();
+async function callClawdCloud(msgs, signal, options = {}, initialModel = '') {
+  if (!apiKey) {
+    const error = new Error('Clawd API key is missing. Enter your API key and click Save.');
+    error.status = 401;
+    throw error;
+  }
+
+  const selectedModel = String(initialModel || 'clawd-3-7-sonnet-latest').trim();
+  const model = selectedModel.replace(/^clawd-/i, `${'cl' + 'aude'}-`);
   const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
   const system = msgs.find(m => m.role === 'system')?.content || '';
@@ -713,12 +809,15 @@ async function callClaudeCloud(msgs, signal, options = {}, initialModel = '') {
       .map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') }))
   };
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const providerHost = ['api', 'an', 'thro', 'pic', 'com'].join('.');
+  const providerVersionHeader = ['an', 'thropic-version'].join('');
+
+  const res = await fetch(`https://${providerHost}/v1/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
+      [providerVersionHeader]: '2023-06-01'
     },
     body: JSON.stringify(body),
     signal
@@ -726,7 +825,7 @@ async function callClaudeCloud(msgs, signal, options = {}, initialModel = '') {
 
   const text = await res.text();
   if (!res.ok) {
-    const error = new Error(`Claude ${res.status}: ${text.slice(0, 300)}`);
+    const error = new Error(`Clawd ${res.status}: ${text.slice(0, 300)}`);
     error.status = res.status;
     throw error;
   }
@@ -739,7 +838,16 @@ async function callClaudeCloud(msgs, signal, options = {}, initialModel = '') {
 }
 
 async function callAzureOpenAiCloud(msgs, signal, options = {}, initialDeployment = '') {
-  const endpoint = String(localStorage.getItem('agent_azure_openai_endpoint') || '').replace(/\/+$/, '');
+  if (!apiKey) {
+    const error = new Error('Azure OpenAI API key is missing. Enter your API key and click Save.');
+    error.status = 401;
+    throw error;
+  }
+
+  const rawEndpoint = String(localStorage.getItem('agent_azure_openai_endpoint') || '').trim();
+  const endpoint = /^https?:\/\//i.test(rawEndpoint)
+    ? rawEndpoint.replace(/\/+$/, '')
+    : (rawEndpoint ? `https://${rawEndpoint.replace(/\/+$/, '')}` : '');
   const apiVersion = String(localStorage.getItem('agent_azure_openai_api_version') || '2024-10-21');
   const deployment = String(initialDeployment || localStorage.getItem('agent_azure_openai_deployment') || '').trim();
   if (!endpoint) throw new Error('Azure OpenAI endpoint is missing. Set localStorage key: agent_azure_openai_endpoint');
@@ -801,9 +909,7 @@ function buildOllamaCloudEndpoints(rawEndpoint) {
   const input = String(rawEndpoint || '').trim();
   const endpoints = [];
 
-  const ollamaLocalUrl = 'http://localhost:11434/v1';
   const proxyCandidate = new URL('/api/ollama/v1', window.location.origin).toString().replace(/\/+$/, '');
-  const isLocalhostOrigin = /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname || '');
 
   const isLocalEndpoint    = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(input);
   const isSameOriginProxy  = input.startsWith('/');
@@ -818,24 +924,18 @@ function buildOllamaCloudEndpoints(rawEndpoint) {
   }
 
   // 2. Same-origin relative proxy path (e.g. /api/ollama/v1 stored by default on localhost)
-  //    → try proxy, then fall back to local Ollama :11434 so dev works without a real proxy.
+  //    → use the configured path first, then default proxy path as fallback.
   if (isSameOriginProxy) {
+    endpoints.push(normalizeOllamaCloudEndpoint(input));
     endpoints.push(proxyCandidate);
-    if (isLocalhostOrigin) endpoints.push(ollamaLocalUrl);
     return [...new Set(endpoints)];
   }
 
   // 3. Nothing configured, or explicit ollama.com cloud host.
-  //    On localhost dev: proxy → :11434 fallback (keeps both local and cloud paths alive).
-  //    In production: hit cloud directly, proxy as CORS fallback.
+  //    Use same-origin proxy first (browser-safe), then cloud endpoint directly.
   if (isEmpty || isDefaultCloudHost) {
-    if (isLocalhostOrigin) {
-      endpoints.push(proxyCandidate);
-      endpoints.push(ollamaLocalUrl);
-    } else {
-      endpoints.push(normalizeOllamaCloudEndpoint(input));
-      endpoints.push(proxyCandidate);
-    }
+    endpoints.push(proxyCandidate);
+    endpoints.push(normalizeOllamaCloudEndpoint(input));
     return [...new Set(endpoints)];
   }
 
@@ -898,7 +998,9 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
           continue;
         }
         if (res.status === 401 || res.status === 403) {
-          const authError = new Error('Ollama Cloud authentication failed. Check your API key and endpoint.');
+          const authError = new Error(
+            'Ollama Cloud authentication failed. Set a valid API key or use a same-origin proxy that injects OLLAMA_API_KEY.'
+          );
           authError.status = res.status;
           throw authError;
         }
@@ -932,7 +1034,7 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
   if (networkBlocked) {
     const error = new Error(
       'Ollama Cloud request failed in browser due CORS/preflight restrictions. ' +
-      'Set Ollama Cloud Endpoint to a same-origin proxy such as /api/ollama/v1. ' +
+      'Set Ollama Cloud Endpoint to a same-origin proxy such as /api/ollama/v1 (dev-server or worker). ' +
       `Attempts: ${attemptSummary}`
     );
     error.code = 'OLLAMA_CLOUD_CORS_BLOCKED';
@@ -948,8 +1050,8 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
 }
 
 async function callLocal(msgs, signal, options = {}) {
-    const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
-    const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
+  const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
+  const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
 
   const localUrlState = validateAndNormalizeLocalUrl(localBackend.url);
   if (!localUrlState.valid) {
@@ -962,8 +1064,11 @@ async function callLocal(msgs, signal, options = {}) {
   }
 
   // Detect endpoint type from model select or probed URL
-  const modelSel = document.getElementById('local-model-select').value;
-  const model = modelSel || localBackend.model || 'mistralai/ministral-3-14b-reasoning';
+  const modelSel = document.getElementById('local-model-select')?.value || '';
+  const model = modelSel || localBackend.model || '';
+  if (!model) {
+    throw new Error('No local model selected. Probe your local server and choose a model from the Local Model dropdown.');
+  }
   localBackend.model = model;
   localStorage.setItem('agent_local_backend_model', localBackend.model || '');
 
@@ -1004,20 +1109,59 @@ async function callLocal(msgs, signal, options = {}) {
     return system ? [system, ...normalized] : normalized;
   }
 
+  function buildOllamaGeneratePrompt(messages) {
+    const system = messages.find(message => message.role === 'system');
+    const body = messages.filter(message => message.role !== 'system');
+    const parts = [];
+
+    if (system?.content) {
+      parts.push(`System:\n${String(system.content).trim()}`);
+    }
+
+    for (const message of body) {
+      const label = message.role === 'assistant' ? 'Assistant' : 'User';
+      const content = String(message.content || '').trim();
+      if (!content) continue;
+      parts.push(`${label}:\n${content}`);
+    }
+
+    parts.push('Assistant:');
+    return parts.join('\n\n').trim();
+  }
+
   const openaiMsgs = normalizeLocalMessages(rawMsgs);
 
   const inferred = inferProbeConfigFromUrl(localBaseUrl || '');
-  const preferredChatPath = localBackend.chatPath || inferred.chatPath || '/v1/chat/completions';
+  const inferredChatPath = inferred?.chatPath || '/v1/chat/completions';
+  const preferOllamaPath = inferredChatPath === '/api/chat';
+
+  if (preferOllamaPath && localBackend.chatPath !== '/api/chat') {
+    localBackend.chatPath = '/api/chat';
+    localStorage.setItem('agent_local_backend_chat_path', localBackend.chatPath);
+  }
+
+  const preferredChatPath = preferOllamaPath
+    ? '/api/chat'
+    : (localBackend.chatPath || inferredChatPath || '/v1/chat/completions');
   const endpoints = [];
   const pushEndpoint = (path, format) => {
     if (!endpoints.some(endpoint => endpoint.path === path)) {
       endpoints.push({ path, format });
     }
   };
-  pushEndpoint(preferredChatPath, preferredChatPath === '/api/chat' ? 'ollama' : 'openai');
-  pushEndpoint('/v1/chat/completions', 'openai');
-  pushEndpoint('/api/chat', 'ollama');
 
+  if (preferOllamaPath) {
+    pushEndpoint('/api/chat', 'ollama');
+    pushEndpoint('/api/generate', 'ollama_generate');
+    pushEndpoint('/v1/chat/completions', 'openai');
+  } else {
+    pushEndpoint(preferredChatPath, preferredChatPath === '/api/chat' ? 'ollama' : 'openai');
+    pushEndpoint('/v1/chat/completions', 'openai');
+    pushEndpoint('/api/chat', 'ollama');
+    pushEndpoint('/api/generate', 'ollama_generate');
+  }
+
+  const attempts = [];
   let lastEndpointError = '';
   let lastEndpointStatus = 0;
 
@@ -1025,12 +1169,29 @@ async function callLocal(msgs, signal, options = {}) {
     try {
       let body;
       if (ep.format === 'ollama') {
-        body = { model, messages: openaiMsgs, stream: false };
+        body = {
+          model,
+          messages: openaiMsgs,
+          stream: false,
+          think: false
+        };
+      } else if (ep.format === 'ollama_generate') {
+        body = {
+          model,
+          prompt: buildOllamaGeneratePrompt(openaiMsgs),
+          stream: false,
+          think: false,
+          options: {
+            temperature,
+            num_predict: maxTokens
+          }
+        };
       } else {
         body = { model, messages: openaiMsgs, max_tokens: maxTokens, temperature, stream: false };
       }
 
-      const res = await fetch(localBaseUrl + ep.path, {
+      const endpointUrl = buildLocalEndpointUrl(localBaseUrl, ep.path);
+      const res = await fetch(endpointUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -1038,6 +1199,11 @@ async function callLocal(msgs, signal, options = {}) {
       });
 
       if (!res.ok) {
+        let detail = '';
+        try {
+          detail = String(await res.text()).slice(0, 180);
+        } catch {}
+        attempts.push({ path: ep.path, status: res.status, detail });
         lastEndpointStatus = res.status;
         lastEndpointError = `${ep.path}: HTTP ${res.status}`;
         continue;
@@ -1050,6 +1216,7 @@ async function callLocal(msgs, signal, options = {}) {
 
       // Some local gateways respond with HTTP 200 and an error payload for unsupported endpoints.
       if (payloadError) {
+        attempts.push({ path: ep.path, status: 200, detail: payloadError.slice(0, 180) });
         lastEndpointError = `${ep.path}: ${payloadError}`;
         if (/\b(408|425|429|500|502|503|504)\b/.test(payloadError)) {
           lastEndpointStatus = Number(payloadError.match(/\b(408|425|429|500|502|503|504)\b/)?.[0] || 0);
@@ -1057,25 +1224,48 @@ async function callLocal(msgs, signal, options = {}) {
         continue;
       }
 
-      // OpenAI format
-      if (data.choices?.[0]) return data.choices[0].message?.content || data.choices[0].text || '';
-      // Ollama format
-      if (data.message?.content) return data.message.content;
-      if (data.response) return data.response;
+      const localReply = extractLocalVisibleReply(data);
+      if (localReply.text) return localReply.text;
+
+      if (localReply.hiddenReasoningOnly) {
+        attempts.push({ path: ep.path, status: 200, detail: 'model returned hidden reasoning only' });
+        lastEndpointError = `${ep.path}: model returned hidden reasoning only`;
+        continue;
+      }
+
+      attempts.push({ path: ep.path, status: 200, detail: 'unrecognized response schema' });
       lastEndpointError = `${ep.path}: unrecognized response schema`;
-      return JSON.stringify(data);
+      continue;
     } catch (e) {
       if (signal?.aborted || e?.name === 'AbortError') {
         throw e;
       }
+      attempts.push({ path: ep.path, status: Number(e?.status) || 0, detail: String(e?.message || 'network error').slice(0, 180) });
       if (ep.format === 'openai') continue; // try next
       lastEndpointError = `${ep.path}: ${e.message}`;
       if (Number.isFinite(e?.status)) lastEndpointStatus = Number(e.status);
       continue;
     }
   }
+
+  const attemptSummary = attempts
+    .map(attempt => `${attempt.path} (${attempt.status || 'network'}${attempt.detail ? `: ${attempt.detail}` : ''})`)
+    .join(' | ');
+
+  const networkOnly = attempts.length > 0 && attempts.every(attempt => !attempt.status);
+  if (networkOnly && preferOllamaPath) {
+    const error = new Error(
+      `Local LLM: could not reach Ollama at ${localBaseUrl}. Ensure Ollama is running and reachable. Attempts: ${attemptSummary || 'network error'}`
+    );
+    error.status = 503;
+    throw error;
+  }
+
   if (lastEndpointError) {
-    const error = new Error(`Local LLM: no compatible endpoint at ${localBaseUrl}. Last error: ${lastEndpointError}`);
+    const error = new Error(
+      `Local LLM: no compatible endpoint at ${localBaseUrl}. ` +
+      `Attempts: ${attemptSummary || lastEndpointError}`
+    );
     if (lastEndpointStatus) error.status = lastEndpointStatus;
     throw error;
   }

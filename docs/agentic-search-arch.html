@@ -134,15 +134,17 @@
   <div class="wrap">
     <h1>JS Agent Architecture</h1>
     <p class="sub">
-      Updated architecture for the current browser runtime with modular skills, preflight query steering,
-      semantic loop guards, and an explicit context-management pipeline.
+      Updated architecture for the current browser runtime with Claude-style prompt composition,
+      modular skills, semantic loop guards, runtime continuation injection, and an explicit context-management pipeline.
     </p>
 
     <div class="badges">
       <div class="badge">runtime: browser</div>
       <div class="badge">loop: multi-round tool orchestration</div>
+      <div class="badge">prompt composer: sectioned + dynamic boundary</div>
       <div class="badge">skills: core + modules + groups</div>
       <div class="badge">context manager: budget + microcompact + summarize</div>
+      <div class="badge">safety: prompt-injection aware continuations</div>
     </div>
 
     <section class="panel">
@@ -159,13 +161,14 @@
   T -- no --> A[Final answer]
   T -- yes --> X[Execute tool batches]
   X --> B[Tool result budget]
-  B --> M[Microcompact old tool results]
+  B --> N[Inject runtime reminders]
+  N --> M[Microcompact old tool results]
   M --> C{Context over limit}
   C -- no --> L
   C -- yes --> S[Summarize context]
-  S --> R{Summary succeeded}
-  R -- yes --> L
-  R -- no --> F[Fallback tail compression]
+  S --> Q{Summary succeeded}
+  Q -- yes --> L
+  Q -- no --> F[Fallback tail compression]
   F --> L</pre>
     </section>
 
@@ -219,6 +222,20 @@
     </section>
 
     <section class="panel">
+      <h2>Prompt Composition Pipeline</h2>
+      <p>
+        System prompt construction is now section-based and merges imported snapshot snippets with runtime state.
+      </p>
+      <pre class="mermaid">flowchart LR
+  A[Snapshot prompt snippets] --> C[orchestrator.buildSystemPrompt]
+  B[Base prompt templates] --> C
+  D[Runtime context hints] --> C
+  C --> E[Sectioned system prompt]
+  E --> F[Dynamic boundary]
+  F --> G[Runtime reminders and continuation prompts]</pre>
+    </section>
+
+    <section class="panel">
       <h2>Core Agentic Systems</h2>
       <div class="grid">
         <div class="card">
@@ -239,7 +256,7 @@
         <div class="card">
           <div class="k">Context Manager</div>
           <div class="v">Budget, microcompact, summarize</div>
-          <div class="d">Large tool outputs are compacted before storing; older tool results are cleared; full summarize path runs only when required.</div>
+          <div class="d">Large tool outputs are compacted before storing; older tool results are cleared; summarize runs only when required.</div>
         </div>
         <div class="card">
           <div class="k">Loop Guardrails</div>
@@ -247,14 +264,24 @@
           <div class="d">Near-duplicate <code>web_search</code> signatures are blocked to avoid repetitive loops across rounds.</div>
         </div>
         <div class="card">
+          <div class="k">Prompt Safety</div>
+          <div class="v">Injection-aware continuation</div>
+          <div class="d">Tool outputs are treated as untrusted input; suspicious payloads are tagged and converted into runtime continuation safety reminders.</div>
+        </div>
+        <div class="card">
           <div class="k">Memory</div>
-          <div class="v">Session and cache persistence</div>
-          <div class="d">Sessions, stats, tool cache, preferences, tasks, and todos are persisted in <code>localStorage</code>.</div>
+          <div class="v">Long-term + session persistence</div>
+          <div class="d">Sessions, runtime cache, long-term memories, preferences, tasks, and todos are persisted in <code>localStorage</code>.</div>
         </div>
         <div class="card">
           <div class="k">Query Strategy</div>
           <div class="v">Bounded recursive orchestration</div>
           <div class="d">Each round decides: call tools, continue with evidence, compact context, or force final answer at max rounds.</div>
+        </div>
+        <div class="card">
+          <div class="k">Snapshot Port</div>
+          <div class="v">Dist reuse + adapted JS runtime</div>
+          <div class="d">Imported snapshot skill metadata and sanitized prompt snippets are reused directly in runtime prompt/tool orchestration.</div>
         </div>
       </div>
     </section>
@@ -265,6 +292,8 @@
         <li>Round-bounded loop with deterministic stop conditions.</li>
         <li>If model output has no usable tool call and no final text, the loop asks for a corrective continuation.</li>
         <li>Repeated failures disable exact tool signatures; semantic signatures disable near-duplicate <code>web_search</code> calls.</li>
+        <li>Structured continuation blocks are injected for tool summaries, permission denials, and compaction notes.</li>
+        <li>Suspicious prompt-injection patterns in tool results trigger explicit safety reminders before the next model turn.</li>
         <li>Context manager runs after each tool execution phase to keep prompt growth controlled before hard-limit summarization.</li>
         <li>When max rounds are reached, the model is forced to produce a final evidence-based answer.</li>
       </ul>
@@ -274,6 +303,10 @@
       <h2>Implementation Anchors</h2>
       <ul>
         <li><code>src/app/agent.js</code>: loop state, tool execution, context manager pipeline, guardrails, and final-answer forcing.</li>
+        <li><code>src/core/orchestrator.js</code>: sectioned system prompt builder and runtime continuation reminder composer.</li>
+        <li><code>src/app/runtime-memory.js</code>: long-term memory manager and multi-scope retention cache.</li>
+        <li><code>src/skills/claude-snapshot-adapter.js</code>: sanitized snapshot prompt/skill bridge into runtime.</li>
+        <li><code>scripts/build-claude-snapshot.mjs</code>: snapshot transpile + prompt snippet extraction pipeline.</li>
         <li><code>src/skills/shared.js</code>: preflight plan, optional planner LLM call, runtime orchestration, and registry wiring.</li>
         <li><code>src/skills/core/*</code>: intent detection and tool execution metadata.</li>
         <li><code>src/skills/modules/web-runtime.js</code>: search providers, web fetch pipeline, weather/geolocation, and page utilities.</li>

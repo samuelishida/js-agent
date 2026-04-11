@@ -124,8 +124,8 @@
             <option value="openai/gpt-4.1">OpenAI GPT-4.1</option>
             <option value="openai/gpt-4.1-mini">OpenAI GPT-4.1 Mini</option>
             <option value="openai/o4-mini">OpenAI o4 Mini</option>
-            <option value="claude/claude-3-7-sonnet-latest">Claude 3.7 Sonnet</option>
-            <option value="claude/claude-3-5-haiku-latest">Claude 3.5 Haiku</option>
+            <option value="clawd/clawd-3-7-sonnet-latest">Clawd 3.7 Sonnet</option>
+            <option value="clawd/clawd-3-5-haiku-latest">Clawd 3.5 Haiku</option>
             <option value="azure/gpt-4.1-mini">Azure GPT-4.1 Mini</option>
             <option value="ollama/llama3.1:8b">Ollama Cloud llama3.1:8b</option>
           </select>
@@ -134,10 +134,10 @@
         <div class="settings-group">
           <label class="settings-label">Ollama Cloud Endpoint (optional)</label>
           <div class="settings-row">
-            <input class="settings-input" id="ollama-cloud-endpoint" type="text" placeholder="empty = auto (local :11434 → proxy → cloud)" autocomplete="off" />
+            <input class="settings-input" id="ollama-cloud-endpoint" type="text" placeholder="empty = auto (proxy → cloud)" autocomplete="off" />
             <button class="btn-primary btn-sm" onclick="saveOllamaCloudEndpoint()">Save</button>
           </div>
-          <div class="settings-hint">Used only when provider is <code>ollama/*</code>. Browser mode may require a same-origin proxy. Default: https://ollama.com/v1</div>
+          <div class="settings-hint">Used only when provider is <code>ollama/*</code>. Browser mode may require a same-origin proxy. Default flow: /api/ollama/v1 then https://ollama.com/v1.</div>
         </div>
       </div>
 
@@ -298,8 +298,8 @@
 <script src="src/core/prompt-loader.js" defer></script>
 <script src="src/skills/core/intents.js" defer></script>
 <script src="src/skills/core/tool-meta.js" defer></script>
-<script src="src/skills/generated/claude-snapshot-data.js" defer></script>
-<script src="src/skills/claude-snapshot-adapter.js" defer></script>
+<script src="src/skills/generated/clawd-snapshot-data.js" defer></script>
+<script src="src/skills/clawd-snapshot-adapter.js" defer></script>
 <script src="src/skills/modules/filesystem-runtime.js" defer></script>
 <script src="src/skills/modules/data-runtime.js" defer></script>
 <script src="src/skills/modules/registry-runtime.js" defer></script>

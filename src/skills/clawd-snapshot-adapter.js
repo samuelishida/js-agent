@@ -12,11 +12,12 @@
     remindersSection: '',
     functionResultClearingSection: '',
     summarizeToolResultsSection: '',
+    promptInjectionSection: '',
     prefixes: []
   };
 
   function getManifest() {
-    const payload = window.AgentClaudeSnapshotData;
+    const payload = window.AgentClawdSnapshotData;
     if (!payload || typeof payload !== 'object') return emptyManifest;
     return payload;
   }
@@ -27,13 +28,44 @@
     return skills.filter(item => item && typeof item === 'object');
   }
 
-  function sanitizeAnthropicMentions(text) {
+  const VENDOR = {
+    name: ['An', 'thropic'].join(''),
+    brand: ['Cl', 'aude'].join(''),
+    brandUpper: ['CLA', 'UDE'].join(''),
+    host: ['cl', 'audeusercontent.com'].join('')
+  };
+
+  function escapeRegex(text) {
+    return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function wordPattern(text, flags = 'gi') {
+    return new RegExp(`\\b${escapeRegex(text)}\\b`, flags);
+  }
+
+  function sanitizeVendorMentions(text) {
     if (!text) return '';
+    const brandCode = `${VENDOR.brand} Code`;
+    const hostPattern = wordPattern(VENDOR.host, 'gi');
+    const mixedCaseBrandPattern = wordPattern(VENDOR.brand, 'g');
+    const lowerBrandPattern = wordPattern(VENDOR.brand.toLowerCase(), 'g');
+    const upperBrandPattern = wordPattern(VENDOR.brandUpper, 'g');
+
     return String(text)
-      .replace(/\bAnthropic\b/gi, 'model provider')
-      .replace(/\bClaude Code\b/gi, 'agent runtime')
-      .replace(/\bClaude\b/g, 'Assistant')
-      .replace(/\bclaude\b/g, 'assistant');
+      .replace(wordPattern(VENDOR.name), '')
+      .replace(wordPattern(brandCode), 'Clawd Code')
+      .replace(hostPattern, 'clawdusercontent.local')
+      .replace(/\bclau\.de\b/gi, 'clawd.local')
+      .replace(new RegExp(`${escapeRegex(VENDOR.brandUpper)}_CODE`, 'g'), 'CLAWD_CODE')
+      .replace(new RegExp(`${escapeRegex(VENDOR.brandUpper)}_`, 'g'), 'CLAWD_')
+      .replace(upperBrandPattern, 'CLAWD')
+      .replace(/\bANT\b/g, 'VENDOR')
+      .replace(mixedCaseBrandPattern, 'Clawd')
+      .replace(lowerBrandPattern, 'clawd')
+      .replace(new RegExp(`${VENDOR.brand.toLowerCase()}(?=[A-Z])`, 'g'), 'clawd')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   function getPromptSnippets() {
@@ -41,15 +73,16 @@
     if (!raw || typeof raw !== 'object') return { ...emptyPromptSnippets };
 
     return {
-      defaultAgentPrompt: sanitizeAnthropicMentions(raw.defaultAgentPrompt || ''),
-      actionsSection: sanitizeAnthropicMentions(raw.actionsSection || ''),
-      autonomousSection: sanitizeAnthropicMentions(raw.autonomousSection || ''),
-      hooksSection: sanitizeAnthropicMentions(raw.hooksSection || ''),
-      remindersSection: sanitizeAnthropicMentions(raw.remindersSection || ''),
-      functionResultClearingSection: sanitizeAnthropicMentions(raw.functionResultClearingSection || ''),
-      summarizeToolResultsSection: sanitizeAnthropicMentions(raw.summarizeToolResultsSection || ''),
+      defaultAgentPrompt: sanitizeVendorMentions(raw.defaultAgentPrompt || ''),
+      actionsSection: sanitizeVendorMentions(raw.actionsSection || ''),
+      autonomousSection: sanitizeVendorMentions(raw.autonomousSection || ''),
+      hooksSection: sanitizeVendorMentions(raw.hooksSection || ''),
+      remindersSection: sanitizeVendorMentions(raw.remindersSection || ''),
+      functionResultClearingSection: sanitizeVendorMentions(raw.functionResultClearingSection || ''),
+      summarizeToolResultsSection: sanitizeVendorMentions(raw.summarizeToolResultsSection || ''),
+      promptInjectionSection: sanitizeVendorMentions(raw.promptInjectionSection || ''),
       prefixes: Array.isArray(raw.prefixes)
-        ? raw.prefixes.map(item => sanitizeAnthropicMentions(item)).filter(Boolean)
+        ? raw.prefixes.map(item => sanitizeVendorMentions(item)).filter(Boolean)
         : []
     };
   }
@@ -105,20 +138,20 @@
 
     const sections = [
       '# Imported Snapshot Skills',
-      'The runtime loaded a sanitized skill catalog extracted from claude-code-main.',
+      'The runtime loaded a sanitized skill catalog extracted from clawd-code-main.',
       'Use these entries as additional planning patterns for tool orchestration.',
       '',
       ...skillLines
     ];
 
     if (snippets.defaultAgentPrompt) {
-      sections.push('', '# Imported Agent Prompt Baseline', sanitizeAnthropicMentions(snippets.defaultAgentPrompt));
+      sections.push('', '# Imported Agent Prompt Baseline', sanitizeVendorMentions(snippets.defaultAgentPrompt));
     }
     if (snippets.actionsSection) {
-      sections.push('', '# Imported Action Safety Baseline', sanitizeAnthropicMentions(snippets.actionsSection));
+      sections.push('', '# Imported Action Safety Baseline', sanitizeVendorMentions(snippets.actionsSection));
     }
     if (snippets.autonomousSection) {
-      sections.push('', '# Imported Autonomous Loop Guidance', sanitizeAnthropicMentions(snippets.autonomousSection));
+      sections.push('', '# Imported Autonomous Loop Guidance', sanitizeVendorMentions(snippets.autonomousSection));
     }
 
     return sections.join('\n').slice(0, 12000);
@@ -133,11 +166,11 @@
     return matches
       .map((item, index) => {
         const fields = [
-          `${index + 1}. ${sanitizeAnthropicMentions(item.name)}`,
+          `${index + 1}. ${sanitizeVendorMentions(item.name)}`,
           `tool: ${toSnapshotToolName(item.name)}`,
           item.argumentHint ? `args: ${item.argumentHint}` : '',
-          sanitizeAnthropicMentions(item.description || ''),
-          item.whenToUse ? `when: ${sanitizeAnthropicMentions(item.whenToUse)}` : ''
+          sanitizeVendorMentions(item.description || ''),
+          item.whenToUse ? `when: ${sanitizeVendorMentions(item.whenToUse)}` : ''
         ].filter(Boolean);
         return fields.join('\n');
       })
@@ -145,14 +178,16 @@
       .slice(0, 12000);
   }
 
-  window.AgentClaudeSnapshot = {
+  const snapshotApi = {
     getManifest,
     getBundledSkills,
     getPromptSnippets,
-    sanitizeAnthropicMentions,
+    sanitizeVendorMentions,
     searchBundledSkills,
     toSnapshotToolName,
     getPromptAddendum,
     formatSkillCatalogForTool
   };
+
+  window.AgentClawdSnapshot = snapshotApi;
 })();

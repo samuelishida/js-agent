@@ -24,10 +24,20 @@ const NON_CACHEABLE_TOOLS = new Set([
   'todo_write',
   'task_create',
   'task_update',
+  'worker_batch',
+  'worker_list',
+  'worker_get',
   'ask_user_question',
   'memory_write',
   'memory_search',
-  'memory_list'
+  'memory_list',
+  'clawd_writeFile',
+  'clawd_editFile',
+  'clawd_multiEdit',
+  'clawd_runTerminal',
+  'clawd_todoWrite',
+  'clawd_memoryWrite',
+  'clawd_spawnAgent'
 ]);
 let notificationPermissionRequested = false;
 // Derive a stable instance ID from localStorage so it survives module load order races.
@@ -105,10 +115,28 @@ let enabledTools = {
   task_get: true,
   task_list: true,
   task_update: true,
+  worker_batch: true,
+  worker_list: true,
+  worker_get: true,
   ask_user_question: true,
   memory_write: true,
   memory_search: true,
   memory_list: true,
+  clawd_readFile: true,
+  clawd_writeFile: true,
+  clawd_editFile: true,
+  clawd_multiEdit: true,
+  clawd_listDir: true,
+  clawd_glob: true,
+  clawd_searchCode: true,
+  clawd_runTerminal: true,
+  clawd_webFetch: true,
+  clawd_getDiagnostics: true,
+  clawd_todoWrite: true,
+  clawd_memoryRead: true,
+  clawd_memoryWrite: true,
+  clawd_lsp: true,
+  clawd_spawnAgent: true,
   tool_search: true,
   snapshot_skill_catalog: true
 };
@@ -344,7 +372,7 @@ function saveOllamaCloudEndpoint() {
 function loadOllamaCloudEndpoint() {
   const input = document.getElementById('ollama-cloud-endpoint');
   if (!input) return;
-  // No default — empty means auto: proxy if available, then localhost:11434, then cloud.
+  // No default — empty means auto: proxy if available, then cloud.
   // User must explicitly set an endpoint to pin behaviour.
   const stored = localStorage.getItem('agent_ollama_cloud_endpoint') || '';
   input.value = stored.startsWith('/')
@@ -586,7 +614,13 @@ function loadSessions() {
       stats: normalizeStats(session?.stats),
       context: {
         compactions: Number(session?.context?.compactions || 0),
-        lastCompactedAt: session?.context?.lastCompactedAt || null
+        lastCompactedAt: session?.context?.lastCompactedAt || null,
+        permissionMode: String(session?.context?.permissionMode || 'default'),
+        permissionDenialsCount: Number(session?.context?.permissionDenialsCount || 0),
+        lastPermissionDeniedAt: session?.context?.lastPermissionDeniedAt || null,
+        queryTracking: session?.context?.queryTracking && typeof session.context.queryTracking === 'object'
+          ? session.context.queryTracking
+          : null
       }
     };
   };
@@ -628,7 +662,11 @@ function createSession(initialTitle = 'New session') {
     stats: { rounds: 0, tools: 0, resets: 0, msgs: 0 },
     context: {
       compactions: 0,
-      lastCompactedAt: null
+      lastCompactedAt: null,
+      permissionMode: 'default',
+      permissionDenialsCount: 0,
+      lastPermissionDeniedAt: null,
+      queryTracking: null
     }
   };
   chatSessions.unshift(session);

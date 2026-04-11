@@ -56,7 +56,8 @@ function normalizeProbeUrl(rawUrl) {
 
   try {
     const parsed = new URL(withScheme);
-    return `${parsed.protocol}//${parsed.host}`;
+    const pathname = String(parsed.pathname || '').replace(/\/+$/, '');
+    return `${parsed.protocol}//${parsed.host}${pathname}`;
   } catch {
     return input.replace(/\/+$/, '');
   }
@@ -130,7 +131,8 @@ async function probeLocal() {
     for (const p of pathsToTry) {
       try {
         const timeoutMs = p === '/api/tags' ? 7000 : 2500;
-        const res = await fetchWithTimeout(baseUrl + p, { cache: 'no-store' }, timeoutMs);
+        const probeUrl = new URL(p.replace(/^\/+/, ''), baseUrl + '/').toString();
+        const res = await fetchWithTimeout(probeUrl, { cache: 'no-store' }, timeoutMs);
         if (res.ok) {
           isReachable = true;
           let models = [];
@@ -186,7 +188,8 @@ async function probeLocal() {
     // Fallback: detect open local endpoint even when CORS blocks response body.
     const modelListPath = pathsToTry[0] || '/v1/models';
     try {
-      const opaqueRes = await fetchWithTimeout(baseUrl + modelListPath, {
+      const probeUrl = new URL(modelListPath.replace(/^\/+/, ''), baseUrl + '/').toString();
+      const opaqueRes = await fetchWithTimeout(probeUrl, {
         method: 'GET',
         mode: 'no-cors',
         cache: 'no-store'
@@ -217,7 +220,8 @@ async function probeLocal() {
 
     // Last fallback: some servers answer chat endpoint with 400/405 but are reachable.
     try {
-      const res = await fetchWithTimeout(baseUrl + (target.chatPath || '/v1/chat/completions'), {
+      const probeUrl = new URL((target.chatPath || '/v1/chat/completions').replace(/^\/+/, ''), baseUrl + '/').toString();
+      const res = await fetchWithTimeout(probeUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: 'probe', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
@@ -280,9 +284,19 @@ function toggleLocalBackend() {
     return;
   }
   if (!localBackend.detected && !localBackend.enabled) {
-    probeLocal().then(() => {
-      if (localBackend.detected) _activateLocal();
-    });
+    probeLocal()
+      .then(() => {
+        if (localBackend.detected) _activateLocal();
+      })
+      .catch(error => {
+        const message = String(error?.message || 'probe failed');
+        console.warn('[Local Probe] failed:', message);
+        setLocalStatus('error', 'probe failed');
+        setLocalBadge('local: error', 'var(--red)', '#993C1D');
+        if (typeof addNotice === 'function') {
+          addNotice(`Local backend probe failed: ${message}`);
+        }
+      });
     return;
   }
   localBackend.enabled ? _deactivateLocal() : _activateLocal();

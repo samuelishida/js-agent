@@ -603,6 +603,8 @@ function renderMarkdownBlocks(text) {
   const isUl = line => /^(\s*[-*+]\s+)/.test(line);
   const isOl = line => /^(\s*\d+\.\s+)/.test(line);
   const isQuote = line => /^\s*>\s?/.test(line);
+  const isTableRow = line => /^\s*\|.+\|\s*$/.test(line);
+  const isTableSep = line => /^\s*\|[\s|:-]+\|\s*$/.test(line);
 
   while (i < lines.length) {
     const line = lines[i];
@@ -651,6 +653,52 @@ function renderMarkdownBlocks(text) {
       continue;
     }
 
+    if (isTableRow(line)) {
+      const tableLines = [];
+      while (i < lines.length && (isTableRow(lines[i]) || isTableSep(lines[i]))) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+
+      const parseRow = raw => raw.trim()
+        .replace(/^\||\|$/g, '')
+        .split('|')
+        .map(cell => cell.trim());
+
+      const hasSep = tableLines.some(l => isTableSep(l));
+      let headerRow = parseRow(tableLines[0]);
+      let bodyRows;
+
+      if (hasSep) {
+        bodyRows = tableLines
+          .slice(1)
+          .filter(l => !isTableSep(l))
+          .map(parseRow);
+      } else {
+        bodyRows = tableLines.slice(1).map(parseRow);
+      }
+
+      let tableHtml = '<table><thead><tr>';
+      headerRow.forEach(cell => {
+        tableHtml += `<th>${renderInlineMarkdown(cell)}</th>`;
+      });
+      tableHtml += '</tr></thead>';
+      if (bodyRows.length) {
+        tableHtml += '<tbody>';
+        bodyRows.forEach(row => {
+          tableHtml += '<tr>';
+          row.forEach(cell => {
+            tableHtml += `<td>${renderInlineMarkdown(cell)}</td>`;
+          });
+          tableHtml += '</tr>';
+        });
+        tableHtml += '</tbody>';
+      }
+      tableHtml += '</table>';
+      html.push(tableHtml);
+      continue;
+    }
+
     if (isUl(line)) {
       const items = [];
       while (i < lines.length && isUl(lines[i])) {
@@ -687,7 +735,8 @@ function renderMarkdownBlocks(text) {
         /^\*\*\*+$/.test(nextTrimmed) ||
         isQuote(next) ||
         isUl(next) ||
-        isOl(next)
+        isOl(next) ||
+        isTableRow(next)
       ) {
         break;
       }

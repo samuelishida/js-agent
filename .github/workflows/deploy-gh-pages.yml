@@ -1,5 +1,14 @@
 name: Deploy GitHub Pages
 
+# Opt into Node.js 24 for JavaScript actions to avoid deprecation warnings
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+# Grant minimal permissions required so GITHUB_TOKEN can push pages
+permissions:
+  contents: read
+  pages: write
+
 on:
   push:
     branches: [ main ]
@@ -8,25 +17,15 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-    permissions:
-      contents: read
-      pages: write
-      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          persist-credentials: true
           fetch-depth: 0
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
-          # If the default GITHUB_TOKEN lacks push permissions, create a personal access token (classic)
-          # with `repo` scope and save it in repo secrets as `PAGES_DEPLOY_TOKEN`.
-          # The action will prefer `personal_token` when provided.
-          personal_token: ${{ secrets.PAGES_DEPLOY_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./docs

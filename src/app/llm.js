@@ -167,32 +167,100 @@ function extractTextFromLocalContent(value) {
     return value;
   }
 
-  if (!Array.isArray(value)) {
+  if (Array.isArray(value)) {
+    const text = value
+      .map(part => extractTextFromLocalContent(part))
+      .filter(Boolean)
+      .join('');
+
+    return text;
+  }
+
+  if (!value || typeof value !== 'object') {
     return '';
   }
 
-  const text = value
-    .map(part => {
-      if (typeof part === 'string') return part;
-      if (typeof part?.text === 'string') return part.text;
-      if (typeof part?.content === 'string') return part.content;
-      return '';
-    })
-    .filter(Boolean)
-    .join('');
+  if (typeof value.text === 'string') return value.text;
+  if (typeof value.content === 'string') return value.content;
+  if (typeof value.response === 'string') return value.response;
+  if (typeof value.output_text === 'string') return value.output_text;
+  if (typeof value.completion === 'string') return value.completion;
 
-  return text;
+  if (Array.isArray(value.content)) {
+    return extractTextFromLocalContent(value.content);
+  }
+
+  if (Array.isArray(value.output)) {
+    return extractTextFromLocalContent(value.output);
+  }
+
+  if (value.message && typeof value.message === 'object') {
+    return extractTextFromLocalContent(value.message);
+  }
+
+  return '';
+}
+
+function extractLocalReasoningText(data) {
+  const reasoningCandidates = [
+    data?.choices?.[0]?.message?.thinking,
+    data?.choices?.[0]?.message?.reasoning,
+    data?.choices?.[0]?.message?.reasoning_content,
+    data?.choices?.[0]?.thinking,
+    data?.choices?.[0]?.reasoning,
+    data?.choices?.[0]?.reasoning_content,
+    data?.message?.thinking,
+    data?.message?.reasoning,
+    data?.message?.reasoning_content,
+    data?.thinking,
+    data?.reasoning,
+    data?.reasoning_content
+  ];
+
+  for (const candidate of reasoningCandidates) {
+    const text = extractTextFromLocalContent(candidate);
+    if (String(text || '').trim()) return text;
+  }
+
+  return '';
+}
+
+function summarizeLocalPayloadShape(data) {
+  if (!data || typeof data !== 'object') return `payload:${typeof data}`;
+
+  const topKeys = Object.keys(data).slice(0, 8).join(',');
+  const messageKeys = (data.message && typeof data.message === 'object')
+    ? Object.keys(data.message).slice(0, 8).join(',')
+    : '';
+  const choiceMessage = data.choices?.[0]?.message;
+  const choiceMessageKeys = (choiceMessage && typeof choiceMessage === 'object')
+    ? Object.keys(choiceMessage).slice(0, 8).join(',')
+    : '';
+
+  return [
+    topKeys ? `keys=${topKeys}` : '',
+    messageKeys ? `message=${messageKeys}` : '',
+    choiceMessageKeys ? `choice.message=${choiceMessageKeys}` : ''
+  ].filter(Boolean).join(' | ') || 'empty-object';
 }
 
 function extractLocalVisibleReply(data) {
   const visibleCandidates = [
     data?.choices?.[0]?.message?.content,
+    data?.choices?.[0]?.message,
+    data?.choices?.[0]?.delta?.content,
     data?.choices?.[0]?.text,
     data?.message?.content,
+    data?.message,
     data?.message?.text,
     data?.response,
+    data?.content,
+    data?.text,
+    data?.completion,
     data?.output_text,
-    data?.output?.text
+    data?.output,
+    data?.output?.text,
+    data?.result
   ];
 
   for (const candidate of visibleCandidates) {
@@ -205,14 +273,7 @@ function extractLocalVisibleReply(data) {
     }
   }
 
-  const hiddenReasoningCandidates = [
-    data?.message?.thinking,
-    data?.thinking,
-    data?.message?.reasoning,
-    data?.message?.reasoning_content
-  ];
-
-  const hasHiddenReasoning = hiddenReasoningCandidates.some(candidate => String(candidate || '').trim());
+  const hasHiddenReasoning = !!String(extractLocalReasoningText(data) || '').trim();
   return {
     text: '',
     hiddenReasoningOnly: hasHiddenReasoning
@@ -258,7 +319,8 @@ function getRateLimitMs(lane, options = {}) {
 function getTimeoutMs(lane, options = {}) {
   const configured = Number(options.timeoutMs);
   if (Number.isFinite(configured) && configured > 0) {
-    return Math.max(1000, configured);
+    // Local models are often slower on control/planner calls; avoid fragile short timeouts.
+    return lane === 'local' ? Math.max(8000, configured) : Math.max(1000, configured);
   }
 
   const maxTokens = Number(options.maxTokens) || 0;
@@ -355,8 +417,6 @@ function abortActiveLlmRequest() {
   activeLlmController.abort();
 }
 
-async function callGemini(msgs, options = {}) { return callLLM(msgs, options); }
-
 function getSelectedCloudModel() {
   const modelSelect = document.getElementById('model-select');
   return String(modelSelect?.value || '').trim();
@@ -391,7 +451,7 @@ async function callCloud(msgs, signal, options = {}) {
   const model = String(options.model || selected.model || '').trim();
 
   if (!localBackend.enabled) {
-    const badgeModel = document.getElementById('badge-model');
+    const badgeModel = document.getElementById('topbar-model');
     if (badgeModel) {
       badgeModel.textContent = provider === 'gemini'
         ? model
@@ -404,10 +464,6 @@ async function callCloud(msgs, signal, options = {}) {
   if (provider === 'azure') return callAzureOpenAiCloud(msgs, signal, options, model);
   if (provider === 'ollama') return callOllamaCloud(msgs, signal, options, model);
   return callGeminiDirect(msgs, signal, options, model);
-}
-
-function sanitizeModelReply(text) {
-  return splitModelReply(text).visible;
 }
 
 const SAFE_HTML_TAGS = new Set([
@@ -445,7 +501,13 @@ function normalizeVisibleModelText(text) {
 
 function splitModelReply(text) {
   const raw = String(text || '');
-  const withoutThinking = raw.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  // Inner-to-outer loop so nested <think> pairs are fully stripped.
+  let withoutThinking = raw;
+  let prev;
+  do {
+    prev = withoutThinking;
+    withoutThinking = withoutThinking.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  } while (withoutThinking !== prev);
   return {
     raw,
     thinkingBlocks: extractThinkingBlocks(raw),
@@ -667,7 +729,7 @@ async function callLLM(msgs, options = {}) {
     configError.code = 'LOCAL_CONFIG_INVALID';
     throw configError;
   }
-  const lane = route.lane;
+  let lane = route.lane;
   console.debug(`[callLLM] Selected lane: ${lane}`);
 
   try {
@@ -683,7 +745,7 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
   const modelSelect = document.getElementById('model-select');
   let model = String(initialModel || (modelSelect ? modelSelect.value : '') || 'gemini-2.5-flash-lite').trim();
   if (!localBackend.enabled) {
-    const badgeModel = document.getElementById('badge-model');
+    const badgeModel = document.getElementById('topbar-model');
     if (badgeModel) badgeModel.textContent = model;
   }
 
@@ -721,7 +783,7 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
     model = fallbackModels[model];
     if (modelSelect) modelSelect.value = model;
     if (!localBackend.enabled) {
-      const badgeModel = document.getElementById('badge-model');
+      const badgeModel = document.getElementById('topbar-model');
       if (badgeModel) badgeModel.textContent = model;
     }
     ({ res, text } = await requestModel(model));
@@ -734,12 +796,18 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
   }
   const data = JSON.parse(text);
   if (data.error) {
-    const error = new Error(data.error.message);
+    const error = new Error(data.error?.message || String(data.error));
     if (Number.isFinite(data.error?.code)) error.status = Number(data.error.code);
     throw error;
   }
   if (!data.candidates?.[0]) throw new Error('No candidates returned');
-  return data.candidates[0].content.parts[0].text || '';
+  const finishReason = data.candidates[0]?.finishReason;
+  if (finishReason && finishReason !== 'STOP' && finishReason !== 'FINISH_REASON_UNSPECIFIED') {
+    const error = new Error(`Gemini response blocked: ${finishReason}`);
+    error.code = `GEMINI_${finishReason}`;
+    throw error;
+  }
+  return data.candidates[0]?.content?.parts?.[0]?.text || '';
 }
 
 async function callOpenAiCloud(msgs, signal, options = {}, initialModel = '') {
@@ -1009,9 +1077,9 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
 
       const data = JSON.parse(text);
       if (data.error) {
-        const error = new Error(data.error?.message || data.error || 'Ollama Cloud error');
-        if (Number.isFinite(data.error?.code)) error.status = Number(data.error.code);
-        throw error;
+        const detail = String(data.error?.message || data.error || 'payload error').slice(0, 200);
+        attempts.push({ endpoint, status: 200, detail });
+        continue;
       }
 
       return data.choices?.[0]?.message?.content
@@ -1049,6 +1117,13 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
   throw error;
 }
 
+function updateModelBadgeForLocal(modelName) {
+  const badgeModel = document.getElementById('topbar-model');
+  if (badgeModel) {
+    badgeModel.textContent = modelName || 'local/model';
+  }
+}
+
 async function callLocal(msgs, signal, options = {}) {
   const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
@@ -1074,9 +1149,14 @@ async function callLocal(msgs, signal, options = {}) {
 
   // Build OpenAI-compatible messages and normalize for strict templates that require
   // user/assistant alternation after an optional system message.
+  const sanitizeLocalMessageContent = value => String(value || '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
   const rawMsgs = msgs.map(m => ({
     role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
-    content: String(m.content || '')
+    content: sanitizeLocalMessageContent(m.content)
   }));
 
   function normalizeLocalMessages(messages) {
@@ -1131,6 +1211,12 @@ async function callLocal(msgs, signal, options = {}) {
 
   const openaiMsgs = normalizeLocalMessages(rawMsgs);
 
+  // Update model badge if the model changed
+  const displayModel = String(model || '').trim();
+  if (displayModel) {
+    updateModelBadgeForLocal(displayModel);
+  }
+
   const inferred = inferProbeConfigFromUrl(localBaseUrl || '');
   const inferredChatPath = inferred?.chatPath || '/v1/chat/completions';
   const preferOllamaPath = inferredChatPath === '/api/chat';
@@ -1172,15 +1258,13 @@ async function callLocal(msgs, signal, options = {}) {
         body = {
           model,
           messages: openaiMsgs,
-          stream: false,
-          think: false
+          stream: false
         };
       } else if (ep.format === 'ollama_generate') {
         body = {
           model,
           prompt: buildOllamaGeneratePrompt(openaiMsgs),
           stream: false,
-          think: false,
           options: {
             temperature,
             num_predict: maxTokens
@@ -1228,20 +1312,26 @@ async function callLocal(msgs, signal, options = {}) {
       if (localReply.text) return localReply.text;
 
       if (localReply.hiddenReasoningOnly) {
+        // Model responded but only emitted reasoning with no visible content.
+        // Wrap the thinking in <think> tags and return it so the agent loop sees
+        // an empty visible reply and pushes a continuation prompt, rather than
+        // propagating a hard error and failing the whole turn.
+        const thinkText = String(extractLocalReasoningText(data) || '').trim();
+        if (thinkText) return `<think>${thinkText}</think>`;
         attempts.push({ path: ep.path, status: 200, detail: 'model returned hidden reasoning only' });
         lastEndpointError = `${ep.path}: model returned hidden reasoning only`;
         continue;
       }
 
-      attempts.push({ path: ep.path, status: 200, detail: 'unrecognized response schema' });
-      lastEndpointError = `${ep.path}: unrecognized response schema`;
+      const schemaHint = summarizeLocalPayloadShape(data).slice(0, 180);
+      attempts.push({ path: ep.path, status: 200, detail: `unrecognized response schema (${schemaHint})` });
+      lastEndpointError = `${ep.path}: unrecognized response schema (${schemaHint})`;
       continue;
     } catch (e) {
       if (signal?.aborted || e?.name === 'AbortError') {
         throw e;
       }
       attempts.push({ path: ep.path, status: Number(e?.status) || 0, detail: String(e?.message || 'network error').slice(0, 180) });
-      if (ep.format === 'openai') continue; // try next
       lastEndpointError = `${ep.path}: ${e.message}`;
       if (Number.isFinite(e?.status)) lastEndpointStatus = Number(e.status);
       continue;
@@ -1253,9 +1343,10 @@ async function callLocal(msgs, signal, options = {}) {
     .join(' | ');
 
   const networkOnly = attempts.length > 0 && attempts.every(attempt => !attempt.status);
-  if (networkOnly && preferOllamaPath) {
+  if (networkOnly) {
+    const serverHint = preferOllamaPath ? 'Ensure Ollama is running and reachable.' : 'Ensure your local LLM server is running and reachable.';
     const error = new Error(
-      `Local LLM: could not reach Ollama at ${localBaseUrl}. Ensure Ollama is running and reachable. Attempts: ${attemptSummary || 'network error'}`
+      `Local LLM: could not reach server at ${localBaseUrl}. ${serverHint} Attempts: ${attemptSummary || 'network error'}`
     );
     error.status = 503;
     throw error;

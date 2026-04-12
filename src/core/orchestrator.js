@@ -59,7 +59,7 @@
     datetime: 'Returns the current date and time.'
   };
   const SNAPSHOT_SKILL_LIMIT = 20;
-  const getSnapshotApi = () => window.AgentClawdSnapshot;
+  const getSnapshotApi = () => window.AgentSnapshot;
 
   function sanitizeProviderMentions(text) {
     const sanitize = getSnapshotApi()?.sanitizeVendorMentions;
@@ -76,7 +76,11 @@
     return enabledTools
       .map(name => {
         const skill = window.AgentSkills?.registry?.[name];
-        return `- ${name}: ${skill?.description || BUILTIN_SKILL_DESCRIPTIONS[name] || 'available skill'}`;
+        const description = skill?.description || BUILTIN_SKILL_DESCRIPTIONS[name] || 'available skill';
+        const sig = skill?.signature
+          ? String(skill.signature).replace(/^[^(]*/, '')
+          : '';
+        return `- ${name}${sig}: ${description}`;
       })
       .join('\n');
   }
@@ -115,10 +119,9 @@
     return [
       '# Using your tools',
       '- Prefer dedicated tools over generic shell commands whenever available.',
-      '- Prefer the extension-compat clawd_* tools when they fit the task.',
-      '- Use clawd_readFile before clawd_editFile or clawd_multiEdit.',
-      '- Prefer clawd_editFile for targeted edits and clawd_multiEdit for coordinated file changes.',
-      '- For tasks with 3 or more concrete steps, create and maintain a todo list with clawd_todoWrite.',
+      '- Use read_file before edit_file or multi_edit.',
+      '- Prefer edit_file for targeted edits and multi_edit for coordinated file changes.',
+      '- For tasks with 3 or more concrete steps, create and maintain a todo list with todo_write.',
       '- Call multiple independent read-only tools in parallel when safe.',
       '- Sequence dependent tool calls; do not parallelize dependency chains.',
       '- Do not invent tool outputs, files, URLs, or command results.'
@@ -161,20 +164,21 @@
   function buildToolReferenceSection() {
     return [
       '# Tool reference',
-      '- clawd_readFile -- Read file (optional startLine/endLine, 1-based)',
-      '- clawd_writeFile -- Create or overwrite a file with full content',
-      '- clawd_editFile -- Surgical string replacement in a file',
-      '- clawd_multiEdit -- Atomic multi-file edit batch',
-      '- clawd_listDir -- List directory contents',
-      '- clawd_glob -- Find files by glob pattern',
-      '- clawd_searchCode -- Search strings/regex across code files',
-      '- clawd_runTerminal -- Run a shell command through the local dev-server bridge',
-      '- clawd_webFetch -- Fetch a URL and return readable text',
-      '- clawd_getDiagnostics -- Run diagnostics through the local bridge when available',
-      '- clawd_todoWrite -- Persist a structured todo list',
-      '- clawd_memoryRead / clawd_memoryWrite -- Read and write compat memory',
-      '- clawd_lsp -- Semantic-navigation compatibility placeholder',
-      '- clawd_spawnAgent -- Run a focused sub-agent task'
+      'Key tools for common tasks (call these by the names shown here):',
+      '- read_file(path, startLine?, endLine?): Read a file with optional 1-based line range',
+      '- write_file(path, content): Create or overwrite a file with complete content',
+      '- edit_file(path, oldString, newString, replaceAll?): Surgical string replacement in a file',
+      '- multi_edit(edits[]): Atomic multi-file edit batch — each edit: {path, oldString, newString}',
+      '- list_dir(path): List directory contents',
+      '- glob(pattern, exclude?): Find files by glob pattern',
+      '- search_code(query, glob?, isRegex?, caseSensitive?, contextLines?): Search code/text files',
+      '- run_terminal(command, cwd?): Run a shell command through the local dev-server bridge',
+      '- web_fetch(url): Fetch a URL and return readable text',
+      '- get_diagnostics(path?, severity?): Get diagnostics from the local bridge when available',
+      '- todo_write(todos): Persist a structured todo list',
+      '- memory_read(scope?): Read compat memory (global/project scope)',
+      '- memory_write(topic?, content, replace?, scope?): Write compat memory',
+      '- spawn_agent(task, tools?, maxIterations?): Run a focused sub-agent task'
     ].join('\n');
   }
 
@@ -183,7 +187,7 @@
       '# Autopilot rules',
       '- Act autonomously on reversible local work.',
       '- Always read a file before editing it.',
-      '- Prefer clawd_editFile for targeted changes and clawd_multiEdit for coordinated edits.',
+      '- Prefer edit_file for targeted changes and multi_edit for coordinated edits.',
       '- After edits, use diagnostics or another verification step before reporting success.',
       '- For multi-step tasks, keep todo state current instead of batching updates.'
     ].join('\n');
@@ -207,6 +211,7 @@
       '- Respect <permission_denials> and [TOOL_USE_SUMMARY] continuations when present.',
       '- If system-reminder tags appear, treat them as high-priority runtime guidance.',
       '- If you describe a next action, execute it in the same reply via tool calls when possible.',
+      '- You may call up to 5 tools in a single reply; independent reads can run in parallel.',
       hint ? `- Query hint: ${hint}` : ''
     ].filter(Boolean).join('\n');
   }
@@ -255,10 +260,12 @@
 
     const blocks = [];
     if (toolSummary) {
-      blocks.push(`[TOOL_USE_SUMMARY]\n${String(toolSummary).trim()}`);
+      // Sanitize tool summary before including in continuation prompt to prevent prompt injection
+      blocks.push(`[TOOL_USE_SUMMARY]\n${String(sanitizeToolResult(toolSummary)).trim()}`);
     }
     if (denialLines.length) {
-      blocks.push(['<permission_denials>', ...denialLines, '</permission_denials>'].join('\n'));
+      // Sanitize permission denial lines before including in continuation prompt
+      blocks.push(['<permission_denials>', ...denialLines.map(line => String(sanitizeToolResult(line))), '</permission_denials>'].join('\n'));
     }
     if (compactLines.length) {
       blocks.push(['[CONTEXT_COMPACTION]', ...compactLines].join('\n'));
@@ -330,8 +337,19 @@
     ]);
   }
 
-  async function buildRepairPrompt(userMessage) {
-    return window.AgentPrompts.loadRendered(DEFAULT_PROMPTS.repair, { user_message: userMessage });
+  async function buildRepairPrompt(input) {
+    const options = (typeof input === 'object' && input !== null)
+      ? input
+      : { userMessage: input };
+    const userMessage = String(options.userMessage || '');
+    const previousReply = sanitizeProviderMentions(String(options.previousReply || ''));
+    const toolsList = buildToolList(Array.isArray(options.enabledTools) ? options.enabledTools : []);
+
+    return window.AgentPrompts.loadRendered(DEFAULT_PROMPTS.repair, {
+      user_message: userMessage,
+      previous_reply: previousReply,
+      tools_list: toolsList
+    });
   }
 
   async function buildSummaryPrompt(history, userMessage) {
@@ -431,7 +449,14 @@
       memorylist: 'memory_list',
       toolsearch: 'tool_search',
       skillcatalog: 'snapshot_skill_catalog',
-      snapshotskillcatalog: 'snapshot_skill_catalog'
+      snapshotskillcatalog: 'snapshot_skill_catalog',
+      listdir: 'clawd_listDir',
+      multiedit: 'clawd_multiEdit',
+      searchcode: 'clawd_searchCode',
+      runterminal: 'clawd_runTerminal',
+      getdiagnostics: 'clawd_getDiagnostics',
+      memoryread: 'clawd_memoryRead',
+      spawnagent: 'clawd_spawnAgent'
     };
 
     if (aliasMap[requested] && registry[aliasMap[requested]]) {

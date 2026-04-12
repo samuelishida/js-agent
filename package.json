@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:clawd-snapshot": "node scripts/build-clawd-snapshot.mjs",
+    "build:snapshot": "node scripts/build-snapshot.mjs",
     "test:skills-smoke": "node scripts/test-skills-smoke.mjs"
   },
   "devDependencies": {

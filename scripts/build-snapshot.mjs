@@ -6,15 +6,15 @@ import { transform } from 'esbuild';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const sourceRoot = path.join(repoRoot, ['cl', 'aude-code-main'].join(''), 'src');
-const distRoot = path.join(repoRoot, 'dist', 'clawd-code-main');
+const distRoot = path.join(repoRoot, 'dist', 'runtime-code-main');
 const distSrcRoot = path.join(distRoot, 'src');
-const manifestPath = path.join(distRoot, 'adapter', 'clawd-snapshot-manifest.json');
+const manifestPath = path.join(distRoot, 'adapter', 'runtime-snapshot-manifest.json');
 const generatedRuntimePath = path.join(
   repoRoot,
   'src',
   'skills',
   'generated',
-  'clawd-snapshot-data.js',
+  'runtime-snapshot-data.js',
 );
 
 const CODE_LOADERS = new Map([
@@ -74,24 +74,24 @@ function sanitizeVendorMentions(text) {
   const brandSdk = `${VENDOR.brand} Agent SDK`;
 
   const replacements = [
-    [wordPattern(bannerText), 'this CLI for Clawd'],
+    [wordPattern(bannerText), 'this CLI for Runtime'],
     [wordPattern(VENDOR.name), ''],
-    [wordPattern(brandCode), 'Clawd Code'],
-    [wordPattern(brandSdk), 'Clawd Agent SDK'],
-    [new RegExp(escapeRegex(`${brandLower}.ai/code`), 'gi'), 'clawd.local/code'],
-    [new RegExp(escapeRegex(`code.${brandLower}.com`), 'gi'), 'code.clawd.local'],
-    [new RegExp(escapeRegex(`${brandLower}.ai`), 'gi'), 'clawd.local'],
-    [new RegExp(`__${brandLower}`, 'gi'), '__clawd'],
-    [new RegExp(`${brandLower}-`, 'gi'), 'clawd-'],
-    [new RegExp(`${brandLower}_`, 'gi'), 'clawd_'],
-    [wordPattern(VENDOR.brand, 'g'), 'Clawd'],
-    [wordPattern(brandLower, 'g'), 'clawd'],
-    [new RegExp(`${brandLower}(?=[A-Z])`, 'g'), 'clawd'],
-    [wordPattern(VENDOR.host), 'clawdusercontent.local'],
-    [/\bclau\.de\b/gi, 'clawd.local'],
-    [new RegExp(`${VENDOR.brandUpper}_CODE`, 'g'), 'CLAWD_CODE'],
-    [new RegExp(`${VENDOR.brandUpper}_`, 'g'), 'CLAWD_'],
-    [wordPattern(VENDOR.brandUpper, 'g'), 'CLAWD'],
+    [wordPattern(brandCode), 'Runtime Code'],
+    [wordPattern(brandSdk), 'Runtime Agent SDK'],
+    [new RegExp(escapeRegex(`${brandLower}.ai/code`), 'gi'), 'runtime.local/code'],
+    [new RegExp(escapeRegex(`code.${brandLower}.com`), 'gi'), 'code.runtime.local'],
+    [new RegExp(escapeRegex(`${brandLower}.ai`), 'gi'), 'runtime.local'],
+    [new RegExp(`__${brandLower}`, 'gi'), '__runtime'],
+    [new RegExp(`${brandLower}-`, 'gi'), 'runtime-'],
+    [new RegExp(`${brandLower}_`, 'gi'), 'runtime_'],
+    [wordPattern(VENDOR.brand, 'g'), 'Runtime'],
+    [wordPattern(brandLower, 'g'), 'runtime'],
+    [new RegExp(`${brandLower}(?=[A-Z])`, 'g'), 'runtime'],
+    [wordPattern(VENDOR.host, 'g'), 'runtimeusercontent.local'],
+    [/\bruntime\.de\b/gi, 'runtime.local'],
+    [new RegExp(`${VENDOR.brandUpper}_CODE`, 'g'), 'RUNTIME_CODE'],
+    [new RegExp(`${VENDOR.brandUpper}_`, 'g'), 'RUNTIME_'],
+    [wordPattern(VENDOR.brandUpper, 'g'), 'RUNTIME'],
     [/\bANT\b/g, 'VENDOR'],
     [/\bANT-\b/g, 'VENDOR-'],
   ];
@@ -443,7 +443,7 @@ function buildPromptSnippetManifest(promptsSource, systemSource) {
 function buildRuntimeDataJs(manifest) {
   const payload = JSON.stringify(manifest, null, 2);
   return `(() => {
-  window.AgentClawdSnapshotData = ${payload};
+  window.AgentRuntimeSnapshotData = ${payload};
 })();\n`;
 }
 
@@ -485,8 +485,8 @@ async function main() {
 
   const manifest = {
     generatedAt: new Date().toISOString(),
-    sourceRoot: 'clawd-code-main/src',
-    outputRoot: 'dist/clawd-code-main/src',
+    sourceRoot: 'runtime-code-main/src',
+    outputRoot: 'dist/runtime-code-main/src',
     stats: {
       transpiledFiles: transpiledCount,
       copiedFiles: copiedCount,
@@ -508,7 +508,7 @@ async function main() {
   await writeFile(generatedRuntimePath, buildRuntimeDataJs(manifest), 'utf8');
 
   process.stdout.write(
-    `Built Clawd snapshot dist.\n` +
+    `Built Runtime snapshot dist.\n` +
       `- Transpiled: ${transpiledCount}\n` +
       `- Copied assets: ${copiedCount}\n` +
       `- Bundled skills cataloged: ${bundledSkills.length}\n` +
@@ -518,6 +518,6 @@ async function main() {
 }
 
 main().catch(error => {
-  process.stderr.write(`build:clawd-snapshot failed: ${error.message}\n`);
+  process.stderr.write(`build:runtime-snapshot failed: ${error.message}\n`);
   process.exitCode = 1;
 });

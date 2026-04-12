@@ -50,7 +50,7 @@
 
   <div class="topbar-right">
     <div class="topbar-badges">
-      <span class="badge badge-sm" id="badge-rounds">10 rounds</span>
+      <span class="badge badge-sm" id="badge-rounds">rounds 50</span>
       <span class="badge badge-sm" id="badge-ctx">32k</span>
       <span class="badge badge-sm" id="badge-status">idle</span>
     </div>
@@ -86,10 +86,38 @@
     <button class="btn-stop" id="btn-stop" onclick="requestStop()" title="Stop" disabled style="display:none">
       <span>■</span>
     </button>
+    <button class="steering-btn" id="btn-steering-toggle" onclick="toggleSteeringUI()" title="Toggle steering input" style="display:none;padding:2px 6px;font-size:10px">⚡Steer</button>
   </div>
   <div class="input-help">
     <span><kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line</span>
   </div>
+
+  <!-- Steering UI input (visible when toggled on) -->
+  <div class="steering-input-row" id="steering-input-row" style="display:none;margin:4px;border:1px solid var(--border);border-radius:6px;padding:4px;background:var(--bg-secondary)">
+    <div class="steering-container" style="display:flex;gap:4px">
+      <input type="text" id="steering-input" placeholder="Inject steering message (e.g., \"Investigate src/core/orchestrator.js first\")…">
+      <button id="btn-steering-clear" onclick="clearSteering()" title="Clear steering buffer" style="padding:2px 6px;font-size:11px">Clear</button>
+      <button id="btn-steering-send" onclick="sendSteering()" title="Inject steering message" style="padding:2px 6px;font-size:11px">Send</button>
+    </div>
+    <div id="steering-status" style="margin-top:2px;font-size:11px;color:var(--text-secondary)"></div>
+  </div>
+
+  <!-- Steering event hooks for external code -->
+  <script>
+    // Make steering functions globally available for external injection
+    window.setSteeringUIVisible = function(visible) {
+      const row = document.getElementById('steering-input-row');
+      const toggleBtn = document.getElementById('btn-steering-toggle');
+      if (row) row.style.display = visible ? 'flex' : 'none';
+      if (toggleBtn) toggleBtn.style.display = visible ? 'inline-block' : 'none';
+    };
+
+    // Toggle steering UI visibility (for slash commands or settings)
+    window.toggleSteeringUI = function() {
+      const visible = document.getElementById('steering-input-row')?.style.display !== 'flex';
+      window.setSteeringUIVisible(visible);
+    };
+  </script>
 </div>
 
 <!-- SETTINGS MODAL -->
@@ -124,8 +152,8 @@
             <option value="openai/gpt-4.1">OpenAI GPT-4.1</option>
             <option value="openai/gpt-4.1-mini">OpenAI GPT-4.1 Mini</option>
             <option value="openai/o4-mini">OpenAI o4 Mini</option>
-            <option value="clawd/clawd-3-7-sonnet-latest">Clawd 3.7 Sonnet</option>
-            <option value="clawd/clawd-3-5-haiku-latest">Clawd 3.5 Haiku</option>
+            <option value="runtime/runtime-3-7-sonnet-latest">Runtime 3.7 Sonnet</option>
+            <option value="runtime/runtime-3-5-haiku-latest">Runtime 3.5 Haiku</option>
             <option value="azure/gpt-4.1-mini">Azure GPT-4.1 Mini</option>
             <option value="ollama/llama3.1:8b">Ollama Cloud llama3.1:8b</option>
           </select>
@@ -151,10 +179,10 @@
         <div class="settings-group">
           <label class="settings-label">Local Server URL</label>
           <div class="settings-row">
-            <input class="settings-input" id="local-url" type="text" placeholder="http://localhost:1234" value="http://localhost:1234" />
+            <input class="settings-input" id="local-url" type="text" placeholder="http://localhost:11434" value="http://localhost:11434" />
             <button class="btn-primary btn-sm" onclick="probeLocal()">Probe</button>
           </div>
-          <div class="settings-hint">LM Studio: 1234 · Ollama: 11434</div>
+          <div class="settings-hint">Ollama: 11434 · LM Studio: 1234</div>
         </div>
 
         <div class="settings-group">
@@ -187,19 +215,19 @@
         <div class="settings-group">
           <label class="settings-label">
             Planning Depth
-            <span class="settings-value" id="val-rounds">10</span>
+            <span class="settings-value" id="val-rounds">50</span>
           </label>
-          <input class="settings-slider" type="range" id="sl-rounds" min="1" max="20" value="10"
-                 oninput="document.getElementById('val-rounds').textContent=this.value;updateBadge()">
+          <input class="settings-slider" type="range" id="sl-rounds" min="1" max="50" value="50"
+                 oninput="document.getElementById('val-rounds').textContent=this.value;localStorage.setItem('agent_sl_rounds',this.value);updateBadge()">
         </div>
 
         <div class="settings-group">
           <label class="settings-label">
             Context Budget
-            <span class="settings-value" id="val-ctx">32</span>k chars
+            <span class="settings-value" id="val-ctx">32</span>
           </label>
           <input class="settings-slider" type="range" id="sl-ctx" min="10" max="200" value="32"
-                 oninput="document.getElementById('val-ctx').textContent=this.value;updateBadge()">
+                 oninput="document.getElementById('val-ctx').textContent=this.value;localStorage.setItem('agent_sl_ctx',this.value);updateBadge()">
         </div>
 
         <div class="settings-group">
@@ -208,7 +236,7 @@
             <span class="settings-value" id="val-delay">500</span>ms
           </label>
           <input class="settings-slider" type="range" id="sl-delay" min="0" max="3000" step="100" value="500"
-                 oninput="document.getElementById('val-delay').textContent=this.value">
+                 oninput="document.getElementById('val-delay').textContent=this.value;localStorage.setItem('agent_sl_delay',this.value)">
         </div>
 
         <div class="ctx-bar">
@@ -298,8 +326,8 @@
 <script src="src/core/prompt-loader.js" defer></script>
 <script src="src/skills/core/intents.js" defer></script>
 <script src="src/skills/core/tool-meta.js" defer></script>
-<script src="src/skills/generated/clawd-snapshot-data.js" defer></script>
-<script src="src/skills/clawd-snapshot-adapter.js" defer></script>
+<script src="src/skills/generated/snapshot-data.js" defer></script>
+<script src="src/skills/snapshot-adapter.js" defer></script>
 <script src="src/skills/modules/filesystem-runtime.js" defer></script>
 <script src="src/skills/modules/data-runtime.js" defer></script>
 <script src="src/skills/modules/registry-runtime.js" defer></script>

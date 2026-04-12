@@ -469,42 +469,6 @@
       return entries.length ? formatToolResult('DuckDuckGo search', entries.join('\n\n')) : null;
     }
 
-    async function searchGoogleNewsRss(query) {
-      const terms = String(query || '').trim();
-      if (!terms) return null;
-
-      try {
-        return await retryWithBackoff(async () => {
-          const url = `https://news.google.com/rss/search?q=${encodeURIComponent(terms)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`;
-          const res = await window.fetchWithTimeout(url, { cache: 'no-store' }, 8000);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-          const xml = await res.text();
-          const doc = new DOMParser().parseFromString(xml, 'text/xml');
-          const items = [...doc.querySelectorAll('item')].slice(0, 6);
-
-          console.debug(`Google News: found ${items.length} articles`);
-
-          if (!items.length) return null;
-
-          const entries = items.map((item, index) => {
-            const title = normalizeSearchSnippet(item.querySelector('title')?.textContent || 'Untitled');
-            const link = normalizeSearchSnippet(item.querySelector('link')?.textContent || '');
-            const pubDate = normalizeSearchSnippet(item.querySelector('pubDate')?.textContent || '');
-            const source = normalizeSearchSnippet(item.querySelector('source')?.textContent || 'Google News');
-
-            const snippet = pubDate ? `Published: ${pubDate}` : 'Published date unavailable';
-            return formatSearchEntry(index + 1, title, snippet, link, source);
-          });
-
-          return formatToolResult('Google News RSS', entries.join('\n\n'));
-        }, 2, 150);
-      } catch (error) {
-        console.debug('Google News search failed:', error.message);
-        return null;
-      }
-    }
-
     async function searchReadableWebFallback(query) {
       const terms = String(query || '').trim();
       if (!terms) return null;
@@ -660,14 +624,12 @@
       const searchQuery = originalQuery;
       const isCodingQuery = detectCodingIntent(searchQuery);
       const isBioFactQuery = detectBiographicalFactIntent(searchQuery);
-      const isRecentQuery = detectRecencyIntent(searchQuery);
       const hasFxIntent = !!detectFxPair(searchQuery);
       const hasWeatherIntent = detectWeatherIntent(searchQuery);
 
       const runners = [
         { name: 'weather_current', enabled: () => hasWeatherIntent, run: () => getCurrentWeather({}) },
         { name: 'fx_rate', enabled: () => hasFxIntent, run: () => searchFxRate(searchQuery) },
-        { name: 'google_news', enabled: () => (isRecentQuery || isBioFactQuery), run: () => searchGoogleNewsRss(searchQuery) },
         { name: 'wikipedia', enabled: () => true, run: () => searchWikipedia(searchQuery) },
         { name: 'wikidata', enabled: () => true, run: () => searchWikidata(searchQuery) },
         { name: 'duckduckgo', enabled: () => true, run: () => searchDuckDuckGo(searchQuery) },
@@ -722,9 +684,7 @@
 
             let result = null;
 
-            if (runner.name === 'google_news') {
-              result = await searchGoogleNewsRss(originalQuery);
-            } else if (runner.name === 'github_repositories' && isCodingQuery) {
+            if (runner.name === 'github_repositories' && isCodingQuery) {
               result = await searchGithubRepositories(originalQuery);
             } else if (runner.name === 'readable_web_fallback') {
               result = await searchReadableWebFallback(originalQuery);
@@ -917,7 +877,8 @@
     }
 
     async function fetchReadablePage(url) {
-      const normalizedUrl = String(url || '').trim();
+      // Strip common markdown delimiters that can bleed into extracted URLs (e.g. trailing backtick)
+      const normalizedUrl = String(url || '').trim().replace(/[`'"]+$/, '');
       if (!/^https?:\/\//i.test(normalizedUrl)) {
         throw new Error('Invalid URL. Use a full http:// or https:// address.');
       }
@@ -939,6 +900,11 @@
         }
       } catch (error) {
         console.debug(`Direct fetch failed: ${error.message}`);
+      }
+
+      // Never proxy localhost or private-network addresses through an external reader service.
+      if (/^https?:\/\/(localhost|127\.|0\.0\.0\.0|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|\[?::1)/i.test(normalizedUrl)) {
+        throw new Error(`Cannot reach private URL via external reader proxy: ${normalizedUrl}`);
       }
 
       const bareUrl = normalizedUrl.replace(/^https?:\/\//i, '');
@@ -1129,7 +1095,6 @@
     return {
       runSearchSkills,
       searchFxRate,
-      searchGoogleNewsRss,
       fetchReadablePage,
       fetchHttpResource,
       extractLinks,

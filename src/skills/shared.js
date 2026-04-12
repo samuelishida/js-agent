@@ -23,8 +23,8 @@
   const TODOS_STORAGE_KEY = 'agent_todos_v1';
   const WORKER_RUNS_STORAGE_KEY = 'agent_worker_runs_v1';
   const WORKER_RUNS_LIMIT = 40;
-  const CLAWD_MEMORY_GLOBAL_KEY = 'clawd_memory_global_v1';
-  const CLAWD_MEMORY_PROJECT_PREFIX = 'clawd_memory_project_v1';
+  const RUNTIME_MEMORY_GLOBAL_KEY = 'runtime_memory_global_v1';
+  const RUNTIME_MEMORY_PROJECT_PREFIX = 'runtime_memory_project_v1';
   let broadcastChannel = null;
   const broadcastListeners = new Map();
 
@@ -183,9 +183,9 @@
             },
             { role: 'user', content: prompt }
           ],
-          { maxTokens: 220, temperature: 0.1, timeoutMs: 2200, retries: 0 }
+          { maxTokens: 220, temperature: 0.1, timeoutMs: 9000, retries: 0 }
         ),
-        2600
+        9600
       );
 
       const parsed = parseJsonObjectFromText(raw);
@@ -417,13 +417,6 @@
       });
     }
 
-    if (detectRecencyIntent(userMessage) && preflight?.recommendedTools?.includes('web_search')) {
-      tasks.push(async () => {
-        const quick = await withTimeout(searchGoogleNewsRss(userMessage), 900);
-        if (quick) blocks.push(quick);
-      });
-    }
-
     const pending = tasks.map(task => (async () => {
       try {
         await withTimeout(task(), 1200);
@@ -504,7 +497,6 @@
 
   const runSearchSkills = webRuntime.runSearchSkills || missingWebRuntime('runSearchSkills');
   const searchFxRate = webRuntime.searchFxRate || missingWebRuntime('searchFxRate');
-  const searchGoogleNewsRss = webRuntime.searchGoogleNewsRss || missingWebRuntime('searchGoogleNewsRss');
   const fetchReadablePage = webRuntime.fetchReadablePage || missingWebRuntime('fetchReadablePage');
   const fetchHttpResource = webRuntime.fetchHttpResource || missingWebRuntime('fetchHttpResource');
   const extractLinks = webRuntime.extractLinks || missingWebRuntime('extractLinks');
@@ -522,6 +514,38 @@
       .trim();
   }
 
+  function extractQueryPlanFromMessageContent(text) {
+    const raw = String(text || '');
+    if (!raw) return '';
+
+    const queryPlanBlocks = [...raw.matchAll(/<tool_result\s+tool="query_plan">\s*([\s\S]*?)\s*<\/tool_result>/gi)];
+    for (let i = queryPlanBlocks.length - 1; i >= 0; i -= 1) {
+      const block = String(queryPlanBlocks[i]?.[1] || '');
+      const match = block.match(/(?:^|\n)query=([^\n]+)/i);
+      if (match?.[1]) {
+        const query = String(match[1]).trim();
+        if (query) return query;
+      }
+    }
+
+    const plannerMatch = raw.match(/Planner optimized query:\s*"([^"]+)"/i);
+    return String(plannerMatch?.[1] || '').trim();
+  }
+
+  function isRuntimeControlPrompt(text) {
+    const value = String(text || '').trim();
+    if (!value) return false;
+
+    return [
+      /^No valid tool call or final answer was returned\./i,
+      /^Your previous reply described a next action but did not execute it\./i,
+      /^Your previous reply claimed a tool call already ran, but no valid <tool_call> block was present\./i,
+      /^Previous reply exceeded output token limits\./i,
+      /^Previous attempt timed out\./i,
+      /^All proposed tool calls were blocked or invalid\b/i
+    ].some(pattern => pattern.test(value));
+  }
+
   function deriveWebSearchQuery(query, context = {}) {
     const direct = String(query || '').trim();
     if (direct) return direct;
@@ -530,7 +554,11 @@
     for (let i = history.length - 1; i >= 0; i -= 1) {
       const message = history[i];
       if (message?.role !== 'user') continue;
+      const plannedQuery = extractQueryPlanFromMessageContent(message.content);
+      if (plannedQuery) return plannedQuery.slice(0, 240);
+
       const candidate = stripAgentTags(message.content);
+      if (isRuntimeControlPrompt(candidate)) continue;
       if (candidate) return candidate.slice(0, 240);
     }
 
@@ -1052,7 +1080,7 @@
 
   async function buildInitialContext(userMessage, context = {}) {
     const blocks = [];
-    const compatContext = buildClawdCompatContextBlock();
+    const compatContext = buildRuntimeContextBlock();
     if (compatContext) {
       blocks.push(compatContext);
     }
@@ -1128,14 +1156,14 @@
   const searchCode = fsRuntime.searchCode || missingFsRuntime('searchCode');
   const multiEditFiles = fsRuntime.multiEditFiles || missingFsRuntime('multiEditFiles');
 
-  function getClawdProjectMemoryKey() {
+  function getRuntimeProjectMemoryKey() {
     const rootId = String(state.defaultRootId || 'default').trim().toLowerCase();
-    return `${CLAWD_MEMORY_PROJECT_PREFIX}:${rootId || 'default'}`;
+    return `${RUNTIME_MEMORY_PROJECT_PREFIX}:${rootId || 'default'}`;
   }
 
-  function readClawdScopedMemory(scope = 'all') {
-    const globalMemory = String(localStorage.getItem(CLAWD_MEMORY_GLOBAL_KEY) || '').trim();
-    const projectMemory = String(localStorage.getItem(getClawdProjectMemoryKey()) || '').trim();
+  function readRuntimeScopedMemory(scope = 'all') {
+    const globalMemory = String(localStorage.getItem(RUNTIME_MEMORY_GLOBAL_KEY) || '').trim();
+    const projectMemory = String(localStorage.getItem(getRuntimeProjectMemoryKey()) || '').trim();
 
     if (scope === 'global') return globalMemory;
     if (scope === 'project') return projectMemory;
@@ -1146,11 +1174,11 @@
     ].filter(Boolean).join('\n\n');
   }
 
-  function writeClawdScopedMemory({ topic = '', content = '', scope = 'global', replace = false } = {}) {
-    const targetKey = scope === 'project' ? getClawdProjectMemoryKey() : CLAWD_MEMORY_GLOBAL_KEY;
+  function writeRuntimeScopedMemory({ topic = '', content = '', scope = 'global', replace = false } = {}) {
+    const targetKey = scope === 'project' ? getRuntimeProjectMemoryKey() : RUNTIME_MEMORY_GLOBAL_KEY;
     const trimmedContent = String(content || '').trim();
     if (!trimmedContent) {
-      throw new Error('clawd_memoryWrite requires content.');
+      throw new Error('memory_write requires content.');
     }
 
     const heading = String(topic || 'memory').trim();
@@ -1190,7 +1218,7 @@
       return hay.includes(terms);
     });
 
-    const snapshotApi = window.AgentClawdSnapshot;
+    const snapshotApi = window.AgentSnapshot;
     const snapshotMatches = snapshotApi?.searchBundledSkills?.({
       query: terms,
       limit: max
@@ -1216,10 +1244,10 @@
   }
 
   async function snapshotSkillCatalog({ query = '', limit = 30 } = {}) {
-    const snapshotApi = window.AgentClawdSnapshot;
+    const snapshotApi = window.AgentSnapshot;
     const formatted = snapshotApi?.formatSkillCatalogForTool?.({ query, limit });
     if (!formatted) {
-      throw new Error('Snapshot skill catalog is unavailable. Run npm run build:clawd-snapshot first.');
+      throw new Error('Snapshot skill catalog is unavailable. Run npm run build:snapshot first.');
     }
     return formatToolResult('snapshot_skill_catalog', formatted);
   }
@@ -1252,18 +1280,18 @@
     return formatToolResult('memory_list', window.AgentMemory?.formatList?.(entries) || '(no memories)');
   }
 
-  async function clawdReadFile(args = {}, context = {}) {
-    return readLocalFile(deriveFilesystemPathArg(args, context, 'clawd_readFile'));
+  async function runtimeReadFile(args = {}, context = {}) {
+    return readLocalFile(deriveFilesystemPathArg(args, context, 'read_file'));
   }
 
-  async function clawdWriteFile(args = {}) {
+  async function runtimeWriteFile(args = {}) {
     return writeTextFile({
       path: args.path,
       content: args.content
     });
   }
 
-  async function clawdEditFile(args = {}) {
+  async function runtimeEditFile(args = {}) {
     return editLocalFile({
       path: args.path,
       oldText: args.oldString ?? args.oldText,
@@ -1272,17 +1300,17 @@
     });
   }
 
-  async function clawdMultiEdit(args = {}) {
+  async function runtimeMultiEdit(args = {}) {
     return multiEditFiles({
       edits: Array.isArray(args.edits) ? args.edits : []
     });
   }
 
-  async function clawdListDir(args = {}, context = {}) {
-    return listDirectory(deriveFilesystemPathArg(args, context, 'clawd_listDir'));
+  async function runtimeListDir(args = {}, context = {}) {
+    return listDirectory(deriveFilesystemPathArg(args, context, 'list_dir'));
   }
 
-  async function clawdGlob(args = {}) {
+  async function runtimeGlob(args = {}) {
     return globPaths({
       path: args.path,
       pattern: args.pattern,
@@ -1291,8 +1319,8 @@
     });
   }
 
-  async function clawdSearchCode(args = {}, context = {}) {
-    const resolved = deriveFilesystemPathArg(args, context, 'clawd_searchCode');
+  async function runtimeSearchCode(args = {}, context = {}) {
+    const resolved = deriveFilesystemPathArg(args, context, 'search_code');
     return searchCode({
       path: resolved.path,
       query: resolved.query,
@@ -1304,35 +1332,35 @@
     });
   }
 
-  async function clawdRunTerminal({ command = '', cwd = '' } = {}) {
+  async function runtimeRunTerminal({ command = '', cwd = '' } = {}) {
     const payload = await callLocalCompatApi('/api/terminal', {
       command: String(command || ''),
       cwd: String(cwd || '')
     });
-    return formatToolResult('clawd_runTerminal', String(payload?.result || payload?.output || ''));
+    return formatToolResult('run_terminal', String(payload?.result || payload?.output || ''));
   }
 
-  async function clawdWebFetch({ url } = {}) {
+  async function runtimeWebFetch({ url } = {}) {
     const text = await fetchReadablePage(String(url || '').trim());
-    return formatToolResult('clawd_webFetch', text);
+    return formatToolResult('web_fetch', text);
   }
 
-  async function clawdGetDiagnostics({ path = '', severity = 'all' } = {}) {
+  async function runtimeGetDiagnostics({ path = '', severity = 'all' } = {}) {
     try {
       const payload = await callLocalCompatApi('/api/diagnostics', {
         path: String(path || ''),
         severity: String(severity || 'all')
       });
-      return formatToolResult('clawd_getDiagnostics', String(payload?.result || '(no diagnostics)'));
+      return formatToolResult('get_diagnostics', String(payload?.result || '(no diagnostics)'));
     } catch (error) {
       return formatToolResult(
-        'clawd_getDiagnostics',
+        'get_diagnostics',
         `Diagnostics endpoint unavailable in this browser runtime. ${String(error?.message || error)}`
       );
     }
   }
 
-  async function clawdTodoWrite(args = {}) {
+  async function runtimeTodoWrite(args = {}) {
     return todoWrite({
       todos: args.todos,
       items: args.items,
@@ -1340,17 +1368,17 @@
     });
   }
 
-  async function clawdMemoryRead({ scope = 'all' } = {}) {
+  async function runtimeMemoryRead({ scope = 'all' } = {}) {
     const normalizedScope = ['all', 'global', 'project'].includes(String(scope || '').trim())
       ? String(scope || 'all').trim()
       : 'all';
-    const text = readClawdScopedMemory(normalizedScope);
-    return formatToolResult('clawd_memoryRead', text || '(no memory stored)');
+    const text = readRuntimeScopedMemory(normalizedScope);
+    return formatToolResult('memory_read', text || '(no memory stored)');
   }
 
-  async function clawdMemoryWrite({ topic = '', content = '', replace = false, scope = 'global' } = {}) {
+  async function runtimeMemoryWrite({ topic = '', content = '', replace = false, scope = 'global' } = {}) {
     const normalizedScope = String(scope || 'global').trim() === 'project' ? 'project' : 'global';
-    const stored = writeClawdScopedMemory({
+    const stored = writeRuntimeScopedMemory({
       topic,
       content,
       replace,
@@ -1361,7 +1389,7 @@
       try {
         window.AgentMemory?.write?.({
           text: `${topic ? `${topic}: ` : ''}${String(content || '').trim()}`,
-          tags: ['clawd_compat', normalizedScope],
+          tags: ['compat', normalizedScope],
           source: 'tool',
           importance: 0.7
         });
@@ -1369,26 +1397,26 @@
     }
 
     return formatToolResult(
-      'clawd_memoryWrite',
+      'memory_write',
       `Saved ${normalizedScope} memory.${stored ? `\n\n${stored.slice(0, 4000)}` : ''}`
     );
   }
 
-  async function clawdLsp(args = {}) {
+  async function runtimeLsp(args = {}) {
     return formatToolResult(
-      'clawd_lsp',
+      'lsp',
       [
         `Requested action: ${String(args.action || '').trim() || '(missing)'}`,
         'LSP semantic navigation is not available in the standalone browser runtime.',
-        'Use clawd_searchCode, clawd_glob, and clawd_readFile as fallbacks.'
+        'Use search_code, glob, and read_file as fallbacks.'
       ].join('\n')
     );
   }
 
-  async function clawdSpawnAgent(args = {}, context = {}) {
+  async function runtimeSpawnAgent(args = {}, context = {}) {
     const task = String(args.task || '').trim();
     if (!task) {
-      throw new Error('clawd_spawnAgent requires task.');
+      throw new Error('spawn_agent requires task.');
     }
 
     const output = await runWorkerTask({
@@ -1401,12 +1429,12 @@
       temperature: 0.2
     });
 
-    return formatToolResult('clawd_spawnAgent', `Task: ${task}\n\n${output}`);
+    return formatToolResult('runtime_spawnAgent', `Task: ${task}\n\n${output}`);
   }
 
-  function buildClawdCompatContextBlock() {
-    const globalMemory = readClawdScopedMemory('global');
-    const projectMemory = readClawdScopedMemory('project');
+  function buildRuntimeContextBlock() {
+    const globalMemory = readRuntimeScopedMemory('global');
+    const projectMemory = readRuntimeScopedMemory('project');
     const rootSummary = state.defaultRootId
       ? `Authorized workspace root: ${state.defaultRootId}`
       : 'No workspace root authorized yet.';
@@ -1417,7 +1445,7 @@
       projectMemory ? `## Project Memory\n${projectMemory}` : ''
     ].filter(Boolean);
 
-    return sections.length ? `<clawd_compat_context>\n${sections.join('\n\n')}\n</clawd_compat_context>` : '';
+    return sections.length ? `<runtime_context>\n${sections.join('\n\n')}\n</runtime_context>` : '';
   }
 
   const registryModuleFactory = window.AgentSkillModules?.createRegistryRuntime;
@@ -1509,14 +1537,14 @@
       run
     };
 
-    if (!skillGroups.clawd_compat) {
-      skillGroups.clawd_compat = {
-        label: 'Clawd Compat',
+    if (!skillGroups.runtime_compat) {
+      skillGroups.runtime_compat = {
+        label: 'Runtime Compat',
         tools: []
       };
     }
 
-    skillGroups.clawd_compat.tools.push({ name, signature });
+    skillGroups.runtime_compat.tools.push({ name, signature });
 
     if (typeof enabledTools === 'object' && enabledTools && !Object.prototype.hasOwnProperty.call(enabledTools, name)) {
       enabledTools[name] = true;
@@ -1525,99 +1553,99 @@
 
   [
     {
-      name: 'clawd_readFile',
-      signature: 'clawd_readFile(path, startLine?, endLine?)',
+      name: 'runtime_readFile',
+      signature: 'runtime_readFile(path, startLine?, endLine?)',
       description: 'Reads a file with optional 1-based line range.',
-      run: clawdReadFile
+      run: runtimeReadFile
     },
     {
-      name: 'clawd_writeFile',
-      signature: 'clawd_writeFile(path, content)',
+      name: 'runtime_writeFile',
+      signature: 'runtime_writeFile(path, content)',
       description: 'Creates or overwrites a file with complete content.',
-      run: clawdWriteFile
+      run: runtimeWriteFile
     },
     {
-      name: 'clawd_editFile',
-      signature: 'clawd_editFile(path, oldString, newString, replaceAll?)',
+      name: 'runtime_editFile',
+      signature: 'runtime_editFile(path, oldString, newString, replaceAll?)',
       description: 'Performs a surgical string replacement in a file.',
-      run: clawdEditFile
+      run: runtimeEditFile
     },
     {
-      name: 'clawd_multiEdit',
-      signature: 'clawd_multiEdit(edits[])',
+      name: 'runtime_multiEdit',
+      signature: 'runtime_multiEdit(edits[])',
       description: 'Applies multiple validated file edits atomically.',
-      run: clawdMultiEdit
+      run: runtimeMultiEdit
     },
     {
-      name: 'clawd_listDir',
-      signature: 'clawd_listDir(path)',
+      name: 'runtime_listDir',
+      signature: 'runtime_listDir(path)',
       description: 'Lists files and directories.',
-      run: clawdListDir
+      run: runtimeListDir
     },
     {
-      name: 'clawd_glob',
-      signature: 'clawd_glob(pattern, exclude?)',
+      name: 'runtime_glob',
+      signature: 'runtime_glob(pattern, exclude?)',
       description: 'Finds files matching a glob pattern.',
-      run: clawdGlob
+      run: runtimeGlob
     },
     {
-      name: 'clawd_searchCode',
-      signature: 'clawd_searchCode(query, glob?, isRegex?, caseSensitive?, contextLines?, maxResults?)',
+      name: 'runtime_searchCode',
+      signature: 'runtime_searchCode(query, glob?, isRegex?, caseSensitive?, contextLines?, maxResults?)',
       description: 'Searches code/text files with optional glob and context.',
-      run: clawdSearchCode
+      run: runtimeSearchCode
     },
     {
-      name: 'clawd_runTerminal',
-      signature: 'clawd_runTerminal(command, cwd?)',
+      name: 'runtime_runTerminal',
+      signature: 'runtime_runTerminal(command, cwd?)',
       description: 'Runs a terminal command through the local dev server bridge.',
-      run: clawdRunTerminal
+      run: runtimeRunTerminal
     },
     {
-      name: 'clawd_webFetch',
-      signature: 'clawd_webFetch(url)',
+      name: 'runtime_webFetch',
+      signature: 'runtime_webFetch(url)',
       description: 'Fetches a URL and returns readable text.',
-      run: clawdWebFetch
+      run: runtimeWebFetch
     },
     {
-      name: 'clawd_getDiagnostics',
-      signature: 'clawd_getDiagnostics(path?, severity?)',
+      name: 'runtime_getDiagnostics',
+      signature: 'runtime_getDiagnostics(path?, severity?)',
       description: 'Gets diagnostics from the local dev server bridge when available.',
-      run: clawdGetDiagnostics
+      run: runtimeGetDiagnostics
     },
     {
-      name: 'clawd_todoWrite',
-      signature: 'clawd_todoWrite(todos)',
+      name: 'runtime_todoWrite',
+      signature: 'runtime_todoWrite(todos)',
       description: 'Persists a structured todo list.',
-      run: clawdTodoWrite
+      run: runtimeTodoWrite
     },
     {
-      name: 'clawd_memoryRead',
-      signature: 'clawd_memoryRead(scope?)',
+      name: 'runtime_memoryRead',
+      signature: 'runtime_memoryRead(scope?)',
       description: 'Reads compatibility memory with global/project scopes.',
-      run: clawdMemoryRead
+      run: runtimeMemoryRead
     },
     {
-      name: 'clawd_memoryWrite',
-      signature: 'clawd_memoryWrite(topic?, content, replace?, scope?)',
+      name: 'runtime_memoryWrite',
+      signature: 'runtime_memoryWrite(topic?, content, replace?, scope?)',
       description: 'Writes compatibility memory with global/project scopes.',
-      run: clawdMemoryWrite
+      run: runtimeMemoryWrite
     },
     {
-      name: 'clawd_lsp',
-      signature: 'clawd_lsp(action, path?, line?, col?, query?)',
+      name: 'runtime_lsp',
+      signature: 'runtime_lsp(action, path?, line?, col?, query?)',
       description: 'LSP compatibility placeholder for the browser runtime.',
-      run: clawdLsp
+      run: runtimeLsp
     },
     {
-      name: 'clawd_spawnAgent',
-      signature: 'clawd_spawnAgent(task, tools?, maxIterations?)',
+      name: 'runtime_spawnAgent',
+      signature: 'runtime_spawnAgent(task, tools?, maxIterations?)',
       description: 'Runs a focused sub-agent task using the worker runtime.',
-      run: clawdSpawnAgent
+      run: runtimeSpawnAgent
     }
   ].forEach(registerCompatTool);
 
   function registerSnapshotTools() {
-    const snapshotApi = window.AgentClawdSnapshot;
+    const snapshotApi = window.AgentSnapshot;
     const importedSkills = snapshotApi?.getBundledSkills?.() || [];
     if (!importedSkills.length) return;
 

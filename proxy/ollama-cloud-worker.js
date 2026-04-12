@@ -1,8 +1,19 @@
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const origin = request.headers.get('Origin') || '*';
-    const allowOrigin = env.CORS_ORIGIN || origin;
+    const origin = request.headers.get('Origin');
+
+    // Fail closed: if CORS_ORIGIN is not configured and a cross-origin request
+    // arrives, block it. Without this guard any website can proxy requests through
+    // this worker and consume the operator's OLLAMA_API_KEY.
+    // To allow all origins explicitly, set CORS_ORIGIN='*' in the Worker env.
+    const allowOrigin = env.CORS_ORIGIN || (origin ? null : '*');
+    if (!allowOrigin) {
+      return new Response(
+        JSON.stringify({ error: 'Proxy requires CORS_ORIGIN to be set in the Worker environment.' }),
+        { status: 403, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
+      );
+    }
 
     if (request.method === 'OPTIONS') {
       return new Response(null, {

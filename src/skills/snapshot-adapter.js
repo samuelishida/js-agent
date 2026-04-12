@@ -17,7 +17,7 @@
   };
 
   function getManifest() {
-    const payload = window.AgentClawdSnapshotData;
+    const payload = window.AgentSnapshotData;
     if (!payload || typeof payload !== 'object') return emptyManifest;
     return payload;
   }
@@ -53,16 +53,16 @@
 
     return String(text)
       .replace(wordPattern(VENDOR.name), '')
-      .replace(wordPattern(brandCode), 'Clawd Code')
-      .replace(hostPattern, 'clawdusercontent.local')
-      .replace(/\bclau\.de\b/gi, 'clawd.local')
-      .replace(new RegExp(`${escapeRegex(VENDOR.brandUpper)}_CODE`, 'g'), 'CLAWD_CODE')
-      .replace(new RegExp(`${escapeRegex(VENDOR.brandUpper)}_`, 'g'), 'CLAWD_')
-      .replace(upperBrandPattern, 'CLAWD')
+      .replace(wordPattern(brandCode), 'Claude Code')
+      .replace(hostPattern, 'claudeusercontent.local')
+      .replace(/\bclaude\.de\b/gi, 'claude.local')
+      .replace(new RegExp(`${escapeRegex(VENDOR.brandUpper)}_CODE`, 'g'), 'CLAUDE_CODE')
+      .replace(new RegExp(`${escapeRegex(VENDOR.brandUpper)}_`, 'g'), 'CLAUDE_')
+      .replace(upperBrandPattern, 'CLAUDE')
       .replace(/\bANT\b/g, 'VENDOR')
-      .replace(mixedCaseBrandPattern, 'Clawd')
-      .replace(lowerBrandPattern, 'clawd')
-      .replace(new RegExp(`${VENDOR.brand.toLowerCase()}(?=[A-Z])`, 'g'), 'clawd')
+      .replace(mixedCaseBrandPattern, 'Claude')
+      .replace(lowerBrandPattern, 'claude')
+      .replace(new RegExp(`${VENDOR.brand.toLowerCase()}(?=[A-Z])`, 'g'), 'claude')
       .replace(/\s{2,}/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
@@ -138,7 +138,7 @@
 
     const sections = [
       '# Imported Snapshot Skills',
-      'The runtime loaded a sanitized skill catalog extracted from clawd-code-main.',
+      'The runtime loaded a sanitized skill catalog extracted from the snapshot bundle.',
       'Use these entries as additional planning patterns for tool orchestration.',
       '',
       ...skillLines
@@ -189,5 +189,5 @@
     formatSkillCatalogForTool
   };
 
-  window.AgentClawdSnapshot = snapshotApi;
+  window.AgentSnapshot = snapshotApi;
 })();

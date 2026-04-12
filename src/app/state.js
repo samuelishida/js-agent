@@ -1,5 +1,10 @@
 // -- STATE ---------------------------------------------------------------------
-let apiKey = localStorage.getItem('cloud_api_key') || localStorage.getItem('gemini_api_key') || '';
+// Safe localStorage read: returns fallback on SecurityError (private browsing).
+function safeGet(key, fallback = '') {
+  try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+}
+
+let apiKey = safeGet('cloud_api_key') || safeGet('gemini_api_key') || '';
 let messages = [];   // agentic loop history [{role, content}]
 let sessionStats = { rounds: 0, tools: 0, resets: 0, msgs: 0 };
 let isBusy = false;
@@ -9,9 +14,7 @@ const TOOL_CACHE_KEY = 'agent_tool_cache_v1';
 const TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
 const CACHE_SCHEMA_VERSION = 2;
 const SESSION_SCHEMA_VERSION = 2;
-const DEFAULT_TOOL_CACHE_TTL_MS = TOOL_CACHE_TTL_MS;
 const SIDEBAR_COLLAPSED_KEY = 'agent_sidebar_collapsed_v1';
-const SIDEBAR_PANELS_KEY = 'agent_sidebar_panels_v1';
 const SIDEBAR_AUTO_COLLAPSE_WIDTH = 1180;
 const CACHE_SYNC_CHANNEL = 'loopagent-cache-v1';
 const BUSY_CHANNEL = 'loopagent-busy-v1';
@@ -31,6 +34,13 @@ const NON_CACHEABLE_TOOLS = new Set([
   'memory_write',
   'memory_search',
   'memory_list',
+  // file write / edit tools must never be served from cache — skip the actual write
+  'file_write',
+  'write_file',
+  'file_edit',
+  'edit_file',
+  'file_append',
+  'write_file_content',
   'clawd_writeFile',
   'clawd_editFile',
   'clawd_multiEdit',
@@ -141,17 +151,17 @@ let enabledTools = {
   snapshot_skill_catalog: true
 };
 let localBackend = {
-  enabled: localStorage.getItem('agent_prefer_local_backend') !== 'false',
-  url: localStorage.getItem('agent_local_backend_url') || '',
-  model: localStorage.getItem('agent_local_backend_model') || '',
-  chatPath: localStorage.getItem('agent_local_backend_chat_path') || '',
-  name: localStorage.getItem('agent_local_backend_name') || '',
+  enabled: safeGet('agent_prefer_local_backend') === 'true',
+  url: safeGet('agent_local_backend_url') || '',
+  model: safeGet('agent_local_backend_model') || '',
+  chatPath: safeGet('agent_local_backend_chat_path') || '',
+  name: safeGet('agent_local_backend_name') || '',
   detected: false,
   corsBlocked: false
 };
 console.debug(`[State Init] localBackend: enabled=${localBackend.enabled}, url='${localBackend.url}', model='${localBackend.model}'`);
 let chatSessions = [];
-let activeSessionId = localStorage.getItem(ACTIVE_SESSION_KEY) || null;
+let activeSessionId = safeGet(ACTIVE_SESSION_KEY) || null;
 
 function getRuntimeModules() {
   return {
@@ -174,19 +184,19 @@ function assertRuntimeReady() {
 }
 
 // -- CONSTRAINTS ---------------------------------------------------------------
-function getMaxRounds() { 
+function getMaxRounds() {
   const el = document.getElementById('sl-rounds');
-  return el ? parseInt(el.value) : 10;
+  return el ? parseInt(el.value, 10) : 50;
 }
 
 function getCtxLimit() {
   const el = document.getElementById('sl-ctx');
-  return el ? parseInt(el.value) * 1000 : 32000;
+  return el ? parseInt(el.value, 10) * 1000 : 32000;
 }
 
 function getDelay() {
   const el = document.getElementById('sl-delay');
-  return el ? parseInt(el.value) : 500;
+  return el ? parseInt(el.value, 10) : 500;
 }
 
 function updateBadge() {
@@ -200,14 +210,6 @@ function updateBadge() {
   const slCtx = document.getElementById('sl-ctx');
   if (badgeCtx && slCtx) {
     badgeCtx.textContent = `context ${slCtx.value}k`;
-  }
-}
-
-function loadSidebarPanels() {
-  try {
-    return JSON.parse(localStorage.getItem(SIDEBAR_PANELS_KEY) || '{}');
-  } catch {
-    return {};
   }
 }
 
@@ -242,26 +244,7 @@ function applySidebarState() {
   const collapsed = stored == null ? shouldAutoCollapseSidebar() : stored === 'true';
   document.body.classList.toggle('sidebar-collapsed', collapsed);
   syncSidebarToggleButtons();
-
-  const panels = loadSidebarPanels();
-  document.querySelectorAll('.sidebar-panel[data-panel]').forEach(panel => {
-    const key = panel.dataset.panel;
-    if (Object.prototype.hasOwnProperty.call(panels, key)) {
-      panel.open = !!panels[key];
-    }
-  });
 }
-
-function bindSidebarPanels() {
-  document.querySelectorAll('.sidebar-panel[data-panel]').forEach(panel => {
-    panel.addEventListener('toggle', () => {
-      const panels = loadSidebarPanels();
-      panels[panel.dataset.panel] = panel.open;
-      localStorage.setItem(SIDEBAR_PANELS_KEY, JSON.stringify(panels));
-    });
-  });
-}
-
 function toggleSidebar() {
   const next = !document.body.classList.contains('sidebar-collapsed');
   document.body.classList.toggle('sidebar-collapsed', next);
@@ -447,7 +430,12 @@ function loadToolCache() {
 }
 
 function saveToolCache(cacheStore) {
-  localStorage.setItem(TOOL_CACHE_KEY, JSON.stringify(cacheStore));
+  try {
+    localStorage.setItem(TOOL_CACHE_KEY, JSON.stringify(cacheStore));
+  } catch {
+    // Quota exceeded or storage blocked — cached results are optional, swallow.
+    console.warn('[ToolCache] Could not persist tool cache (storage quota exceeded or blocked).');
+  }
 }
 
 function getCacheBucket(cacheStore, scope = 'tool') {
@@ -473,7 +461,7 @@ function pruneCacheBucket(cacheStore, scope = 'tool') {
       continue;
     }
 
-    const ttlMs = Number(entry.ttlMs || DEFAULT_TOOL_CACHE_TTL_MS);
+    const ttlMs = Number(entry.ttlMs || TOOL_CACHE_TTL_MS);
     const timestamp = Number(entry.timestamp || 0);
     if (!timestamp || (now - timestamp) > ttlMs) {
       delete bucket[key];
@@ -516,7 +504,8 @@ function clearToolCache(predicate = () => true) {
 function getCachedToolResult(call) {
   if (!isCacheableTool(call)) return null;
   const cacheStore = loadToolCache();
-  pruneCacheBucket(cacheStore, 'tool');
+  const pruned = pruneCacheBucket(cacheStore, 'tool');
+  if (pruned) saveToolCache(cacheStore);
   const cache = getCacheBucket(cacheStore, 'tool');
   const key = getToolCacheKey(call);
   const entry = cache[key];
@@ -538,7 +527,7 @@ function setCachedToolResult(call, result) {
   const entry = {
     payload: result,
     timestamp: Date.now(),
-    ttlMs: DEFAULT_TOOL_CACHE_TTL_MS
+    ttlMs: TOOL_CACHE_TTL_MS
   };
   cache[key] = entry;
   saveToolCache(cacheStore);
@@ -642,10 +631,21 @@ function loadSessions() {
 }
 
 function saveSessions() {
-  localStorage.setItem(CHAT_SESSIONS_KEY, JSON.stringify({
-    version: SESSION_SCHEMA_VERSION,
-    sessions: chatSessions
-  }));
+  const payload = JSON.stringify({ version: SESSION_SCHEMA_VERSION, sessions: chatSessions });
+  try {
+    localStorage.setItem(CHAT_SESSIONS_KEY, payload);
+  } catch {
+    // Quota exceeded — try again with message content stripped to bare metadata.
+    try {
+      const slim = chatSessions.map(s => ({
+        ...s,
+        messages: s.messages.slice(-5).map(m => ({ role: m.role, content: String(m.content||'').slice(0, 200) }))
+      }));
+      localStorage.setItem(CHAT_SESSIONS_KEY, JSON.stringify({ version: SESSION_SCHEMA_VERSION, sessions: slim }));
+    } catch {
+      console.warn('[Sessions] Could not persist sessions (storage quota exceeded or blocked).');
+    }
+  }
 }
 
 function makeSessionTitle(sourceText = 'New session') {
@@ -685,6 +685,28 @@ function getActiveSession() {
   return chatSessions.find(session => session.id === activeSessionId) || null;
 }
 
+let _saveSessionsTimer = null;
+
+// Debounced save used during the agentic loop to avoid serializing MBs of
+// conversation history on every round. Immediate saves are still used for
+// session create/delete/switch where fast persistence matters.
+function scheduleSaveSessions() {
+  if (_saveSessionsTimer) clearTimeout(_saveSessionsTimer);
+  _saveSessionsTimer = setTimeout(() => {
+    _saveSessionsTimer = null;
+    saveSessions();
+  }, 2000);
+}
+
+// Flush any pending scheduled save (called on page unload).
+function flushSaveSessions() {
+  if (_saveSessionsTimer) {
+    clearTimeout(_saveSessionsTimer);
+    _saveSessionsTimer = null;
+    saveSessions();
+  }
+}
+
 function syncSessionState() {
   let session = getActiveSession();
   if (!session) session = createSession();
@@ -692,7 +714,7 @@ function syncSessionState() {
   session.updatedAt = new Date().toISOString();
   session.messages = messages;
   session.stats = sessionStats;
-  saveSessions();
+  scheduleSaveSessions();
   renderSessionList();
 }
 

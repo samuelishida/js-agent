@@ -29,11 +29,3 @@ document.addEventListener('keydown', (e) => {
     }
   }
 });
-
-// Close modal on overlay click
-document.addEventListener('click', (e) => {
-  const modal = document.getElementById('settings-modal');
-  if (modal && e.target === modal.querySelector('.modal-overlay')) {
-    closeSettings();
-  }
-});

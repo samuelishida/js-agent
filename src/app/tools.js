@@ -19,6 +19,22 @@
 function toggleTool(name) {
   enabledTools[name] = !enabledTools[name];
   document.getElementById(`tool-${name}`)?.classList.toggle('active', enabledTools[name]);
+  try {
+    localStorage.setItem('agent_enabled_tools', JSON.stringify(enabledTools));
+  } catch { /* quota / private browsing — ignore */ }
+}
+
+function loadPersistedEnabledTools() {
+  try {
+    const stored = JSON.parse(localStorage.getItem('agent_enabled_tools') || 'null');
+    if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+      for (const key of Object.keys(enabledTools)) {
+        if (Object.prototype.hasOwnProperty.call(stored, key)) {
+          enabledTools[key] = !!stored[key];
+        }
+      }
+    }
+  } catch { /* private browsing / quota — ignore */ }
 }
 
 function isLocalModeActive() {
@@ -77,10 +93,6 @@ function canUseCloud() {
   return getCloudReadiness().ready;
 }
 
-function canUseGemini() {
-  return canUseCloud();
-}
-
 // -- SYSTEM PROMPT -------------------------------------------------------------
 async function buildSystemPrompt(userMessage = '') {
   assertRuntimeReady();
@@ -97,10 +109,13 @@ async function buildSystemPrompt(userMessage = '') {
   });
 }
 
-async function buildDirectAnswerRepairPrompt(userMessage) {
+async function buildDirectAnswerRepairPrompt(userMessageOrOptions, extraOptions = {}) {
   assertRuntimeReady();
   const { orchestrator } = getRuntimeModules();
-  return orchestrator.buildRepairPrompt(userMessage);
+  const options = (typeof userMessageOrOptions === 'object' && userMessageOrOptions !== null)
+    ? userMessageOrOptions
+    : { userMessage: userMessageOrOptions, ...extraOptions };
+  return orchestrator.buildRepairPrompt(options);
 }
 
 // -- LLM ROUTER: Gemini or Local ----------------------------------------------

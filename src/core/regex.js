@@ -2,6 +2,17 @@
   const TOOL_BLOCK = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/i;
   const TOOL_BLOCK_GLOBAL = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
 
+  // Matches <|tool_call>call:name{...} or <|tool_call>name{...} used by some local models.
+  // The args block is shallow (no nested braces) so [^{}]* is sufficient.
+  const PIPE_TOOL_BLOCK = /<\|tool_call>(?:call:)?(\w+)\s*\{([^{}]*)\}/i;
+
+  // Normalize <|token|> quote delimiters (e.g. <|"|>) to standard double-quotes,
+  // then parse the result as a JSON object body (without outer braces).
+  function parsePipeArgs(raw) {
+    const normalized = String(raw || '').replace(/<\|[^|]*\|>/g, '"');
+    return parseJsonSafely(`{${normalized}}`) || {};
+  }
+
   function parseJsonSafely(raw) {
     try {
       return JSON.parse(raw);
@@ -179,6 +190,12 @@
   function extractToolCall(text) {
     const match = String(text || '').match(TOOL_BLOCK);
     if (!match) {
+      const pipeMatch = String(text || '').match(PIPE_TOOL_BLOCK);
+      if (pipeMatch) {
+        const tool = pipeMatch[1];
+        const args = parsePipeArgs(pipeMatch[2]);
+        if (tool) return { tool, args };
+      }
       return extractStandaloneToolCall(text);
     }
 
@@ -249,11 +266,21 @@
       if (parsed?.tool) calls.push(parsed);
     }
 
+    // Also extract <|tool_call> format used by some local models.
+    const pipePattern = /<\|tool_call>(?:call:)?(\w+)\s*\{([^{}]*)\}/gi;
+    let pm;
+    while ((pm = pipePattern.exec(String(text || ''))) !== null) {
+      const tool = pm[1];
+      const args = parsePipeArgs(pm[2]);
+      if (tool) calls.push({ tool, args });
+    }
+
     return calls;
   }
 
   function hasUnprocessedToolCall(text) {
-    return TOOL_BLOCK.test(String(text || ''));
+    const s = String(text || '');
+    return TOOL_BLOCK.test(s) || PIPE_TOOL_BLOCK.test(s);
   }
 
   function isBareToolCallOutput(text) {

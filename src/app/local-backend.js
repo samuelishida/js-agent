@@ -1,6 +1,6 @@
 const LOCAL_CANDIDATES = [
-  { port: 1234,  paths: ['/v1/models'], name: 'LM Studio', chatPath: '/v1/chat/completions' },
   { port: 11434, paths: ['/api/tags'],  name: 'Ollama',    chatPath: '/api/chat' },
+  { port: 1234,  paths: ['/v1/models'], name: 'LM Studio', chatPath: '/v1/chat/completions' },
   { port: 8080,  paths: ['/v1/models'], name: 'llama.cpp', chatPath: '/v1/chat/completions' },
   { port: 5000,  paths: ['/v1/models'], name: 'generic',   chatPath: '/v1/chat/completions' },
 ];
@@ -10,14 +10,6 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
     fetch(url, options),
     new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs))
   ]);
-}
-
-function setLocalBadge(text, color = '', borderColor = '') {
-  const badge = document.getElementById('badge-local');
-  if (!badge) return;
-  badge.textContent = text;
-  if (color) badge.style.color = color;
-  if (borderColor) badge.style.borderColor = borderColor;
 }
 
 window.fetchWithTimeout = fetchWithTimeout;
@@ -117,7 +109,6 @@ async function probeLocal() {
 
   const manualUrl = document.getElementById('local-url').value.trim();
   setLocalStatus('busy', 'probing…');
-  setLocalBadge('local: probing…', '', '');
 
   // If user typed a custom URL, probe that first
   const targets = getProbeTargets(manualUrl);
@@ -178,7 +169,6 @@ async function probeLocal() {
 
       const label = `${target.name} @ ${baseUrl.replace('http://localhost:',':')}`;
       setLocalStatus('ok', label);
-      setLocalBadge(`local: ${target.name}`, 'var(--green)', 'var(--green2)');
       if (localStorage.getItem('agent_prefer_local_backend') !== 'false') {
         _activateLocal(true);
       }
@@ -213,7 +203,6 @@ async function probeLocal() {
         if (url) url.value = baseUrl;
 
         setLocalStatus('busy', `${target.name} reachable (CORS blocked)`);
-        setLocalBadge('local: CORS?', 'var(--amber)', 'var(--amber2)');
         return;
       }
     } catch {}
@@ -246,15 +235,13 @@ async function probeLocal() {
         if (url) url.value = baseUrl;
 
         setLocalStatus('ok', `${target.name} reachable`);
-        setLocalBadge(`local: ${target.name}`, 'var(--green)', 'var(--green2)');
         if (localStorage.getItem('agent_prefer_local_backend') !== 'false') {
           _activateLocal(true);
         }
         return;
-          
-          }
+      }
     } catch {}
-    }
+  }
 
   // Nothing found
   localBackend.url = '';
@@ -267,8 +254,7 @@ async function probeLocal() {
   localStorage.removeItem('agent_local_backend_model');
   localStorage.removeItem('agent_local_backend_chat_path');
   localStorage.removeItem('agent_local_backend_name');
-  setLocalStatus('error', 'nothing found on :1234 / :11434 / :8080');
-  setLocalBadge('local: offline', 'var(--red)', '#993C1D');
+  setLocalStatus('error', 'nothing found on :11434 / :1234 / :8080 / :5000');
 }
 
 function setLocalStatus(state, label) {
@@ -292,7 +278,6 @@ function toggleLocalBackend() {
         const message = String(error?.message || 'probe failed');
         console.warn('[Local Probe] failed:', message);
         setLocalStatus('error', 'probe failed');
-        setLocalBadge('local: error', 'var(--red)', '#993C1D');
         if (typeof addNotice === 'function') {
           addNotice(`Local backend probe failed: ${message}`);
         }
@@ -305,14 +290,6 @@ function toggleLocalBackend() {
 function _activateLocal(isSilent=false) {
   localBackend.enabled = true;
   localStorage.setItem('agent_prefer_local_backend', 'true');
-
-  const ctxSlider = document.getElementById('sl-ctx');
-  const ctxValue = document.getElementById('val-ctx');
-  if (ctxSlider && ctxValue) {
-    ctxSlider.value = '45';
-    ctxValue.textContent = '45';
-    if (typeof updateBadge === 'function') updateBadge();
-  }
 
   const tog = document.getElementById('toggle-local');
   if (tog) { tog.checked = true; tog.classList.add('active'); }

@@ -8,6 +8,86 @@ function parseToolCall(text) {
   return orchestrator.parseToolCall(text);
 }
 
+// ── Steering buffer ───────────────────────────────────────────────────────────
+// Allows injecting mid-flight guidance via steer() or an external hook.
+// The agent loop drains this buffer each iteration and injects messages as new
+// User turns so the LLM sees them immediately.
+const steeringBuffer = [];
+
+function pushSteering(msg) {
+  const text = String(msg || '').trim();
+  if (text) steeringBuffer.push(text);
+}
+
+function drainSteering() {
+  return steeringBuffer.splice(0, steeringBuffer.length);
+}
+
+function clearSteering() {
+  const drained = drainSteering();
+  const status = document.getElementById('steering-status');
+  if (status) status.textContent = 'Steering buffer cleared.';
+  return drained;
+}
+
+function sendSteering() {
+  const input = document.getElementById('steering-input');
+  const text = input.value.trim();
+  if (text) {
+    pushSteering(text);
+    input.value = '';
+    const status = document.getElementById('steering-status');
+    if (status) status.textContent = `Injected: ${text}${text.length > 60 ? '…' : ''}`;
+  }
+}
+
+// Expose globally so UI / external code can inject steering at runtime.
+window.AgentSteering = {
+  push: pushSteering,
+  drain: drainSteering,
+  clear: clearSteering,
+  send: sendSteering
+};
+
+// ── Tool call steering / rewriting ────────────────────────────────────────────
+// Intercepts and rewrites known-bad model-generated tool inputs BEFORE they
+// reach the executor — a defence-in-depth layer on top of system-prompt rules.
+function steerToolCall(toolName, args) {
+  // Block catastrophic shell commands regardless of tool name.
+  if (typeof args.command === 'string') {
+    const cmd = args.command;
+
+    // Block root filesystem deletions.
+    if (/rm\s+(-rf?|\/s)\s+[/\\]($|\s)/i.test(cmd) ||
+        /Remove-Item\s+[/\\]\s/i.test(cmd) ||
+        /del\s+\/[sq]\s+[/\\]/i.test(cmd)) {
+      args.command = 'echo BLOCKED: refusing to delete root filesystem';
+      return;
+    }
+
+    // Block disk operations.
+    if (/(?:format|fdisk|diskpart)\s/i.test(cmd)) {
+      args.command = 'echo BLOCKED: disk operations not allowed';
+      return;
+    }
+  }
+
+  // Strip control-channel tags the model may have injected into string args,
+  // preventing prompt injection through crafted filenames or query strings.
+  const sanitizeStringArg = val => val
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+    .replace(/<system-reminder[^>]*>[\s\S]*?<\/system-reminder>/gi, '')
+    .replace(/<permission_denials[^>]*>[\s\S]*?<\/permission_denials>/gi, '')
+    .trim();
+
+  const stringsToSanitize = ['path', 'filePath', 'sourcePath', 'destinationPath', 'content', 'query', 'text'];
+  for (const key of stringsToSanitize) {
+    if (typeof args[key] === 'string') {
+      args[key] = sanitizeStringArg(args[key]);
+    }
+  }
+}
+
 let stopRequested = false;
 let runDisabledToolCalls = new Set();
 let runDisabledSemanticToolCalls = new Set();
@@ -17,6 +97,7 @@ let runSuccessfulToolCount = 0;
 let runLocalTimeoutStreak = 0;
 let runLastToolCallSignature = '';
 let runRepeatedToolCallCount = 0;
+let runToolCallTotalCounts = new Map();
 let runCompactionState = {
   count: 0,
   consecutiveFailures: 0,
@@ -25,7 +106,6 @@ let runCompactionState = {
   lastAfterSize: 0
 };
 let runToolResultReplacementState = {
-  seenSignatures: new Set(),
   replacements: new Map()
 };
 let runCompactedResultNoticeSignatures = new Set();
@@ -39,6 +119,7 @@ let runTimeBasedMicrocompactState = {
   inactivityGapMs: 0
 };
 let runMaxOutputTokensRecoveryCount = 0;
+let runToolCallRepairAttempts = new Set();
 let runQueryTracking = null;
 let runPermissionMode = 'default';
 
@@ -59,6 +140,7 @@ const TIME_BASED_MICROCOMPACT_POLICY = {
 };
 const PERMISSION_DENIAL_LIMIT = 30;
 const PROMPT_INJECTION_SIGNAL_LIMIT = 40;
+const MAX_CONSECUTIVE_NON_ACTION_ROUNDS = 6;
 const TOOL_RESULT_REPLACEMENTS_STORAGE_KEY = 'agent_tool_result_replacements_v1';
 const PERMISSION_ESCALATION_THRESHOLDS = {
   ask: 3,
@@ -98,16 +180,25 @@ function getReplacementStorageKey() {
 function loadPersistedToolResultReplacements() {
   try {
     const raw = sessionStorage.getItem(getReplacementStorageKey());
-    const list = JSON.parse(raw || '[]');
-    if (!Array.isArray(list)) return [];
-    return list
-      .filter(item => item && typeof item === 'object')
+    const parsed = JSON.parse(raw || '[]');
+    // Reject if not an array (could be a tampered value from sessionStorage).
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(item => item && typeof item === 'object' && !Array.isArray(item))
       .map(item => ({
+        // Coerce each field to string; reject any item whose signature or
+        // replacement contains control-channel XML (injection guard).
         signature: String(item.signature || ''),
         replacement: String(item.replacement || ''),
         timestamp: String(item.timestamp || '')
       }))
-      .filter(item => item.signature && item.replacement)
+      .filter(item => {
+        if (!item.signature || !item.replacement) return false;
+        // Do not restore a persisted replacement that itself contains injection
+        // payloads — drop it so the original result is re-fetched clean.
+        const injectionPattern = /<tool_call\s*>|<system-reminder\s*>|\[SYSTEM\s+OVERRIDE\]/i;
+        return !injectionPattern.test(item.replacement);
+      })
       .slice(-300);
   } catch {
     return [];
@@ -129,59 +220,45 @@ function persistToolResultReplacementRecord(call, originalResult, replacement) {
   } catch {}
 }
 
-function ensureAgentHookRegistry() {
-  const existing = (window.AgentHooks && typeof window.AgentHooks === 'object')
-    ? window.AgentHooks
-    : {};
-
-  if (!existing.__listeners || !(existing.__listeners instanceof Map)) {
-    existing.__listeners = new Map();
-  }
-
-  if (typeof existing.on !== 'function') {
-    existing.on = (eventName, callback) => {
+// Initialize hook registry once at module load.
+// External code can subscribe via window.AgentHooks.on(event, callback).
+const _agentHookRegistry = (() => {
+  const reg = (window.AgentHooks && typeof window.AgentHooks === 'object') ? window.AgentHooks : {};
+  if (!reg.__listeners || !(reg.__listeners instanceof Map)) reg.__listeners = new Map();
+  if (typeof reg.on !== 'function') {
+    reg.on = (eventName, callback) => {
       const event = String(eventName || '').trim();
       if (!event || typeof callback !== 'function') return;
-      const listeners = existing.__listeners.get(event) || new Set();
+      const listeners = reg.__listeners.get(event) || new Set();
       listeners.add(callback);
-      existing.__listeners.set(event, listeners);
+      reg.__listeners.set(event, listeners);
     };
   }
-
-  if (typeof existing.off !== 'function') {
-    existing.off = (eventName, callback) => {
+  if (typeof reg.off !== 'function') {
+    reg.off = (eventName, callback) => {
       const event = String(eventName || '').trim();
       if (!event || typeof callback !== 'function') return;
-      const listeners = existing.__listeners.get(event);
+      const listeners = reg.__listeners.get(event);
       listeners?.delete(callback);
-      if (listeners && !listeners.size) {
-        existing.__listeners.delete(event);
-      }
+      if (listeners && !listeners.size) reg.__listeners.delete(event);
     };
   }
-
-  if (typeof existing.emit !== 'function') {
-    existing.emit = (eventName, payload) => {
+  if (typeof reg.emit !== 'function') {
+    reg.emit = (eventName, payload) => {
       const event = String(eventName || '').trim();
       if (!event) return;
-      const listeners = existing.__listeners.get(event) || new Set();
-      listeners.forEach(listener => {
-        try {
-          listener(payload);
-        } catch {}
-      });
+      const listeners = reg.__listeners.get(event) || new Set();
+      listeners.forEach(listener => { try { listener(payload); } catch {} });
     };
   }
-
-  window.AgentHooks = existing;
-  return existing;
-}
+  window.AgentHooks = reg;
+  return reg;
+})();
 
 function emitAgentHook(eventName, payload = {}) {
-  const hooks = ensureAgentHookRegistry();
-  hooks.emit?.(eventName, payload);
+  _agentHookRegistry.emit?.(eventName, payload);
 
-  const directHook = hooks[eventName];
+  const directHook = _agentHookRegistry[eventName];
   if (typeof directHook === 'function') {
     try {
       directHook(payload);
@@ -190,7 +267,7 @@ function emitAgentHook(eventName, payload = {}) {
 }
 
 async function evaluateToolPermissionHook(call, context = {}) {
-  const hooks = ensureAgentHookRegistry();
+  const hooks = _agentHookRegistry;
   const callback = typeof hooks.canUseTool === 'function'
     ? hooks.canUseTool
     : (typeof hooks.onCanUseTool === 'function' ? hooks.onCanUseTool : null);
@@ -304,11 +381,135 @@ function looksLikeDeferredActionReply(text) {
   const value = String(text || '').trim();
   if (!value) return false;
 
-  const futureActionPattern = /\b(?:i\s+will|i'll|let me|i am going to|i'm going to|next[, ]+i(?:\s+will|'ll)?)\b/i;
-  const actionVerbPattern = /\b(?:search|look up|check|verify|probe|inspect|browse|review|find|perform|run|try|investigate)\b/i;
+  const futureActionPattern = /\b(?:i\s+will|i'll|let me|i am going to|i'm going to|next[, ]+i(?:\s+will|'ll)?|i'll\s+(?:start|begin|now)|now\s+i(?:'ll|\s+will))\b/i;
+  const actionVerbPattern = /\b(?:search|look up|check|verify|probe|inspect|browse|review|find|perform|run|try|investigate|list|listing|read|reading|fetch|fetching|scan|scanning|call|calling|execute|executing|start|starting|begin|beginning|map|mapping|gather|gathering|analyze|analyzing|collect|collecting|query|querying|load|loading|open|opening|access|accessing|retrieve|retrieving|walk|walking|traverse|traversing|explore|exploring|examine|examining|identify|identifying|inspect)\b/i;
   const finalityPattern = /\b(?:final answer|in summary|overall|therefore|the answer is|based on (?:the|current) (?:evidence|information))\b/i;
 
   return futureActionPattern.test(value) && actionVerbPattern.test(value) && !finalityPattern.test(value);
+}
+
+function looksLikeToolExecutionClaimWithoutCall(text) {
+  const value = String(text || '').trim();
+  if (!value) return false;
+
+  const executionClaimPattern = /\b(?:i\s+(?:have|already)\s+(?:executed|called|run|performed)|(?:the\s+)?tool\s+call\s+(?:has\s+been\s+)?(?:executed|made|performed)|executed\s+the\s+necessary\s+tool\s+call|necessary\s+tool\s+call)\b/i;
+  const waitingPattern = /\b(?:please\s+wait|wait\s+for\s+(?:the\s+)?tool\s+output|await(?:ing)?\s+tool\s+output|once\s+the\s+tool\s+output|after\s+tool\s+output|provide\s+the\s+final\s+answer\s+after\s+tool\s+output)\b/i;
+  const finalityPattern = /\b(?:final answer|in summary|overall|therefore|the answer is|based on (?:the|current) (?:evidence|information))\b/i;
+
+  return executionClaimPattern.test(value) && waitingPattern.test(value) && !finalityPattern.test(value);
+}
+
+function extractPlannerOptimizedQueryFromMessages(messages = []) {
+  const recentUserMessages = Array.isArray(messages)
+    ? messages.filter(message => message?.role === 'user').slice(-8).reverse()
+    : [];
+
+  for (const message of recentUserMessages) {
+    const content = String(message?.content || '');
+    const queryPlanBlocks = [...content.matchAll(/<tool_result\s+tool="query_plan">\s*([\s\S]*?)\s*<\/tool_result>/gi)];
+    for (let i = queryPlanBlocks.length - 1; i >= 0; i -= 1) {
+      const block = String(queryPlanBlocks[i]?.[1] || '');
+      const directMatch = block.match(/(?:^|\n)query=([^\n]+)/i);
+      if (directMatch?.[1]) {
+        const query = String(directMatch[1]).trim();
+        if (query) return query;
+      }
+    }
+
+    const plannerMatch = content.match(/Planner optimized query:\s*"([^"]+)"/i);
+    if (plannerMatch?.[1]) {
+      const query = String(plannerMatch[1]).trim();
+      if (query) return query;
+    }
+  }
+
+  return '';
+}
+
+function completeToolCallArgs(call, { messages = [], userMessage = '' } = {}) {
+  const normalized = normalizeToolCallObject(call);
+  if (!normalized) return null;
+
+  if (normalized.tool === 'web_search' && !String(normalized.args?.query || '').trim()) {
+    const recoveredQuery = extractPlannerOptimizedQueryFromMessages(messages) || String(userMessage || '').trim();
+    if (recoveredQuery) {
+      normalized.args = {
+        ...normalized.args,
+        query: recoveredQuery
+      };
+    }
+  }
+
+  return normalized;
+}
+
+function shouldAttemptToolCallRepair({ rawReply = '', cleanReply = '', thinkingBlocks = [] } = {}) {
+  const raw = String(rawReply || '').trim();
+  const visible = String(cleanReply || '').trim();
+  if (!raw) return false;
+
+  const { regex, orchestrator } = getRuntimeModules();
+
+  if (regex?.hasUnprocessedToolCall?.(raw)) return true;
+  if (/<\|tool_call>|<tool_call\b/i.test(raw) || /"tool"\s*:/i.test(raw)) return true;
+  if (!visible && Array.isArray(thinkingBlocks) && thinkingBlocks.some(block => String(block || '').trim())) return true;
+  if (looksLikeDeferredActionReply(visible)) return true;
+  if (looksLikeToolExecutionClaimWithoutCall(visible)) return true;
+  if (orchestrator?.hasReasoningLeak?.(visible)) return true;
+
+  return false;
+}
+
+async function attemptToolCallRepair({ userMessage = '', rawReply = '', messages = [] } = {}) {
+  const assistantReply = String(rawReply || '').trim();
+  if (!assistantReply) return null;
+
+  const repairSignature = stableHashText(`${userMessage}\n${assistantReply}`);
+  if (runToolCallRepairAttempts.has(repairSignature)) {
+    return null;
+  }
+  runToolCallRepairAttempts.add(repairSignature);
+
+  const enabledToolNames = Object.entries(enabledTools)
+    .filter(([, enabled]) => !!enabled)
+    .map(([name]) => name);
+  const systemMessage = Array.isArray(messages)
+    ? messages.find(message => message?.role === 'system')
+    : null;
+  const recentMessages = Array.isArray(messages)
+    ? messages.filter(message => message?.role !== 'system').slice(-12)
+    : [];
+  const repairPrompt = await buildDirectAnswerRepairPrompt({
+    userMessage,
+    previousReply: assistantReply,
+    enabledTools: enabledToolNames
+  });
+
+  const repairMessages = [
+    ...(systemMessage ? [systemMessage] : []),
+    ...recentMessages,
+    { role: 'assistant', content: assistantReply },
+    { role: 'user', content: repairPrompt }
+  ];
+
+  const repairedRawReply = await callLLM(repairMessages, {
+    maxTokens: 450,
+    temperature: 0.1,
+    timeoutMs: isLocalModeActive() ? 70000 : 22000,
+    retries: isLocalModeActive() ? 0 : 1
+  });
+  const repairedParsedReply = splitModelReply(repairedRawReply);
+  const repairedToolCalls = dedupeToolCalls(resolveToolCallsFromModelReply(
+    repairedParsedReply.visible,
+    repairedRawReply
+  ));
+
+  return {
+    rawReply: repairedRawReply,
+    parsedReply: repairedParsedReply,
+    reply: repairedParsedReply.visible,
+    toolCalls: repairedToolCalls
+  };
 }
 
 function getRuntimeScopedCache(scope, key) {
@@ -401,7 +602,6 @@ function resetRunGuards() {
   runToolFailureCounts.clear();
   const persistedReplacements = loadPersistedToolResultReplacements();
   runToolResultReplacementState = {
-    seenSignatures: new Set(persistedReplacements.map(item => item.signature)),
     replacements: new Map(persistedReplacements.map(item => [item.signature, item.replacement]))
   };
   runCompactedResultNoticeSignatures = new Set();
@@ -410,6 +610,7 @@ function resetRunGuards() {
   runLocalTimeoutStreak = 0;
   runLastToolCallSignature = '';
   runRepeatedToolCallCount = 0;
+  runToolCallTotalCounts = new Map();
   runCompactionState = {
     count: 0,
     consecutiveFailures: 0,
@@ -425,6 +626,7 @@ function resetRunGuards() {
     inactivityGapMs: 0
   };
   runMaxOutputTokensRecoveryCount = 0;
+  runToolCallRepairAttempts = new Set();
   runQueryTracking = null;
   const sessionPermissionMode = typeof getActiveSession === 'function'
     ? getActiveSession()?.context?.permissionMode
@@ -462,7 +664,10 @@ function normalizeToolArgs(args) {
   return args && typeof args === 'object' && !Array.isArray(args) ? { ...args } : {};
 }
 
-function stableStringify(value) {
+function stableStringify(value, _depth = 0) {
+  // Guard against stack overflow from deeply nested or circular structures.
+  if (_depth > 12) return '"[deep]"';
+
   if (value === null || value === undefined) {
     return String(value);
   }
@@ -473,11 +678,11 @@ function stableStringify(value) {
     return String(value);
   }
   if (Array.isArray(value)) {
-    return '[' + value.map(item => stableStringify(item)).join(',') + ']';
+    return '[' + value.map(item => stableStringify(item, _depth + 1)).join(',') + ']';
   }
   if (typeof value === 'object') {
     const keys = Object.keys(value).sort();
-    return '{' + keys.map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',') + '}';
+    return '{' + keys.map(key => `${JSON.stringify(key)}:${stableStringify(value[key], _depth + 1)}`).join(',') + '}';
   }
   return JSON.stringify(String(value));
 }
@@ -726,10 +931,10 @@ function buildToolUseSummary(batchResults = []) {
   for (const item of batchResults) {
     const call = item?.call || {};
     const tool = String(call.tool || 'unknown');
-    const result = String(item?.result || '');
+    let result = String(item?.result || '');
     const ok = !/^ERROR\b/i.test(result);
     if (!ok) errors += 1;
-    const preview = result.replace(/\s+/g, ' ').trim().slice(0, 120);
+    const preview = sanitizeToolResult(result).replace(/\s+/g, ' ').trim().slice(0, 120);
     lines.push(`- ${tool}: ${ok ? 'ok' : 'error'}${preview ? ` (${preview})` : ''}`);
   }
 
@@ -741,6 +946,21 @@ function buildToolUseSummary(batchResults = []) {
     `Tools: ${batchResults.length}, Success: ${successCount}, Errors: ${errors}`,
     ...lines.slice(0, 6)
   ].join('\n');
+}
+
+// Sanitize tool result text before it enters the message history.
+// Strips control-channel XML and role-override markers that could mislead
+// the LLM into treating injected data as authoritative agent instructions.
+function sanitizeToolResult(text) {
+  const raw = String(text || '');
+  return raw
+    // Remove exact control-channel tags the agent itself emits.
+    .replace(/<tool_call\s*>[\s\S]*?<\/tool_call\s*>/gi, '[tool_call content removed by injection guard]')
+    .replace(/<system-reminder\s*>[\s\S]*?<\/system-reminder\s*>/gi, '[system-reminder removed by injection guard]')
+    .replace(/<permission_denials\s*>[\s\S]*?<\/permission_denials\s*>/gi, '[permission_denials removed by injection guard]')
+    // Neutralize role-override markers.
+    .replace(/\[(?:SYSTEM|ASSISTANT|USER)\s+OVERRIDE\]/gi, '[OVERRIDE_BLOCKED]')
+    .replace(/\bNEW\s+SYSTEM\s+PROMPT\b/gi, '[BLOCKED]');
 }
 
 function extractPromptInjectionSignals(toolCall, result) {
@@ -769,8 +989,19 @@ function extractPromptInjectionSignals(toolCall, result) {
       label: 'Safety bypass language detected'
     },
     {
-      pattern: /<tool_call>|<system-reminder>|<permission_denials>|\[TOOL_USE_SUMMARY\]/i,
+      // Tightened: require COMPLETE tag matches to avoid false positives on nested content
+      pattern: /<tool_call\s*>.*?<\/tool_call\s*>|<system-reminder\s*>.*?<\/system-reminder\s*>|<permission_denials\s*>.*?<\/permission_denials\s*>|\[TOOL_USE_SUMMARY\]/i,
       label: 'Control-channel tag injection detected in tool output'
+    },
+    {
+      // New: detect attempts to override the assistant role directly in content.
+      pattern: /\[(?:SYSTEM|ASSISTANT|USER)\s+OVERRIDE\]|\bNEW\s+SYSTEM\s+PROMPT\b/i,
+      label: 'Role/system override marker detected in tool output'
+    },
+    {
+      // New: detect encoded or obfuscated injection attempts.
+      pattern: /(?:base64|hex|rot13|url.?encod).{0,30}(?:decode|convert).{0,40}(?:instruct|prompt|command)/i,
+      label: 'Encoded instruction injection pattern detected'
     }
   ];
 
@@ -841,8 +1072,8 @@ function registerCompactionSuccess(round, beforeSize, afterSize) {
       }
       session.context.compactions = Number(session.context.compactions || 0) + 1;
       session.context.lastCompactedAt = new Date().toISOString();
-      if (typeof saveSessions === 'function') {
-        saveSessions();
+      if (typeof scheduleSaveSessions === 'function') {
+        scheduleSaveSessions();
       }
     }
   }
@@ -856,6 +1087,11 @@ function registerCompactionFailure(round) {
 function recordRepeatedToolCall(call) {
   const signature = getSemanticToolCallSignature(call);
 
+  // Track total appearances this run to catch alternating 2-tool loops (A,B,A,B,...).
+  const totalCount = (runToolCallTotalCounts.get(signature) || 0) + 1;
+  runToolCallTotalCounts.set(signature, totalCount);
+
+  // Track consecutive identical calls.
   if (signature === runLastToolCallSignature) {
     runRepeatedToolCallCount += 1;
   } else {
@@ -863,12 +1099,13 @@ function recordRepeatedToolCall(call) {
     runRepeatedToolCallCount = 1;
   }
 
-  if (runRepeatedToolCallCount >= 2) {
+  // Block at ≥3 consecutive identical calls OR ≥4 total calls for the same signature.
+  if (runRepeatedToolCallCount >= 3 || totalCount >= 4) {
     runDisabledSemanticToolCalls.add(signature);
-    return { repeated: true, count: runRepeatedToolCallCount, signature };
+    return { repeated: true, count: runRepeatedToolCallCount, totalCount, signature };
   }
 
-  return { repeated: false, count: runRepeatedToolCallCount, signature };
+  return { repeated: false, count: runRepeatedToolCallCount, totalCount, signature };
 }
 
 function getTurnLlmCallOptions() {
@@ -900,7 +1137,7 @@ function normalizeToolCallObject(call) {
   return { tool, args: normalizeToolArgs(call.args) };
 }
 
-function dedupeToolCalls(calls, maxCalls = 3) {
+function dedupeToolCalls(calls, maxCalls = 5) {
   const deduped = [];
   const seen = new Set();
 
@@ -918,7 +1155,11 @@ function dedupeToolCalls(calls, maxCalls = 3) {
 }
 
 function resolveToolCallsFromModelReply(reply, rawReply) {
-  const blockMatches = String(rawReply || '')
+  // Strip thinking blocks before scanning for tool calls so that tool calls
+  // the model only "considered" inside <think> are never executed.
+  const scanTarget = String(rawReply || '').replace(/<think>[\s\S]*?<\/think>/gi, '');
+
+  const blockMatches = scanTarget
     .match(/<tool_call>\s*[\s\S]*?<\/tool_call>/gi) || [];
 
   const parsedBlockCalls = blockMatches
@@ -929,7 +1170,7 @@ function resolveToolCallsFromModelReply(reply, rawReply) {
     return dedupeToolCalls(parsedBlockCalls);
   }
 
-  const fallbackCall = resolveToolCallFromModelReply(reply, rawReply);
+  const fallbackCall = resolveToolCallFromModelReply(reply, scanTarget);
   return fallbackCall ? [fallbackCall] : [];
 }
 
@@ -972,6 +1213,9 @@ async function executeTool(call) {
   assertRuntimeReady();
   const { orchestrator } = getRuntimeModules();
   const { tool, args } = call;
+
+  // Apply tool call steering: rewrite known-bad patterns before execution.
+  steerToolCall(tool, args);
 
   const callSignature = getToolCallSignature(call);
   const semanticSignature = getSemanticToolCallSignature(call);
@@ -1033,13 +1277,28 @@ async function executeTool(call) {
       return 'calc error: expression is required.';
     }
 
-    const unsafeCalcPattern = /[{}\[\];=<>|&'"`]|\b(?:async|await|function|class|var|let|const|return|if|else|for|while|switch|case|break|continue|throw|catch|finally|eval|Function|constructor|prototype|__proto__|window|document|globalThis|process|require|import|export|module|this)\b/i;
-    if (unsafeCalcPattern.test(expr)) {
+    // Allowlist: only permit numeric literals, arithmetic ops, parens, spaces,
+    // Math.* functions, and Math constants. Everything else is rejected.
+    const ALLOWED_CALC = /^[\d\s+\-*/%.()e,^]+$|^(?:[\d\s+\-*/%.()e,^]|Math\.\w+)*$/;
+    const DANGEROUS_CALC = /[{}\[\];=<>|&'"`:!@#$~\\]|\b(?:async|await|function|class|var|let|const|return|if|else|for|while|switch|case|break|continue|throw|catch|finally|eval|Function|constructor|prototype|__proto__|window|document|globalThis|process|require|import|export|module|this|Object|Array|Promise|fetch|XMLHttp)\b/i;
+
+    // Replace ^ with ** for exponentiation (common user expectation).
+    const sanitizedExpr = expr.replace(/\^/g, '**');
+
+    if (!ALLOWED_CALC.test(sanitizedExpr)) {
+      return 'calc error: expression contains disallowed characters or identifiers.';
+    }
+
+    if (DANGEROUS_CALC.test(expr)) {
       return 'calc error: expression contains unsupported or unsafe syntax.';
     }
 
     try {
-      const result = Function('"use strict"; return (' + expr + ')')();
+      // Scope is intentionally empty — Math is the only global allowed.
+      const result = new Function('Math', `"use strict"; return (${sanitizedExpr})`)(Math);
+      if (typeof result !== 'number' && typeof result !== 'bigint') {
+        return `calc error: expression did not return a number.`;
+      }
       return `${expr} = ${result}`;
     } catch (e) {
       return `calc error: ${e?.message || 'invalid expression'}`;
@@ -1048,7 +1307,8 @@ async function executeTool(call) {
 
   if (tool === 'datetime') {
     const now = new Date();
-    return `Current datetime: ${now.toISOString()}\nLocal: ${now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo', weekday:'long', year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit', timeZoneName:'short' })}\nTimezone: America/Sao_Paulo (BRT)`;
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    return `Current datetime: ${now.toISOString()}\nLocal: ${now.toLocaleString(undefined, { timeZone: tz, weekday:'long', year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit', timeZoneName:'short' })}\nTimezone: ${tz}`;
   }
 
   const cachedResult = getCachedToolResult(call);
@@ -1103,8 +1363,6 @@ function updateCtxBar() {
     bar.classList.toggle('danger', pct > 85);
   }
   if (label) label.textContent = pct.toFixed(1) + '%';
-  const statCtx = document.getElementById('stat-ctx');
-  if (statCtx) statCtx.textContent = size.toLocaleString();
 }
 
 function notifyIfHidden(summary) {
@@ -1158,13 +1416,13 @@ async function summarizeContext(userQuery) {
 
   const hist = messages
     .filter(m => m.role !== 'system')
-    .map(m => `[${m.role.toUpperCase()}]: ${m.content}`)
+    .map(m => `[${m.role.toUpperCase()}]: ${sanitizeToolResult(m.content)}`)
     .join('\n\n');
 
   const summaryCacheKey = `${stableHashText(hist)}:${stableHashText(userQuery)}`;
   const cachedSummaryText = getRuntimeScopedCache('context_summary', summaryCacheKey);
   if (cachedSummaryText) {
-    const sysMsgFromCache = messages.find(m => m.role === 'system');
+    const sysMsgFromCache = messages.find(m => m.role === 'system') ?? { role: 'system', content: '' };
     return [
       sysMsgFromCache,
       { role: 'assistant', subtype: 'compact_boundary', content: buildCompactBoundaryMarker({ reason: 'cached_summary' }) },
@@ -1175,7 +1433,7 @@ async function summarizeContext(userQuery) {
 
   const prompt = await orchestrator.buildSummaryPrompt(hist, userQuery);
 
-  const sysMsg = messages.find(m => m.role === 'system');
+  const sysMsg = messages.find(m => m.role === 'system') ?? { role: 'system', content: '' };
   const summary = await callLLM([
     sysMsg,
     { role: 'user', content: prompt }
@@ -1234,8 +1492,6 @@ function applyToolResultContextBudget(call, result) {
   if (existingReplacement !== undefined) {
     return existingReplacement;
   }
-
-  runToolResultReplacementState.seenSignatures.add(signature);
 
   if (/^ERROR\b/i.test(text) || text.length <= TOOL_RESULT_CONTEXT_BUDGET.inlineMaxChars) {
     return text;
@@ -1448,7 +1704,6 @@ async function agentLoop(userMessage) {
   const delay      = getDelay();
   runQueryTracking = {
     chainId: generateRunChainId(),
-    depth: 0,
     startedAt: new Date().toISOString()
   };
   updateRunSessionContext({ queryTracking: runQueryTracking });
@@ -1466,13 +1721,19 @@ async function agentLoop(userMessage) {
   throwIfStopRequested();
 
   // Init messages for this turn
+  const sysPrompt = await buildSystemPrompt(userMessage);
+  const unresolvedPlaceholders = sysPrompt.match(/\{\{[^}]+\}\}/g);
+  if (unresolvedPlaceholders) {
+    throw new Error(`System prompt has unresolved template placeholders: ${unresolvedPlaceholders.join(', ')}`);
+  }
   messages = [
-    { role: 'system', content: await buildSystemPrompt(userMessage) },
+    { role: 'system', content: sysPrompt },
     ...messages.filter(m => m.role !== 'system').slice(-20), // keep last 20 non-system
     { role: 'user', content: turnInputMessage }
   ];
 
   let round = 0;
+  let consecutiveNonActionRounds = 0;
   sessionStats.msgs++;
 
   while (round < MAX_ROUNDS) {
@@ -1483,6 +1744,17 @@ async function agentLoop(userMessage) {
 
     setStatus('busy', `round ${round}/${MAX_ROUNDS}`);
     showThinking(`round ${round}/${MAX_ROUNDS}`);
+
+    // Drain steering buffer — inject any mid-session guidance from user.
+    const steeredMessages = drainSteering();
+    if (steeredMessages.length) {
+      const combined = steeredMessages.join('\n\n');
+      messages.push({
+        role: 'user',
+        content: `[USER STEERING — mid-session guidance, follow immediately]\n${combined}`
+      });
+      addNotice(`Steering injected: ${combined.slice(0, 120)}${combined.length > 120 ? '…' : ''}`);
+    }
 
     if (delay > 0) await sleep(delay);
     throwIfStopRequested();
@@ -1496,10 +1768,10 @@ async function agentLoop(userMessage) {
       parsedReply = splitModelReply(rawReply);
       reply = parsedReply.visible;
       runLocalTimeoutStreak = 0;
-      if (parsedReply.thinkingBlocks.length) {
-      }
     } catch (e) {
       hideThinking();
+      // Let the outer sendMessage handler deal with user-initiated stops.
+      if (e?.code === 'RUN_STOPPED' || e?.name === 'AbortError') throw e;
 
       if (isMaxOutputTokenLikeError(e) && round < MAX_ROUNDS) {
         runMaxOutputTokensRecoveryCount += 1;
@@ -1521,7 +1793,7 @@ async function agentLoop(userMessage) {
 
           messages.push({
             role: 'user',
-            content: 'Previous reply exceeded output token limits. Continue with a concise response under 220 words: either call exactly one tool with complete args or provide a final answer grounded in current evidence.'
+            content: 'Previous reply exceeded output token limits. Continue with a concise response under 220 words: either call the required tool(s) with complete args or provide a final answer grounded in current evidence.'
           });
           updateCtxBar();
           continue;
@@ -1534,7 +1806,7 @@ async function agentLoop(userMessage) {
           addNotice(`Local model timed out on round ${round}. Retrying once with concise continuation guidance.`);
           messages.push({
             role: 'user',
-            content: 'Previous attempt timed out. Continue from the current context with a concise response: either call exactly one tool with complete args or provide the final answer.'
+            content: 'Previous attempt timed out. Continue from the current context with a concise response: either call the required tool(s) with complete args or provide the final answer.'
           });
           updateCtxBar();
           continue;
@@ -1548,17 +1820,54 @@ async function agentLoop(userMessage) {
     hideThinking();
 
     // Parse for tool call(s)
-    const toolCalls = resolveToolCallsFromModelReply(reply, rawReply);
+    let toolCalls = resolveToolCallsFromModelReply(reply, rawReply);
     throwIfStopRequested();
+
+    if (!toolCalls.length) {
+      const cleanReply = reply.replace(getToolRegex(), '').trim();
+      if (shouldAttemptToolCallRepair({
+        rawReply,
+        cleanReply,
+        thinkingBlocks: parsedReply?.thinkingBlocks
+      })) {
+        try {
+          const repaired = await attemptToolCallRepair({ userMessage, rawReply: rawReply || reply, messages });
+          throwIfStopRequested();
+          if (repaired?.rawReply) {
+            rawReply = repaired.rawReply;
+            parsedReply = repaired.parsedReply;
+            reply = repaired.reply;
+            toolCalls = repaired.toolCalls;
+
+            if (toolCalls.length) {
+              addNotice(`Repair pass normalized malformed output into valid tool call(s): ${toolCalls.map(call => call.tool).join(', ')}.`);
+            } else if (String(reply || '').trim()) {
+              addNotice('Repair pass normalized malformed output into a contract-compliant reply.');
+            }
+          }
+        } catch (error) {
+          if (error?.code === 'RUN_STOPPED' || error?.name === 'AbortError') throw error;
+          addNotice(`Repair pass failed: ${error?.message || 'unknown error'}`);
+        }
+      }
+    }
 
     if (!toolCalls.length) {
       const cleanReply = reply.replace(getToolRegex(), '').trim();
 
       if (!cleanReply) {
+        consecutiveNonActionRounds++;
+        if (consecutiveNonActionRounds >= MAX_CONSECUTIVE_NON_ACTION_ROUNDS) {
+          addMessage('error', `Model returned empty output ${consecutiveNonActionRounds} times in a row — stopping to avoid burning rounds. Try a different model or rephrase your prompt.`, round);
+          syncSessionState();
+          setStatus('ok', `stopped after ${round} round${round > 1 ? 's' : ''}`);
+          updateCtxBar();
+          return;
+        }
         messages.push({ role: 'assistant', content: rawReply || reply });
         messages.push({
           role: 'user',
-          content: 'No valid tool call or final answer was returned. Continue now: either call exactly one tool with complete args, or provide a complete final answer.'
+          content: 'No valid tool call or final answer was returned. Continue now: call one or more tools with complete args, or provide a complete final answer.'
         });
         addNotice('Model returned empty output. Requesting continuation.');
         updateCtxBar();
@@ -1566,12 +1875,39 @@ async function agentLoop(userMessage) {
       }
 
       if (looksLikeDeferredActionReply(cleanReply)) {
+        consecutiveNonActionRounds++;
+        if (consecutiveNonActionRounds >= MAX_CONSECUTIVE_NON_ACTION_ROUNDS) {
+          addMessage('error', `Model narrated instead of acting ${consecutiveNonActionRounds} times in a row — stopping to avoid burning rounds. Try a different model or rephrase your prompt.`, round);
+          syncSessionState();
+          setStatus('ok', `stopped after ${round} round${round > 1 ? 's' : ''}`);
+          updateCtxBar();
+          return;
+        }
         messages.push({ role: 'assistant', content: rawReply || cleanReply });
         messages.push({
           role: 'user',
-          content: 'Your previous reply described a next action but did not execute it. Continue now without narration: either call exactly one tool with complete args, or provide the final answer if no tool is needed.'
+          content: 'Your previous reply described a next action but did not execute it. Continue now without narration: call one or more tools with complete args, or provide the final answer if no tool is needed.'
         });
         addNotice('Model narrated a next step without making a tool call. Requesting direct continuation.');
+        updateCtxBar();
+        continue;
+      }
+
+      if (looksLikeToolExecutionClaimWithoutCall(cleanReply)) {
+        consecutiveNonActionRounds++;
+        if (consecutiveNonActionRounds >= MAX_CONSECUTIVE_NON_ACTION_ROUNDS) {
+          addMessage('error', `Model claimed tool execution without a tool call ${consecutiveNonActionRounds} times in a row — stopping to avoid burning rounds. Try a different model or rephrase your prompt.`, round);
+          syncSessionState();
+          setStatus('ok', `stopped after ${round} round${round > 1 ? 's' : ''}`);
+          updateCtxBar();
+          return;
+        }
+        messages.push({ role: 'assistant', content: rawReply || cleanReply });
+        messages.push({
+          role: 'user',
+          content: 'Your previous reply claimed a tool call already ran, but no valid <tool_call> block was present. Continue now with exactly one of these: (1) emit one or more valid tool calls with complete args, or (2) provide the complete final answer. Do not ask to wait for tool output.'
+        });
+        addNotice('Model claimed tool execution without emitting a tool call. Requesting strict continuation.');
         updateCtxBar();
         continue;
       }
@@ -1579,12 +1915,21 @@ async function agentLoop(userMessage) {
       let finalMarkdown = cleanReply;
       throwIfStopRequested();
 
-      addMessage('agent', finalMarkdown, round, false, false, []);
+      addMessage('agent', finalMarkdown, round, false, false, parsedReply.thinkingBlocks);
       messages.push({ role: 'assistant', content: finalMarkdown });
       const memoryDelta = maybeExtractLongTermMemory(userMessage, finalMarkdown);
       if (memoryDelta?.saved) {
         addNotice(`Memory manager: stored ${memoryDelta.saved} durable memory item(s).`);
       }
+      // Async post-turn work: extract session-level memories via hook if available.
+      void Promise.resolve().then(() => {
+        try {
+          window.AgentMemory?.onTurnComplete?.({ userMessage, assistantMessage: finalMarkdown, messages });
+        } catch { /* fire-and-forget */ }
+      });
+      // Clear steering status after turn completes
+      const statusEl = document.getElementById('steering-status');
+      if (statusEl) statusEl.textContent = '';
       syncSessionState();
       setStatus('ok', `done in ${round} round${round>1?'s':''}`);
       notifyIfHidden(finalMarkdown);
@@ -1596,7 +1941,7 @@ async function agentLoop(userMessage) {
     const blockedToolReasons = [];
 
     for (const candidateCall of toolCalls) {
-      const normalizedCandidate = normalizeToolCallObject(candidateCall);
+      const normalizedCandidate = completeToolCallArgs(candidateCall, { messages, userMessage });
       if (!normalizedCandidate) continue;
 
       const repeatState = recordRepeatedToolCall(normalizedCandidate);
@@ -1619,7 +1964,8 @@ async function agentLoop(userMessage) {
       continue;
     }
 
-    // Tool call(s) detected
+    // Tool call(s) detected — reset non-action streak
+    consecutiveNonActionRounds = 0;
     const toolContent = String(reply || '').replace(/<tool_call>\s*[\s\S]*?<\/tool_call>/gi, '').trim();
     if (toolContent) {
       addMessage('agent', toolContent, round, false, false, []);
@@ -1708,7 +2054,8 @@ async function agentLoop(userMessage) {
           }
         }
 
-        messages.push({ role: 'user', content: `<tool_result tool="${toolCall.tool}">\n${contextSafeResult}\n</tool_result>` });
+        const safeResult = sanitizeToolResult(contextSafeResult);
+        messages.push({ role: 'user', content: `<tool_result tool="${toolCall.tool}">\n${safeResult}\n</tool_result>` });
 
         if (failureState.repeated) {
           messages.push({
@@ -1767,19 +2114,30 @@ async function agentLoop(userMessage) {
     throwIfStopRequested();
 
     hideThinking();
-    addMessage('agent', finalMarkdown, MAX_ROUNDS, false, false, []);
-    messages.push({ role: 'assistant', content: finalMarkdown });
+    addMessage('agent', finalMarkdown, MAX_ROUNDS, false, false, parsedFinalReply.thinkingBlocks);
+    messages.push({ role: 'assistant', content: finalReply });
     const memoryDelta = maybeExtractLongTermMemory(userMessage, finalMarkdown);
     if (memoryDelta?.saved) {
       addNotice(`Memory manager: stored ${memoryDelta.saved} durable memory item(s).`);
     }
+    void Promise.resolve().then(() => {
+      try {
+        window.AgentMemory?.onTurnComplete?.({ userMessage, assistantMessage: finalMarkdown, messages });
+      } catch { /* fire-and-forget */ }
+    });
     syncSessionState();
+    setStatus('ok', 'response limit reached');
     notifyIfHidden(finalMarkdown || 'Response ready. Check the latest result.');
   } catch (e) {
     hideThinking();
+    if (e?.code === 'RUN_STOPPED' || e?.name === 'AbortError') {
+      setStatus('ok', 'stopped');
+      updateCtxBar();
+      return;
+    }
     addMessage('error', `Final answer failed: ${e.message}`, MAX_ROUNDS);
+    setStatus('error', 'final answer failed');
   }
-  setStatus('ok', 'response limit reached');
   updateCtxBar();
 }
 
@@ -1795,7 +2153,7 @@ function showThinking(label) {
     <div class="thinking-dots">
       <div class="dot"></div><div class="dot"></div><div class="dot"></div>
     </div>
-    <span class="thinking-label">${label}</span>`;
+    <span class="thinking-label">${escHtml(String(label || ''))}</span>`;
   const container = document.getElementById('messages') || document.getElementById('chat');
   container.appendChild(el);
   scrollBottom();
@@ -1900,7 +2258,7 @@ function scrollBottom() {
 }
 
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -1956,11 +2314,12 @@ async function sendMessage() {
   const inputStatus = document.getElementById('input-status');
   if (inputStatus) inputStatus.textContent = 'processing…';
 
-  addMessage('user', text, null);
-  if (!getActiveSession()?.messages?.length) {
-    const session = getActiveSession() || createSession(text);
-    session.title = makeSessionTitle(text);
+  // Title the session from the first user message before addMessage modifies it.
+  const curSession = getActiveSession() || createSession(text);
+  if (!curSession.messages?.length) {
+    curSession.title = makeSessionTitle(text);
   }
+  addMessage('user', text, null);
   saveSessions();
   renderSessionList();
 
@@ -1976,16 +2335,14 @@ async function sendMessage() {
       setStatus('error', 'error');
     }
     syncSessionState();
+  } finally {
+    isBusy = false;
+    broadcastBusyState(false);
+    if (sendBtn) sendBtn.disabled = false;
+    setStopButtonState(false);
+    if (inputStatus) inputStatus.textContent = `${sessionStats.msgs} message${sessionStats.msgs!==1?'s':''} sent`;
+    input.focus();
   }
-
-  isBusy = false;
-  broadcastBusyState(false);
-  const sendBtn2 = document.getElementById('btn-send');
-  if (sendBtn2) sendBtn2.disabled = false;
-  setStopButtonState(false);
-  const inputStatus2 = document.getElementById('input-status');
-  if (inputStatus2) inputStatus2.textContent = `${sessionStats.msgs} message${sessionStats.msgs!==1?'s':''} sent`;
-  input.focus();
 }
 
 function handleKey(e) {
@@ -2021,8 +2378,26 @@ function clearSession() {
 document.addEventListener('DOMContentLoaded', () => {
   installUnhandledRejectionGuard();
   applySidebarState();
-  bindSidebarPanels();
   window.addEventListener('resize', handleResponsiveSidebar);
+
+  // Restore persisted slider values before updateBadge() reads them.
+  const sliderDefs = [
+    { id: 'sl-rounds', valId: 'val-rounds', key: 'agent_sl_rounds' },
+    { id: 'sl-ctx',    valId: 'val-ctx',    key: 'agent_sl_ctx'    },
+    { id: 'sl-delay',  valId: 'val-delay',  key: 'agent_sl_delay'  }
+  ];
+  for (const def of sliderDefs) {
+    try {
+      const stored = localStorage.getItem(def.key);
+      if (stored !== null) {
+        const sl = document.getElementById(def.id);
+        const vl = document.getElementById(def.valId);
+        if (sl) sl.value = stored;
+        if (vl) vl.textContent = stored;
+      }
+    } catch { /* private browsing / quota — ignore */ }
+  }
+
   updateBadge();
   updateStats();
   updateCtxBar();
@@ -2044,6 +2419,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!chatSessions.length) createSession();
   if (!getActiveSession()) activeSessionId = chatSessions[0]?.id || createSession().id;
   renderSessionList();
+  if (typeof loadPersistedEnabledTools === 'function') loadPersistedEnabledTools();
   renderToolGroups();
   activateSession(activeSessionId);
   if (apiKey) {
@@ -2057,6 +2433,18 @@ document.addEventListener('DOMContentLoaded', () => {
       sel.innerHTML = `<option value="${localBackend.model}">${localBackend.model}</option>`;
       sel.value = localBackend.model;
       document.getElementById('local-model-row').style.display = 'block';
+
+      // Add change listener to update badge when model changes
+      sel?.addEventListener('change', function() {
+        const model = this.value;
+        if (model) {
+          localBackend.model = model;
+          localStorage.setItem('agent_local_backend_model', model);
+          // Update badge if visible
+          updateModelBadgeForLocal(model);
+          updateBadge();
+        }
+      });
     }
     if (localBackend.enabled) {
       _activateLocal(true);
@@ -2068,5 +2456,6 @@ document.addEventListener('DOMContentLoaded', () => {
     console.warn('[Local Probe] startup probe failed:', message);
     addNotice(`Startup local probe failed: ${message}`);
   });
+  window.addEventListener('beforeunload', flushSaveSessions);
   setStopButtonState(false);
 });

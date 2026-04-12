@@ -205,6 +205,72 @@ Primary families:
   - runtime continuation notes to keep loop state coherent after compaction
 - Multi-scope retention cache (`AgentRuntimeCache`) with TTL + max entries + max bytes policy per scope
 
+## UI Rendering Pipeline
+
+The UI rendering system automatically detects and transforms message content for readability and formatting.
+
+### Markdown Detection and Rendering
+
+**`containsMarkdown(text)`** checks for syntax patterns:
+- Headings: `## Title`
+- Tables: `| column | column |`
+- Fenced code: `` ``` ``
+- Lists: `- item` or `1. item`
+- Bold/italic: `**text**`, `__text__`, `*text*`, `_text_`
+- Inline code: `` `code` ``
+- Blockquotes: `> quote`
+- Horizontal rules: `---`
+
+### Rendering Pipeline
+
+1. **Detection Phase**: `containsMarkdown()` scans content for markdown syntax
+2. **Block Rendering**: `renderMarkdownBlocks(text)` transforms block-level markdown to HTML:
+   - Fenced code blocks with language syntax highlighting support
+   - Headings (## through ####) with proper semantic levels
+   - Markdown tables (`| Header | Header |`) with `<table>`, `<thead>`, `<tbody>`
+   - Ordered/unordered lists with proper nesting
+   - Blockquotes with left border styling
+   - Horizontal rules
+3. **Inline Rendering**: `renderInlineMarkdown(text)` handles cell/line content:
+   - Backtick code: `` `code` `` → `<code>`
+   - Links: `[text](url)` → `<a>`
+   - Bold: `**text**` / `__text__` → `<strong>`
+   - Italic: `*text*` / `_text_` → `<em>`
+4. **HTML Sanitization**: `sanitizeHtmlFragment()` strips unsafe tags and attributes; whitelisted: `<p>`, `<h1-6>`, `<code>`, `<pre>`, `<table>`, `<tr>`, `<td>`, `<th>`, `<ul>`, `<ol>`, `<li>`, `<blockquote>`, `<strong>`, `<em>`, `<a>`, `<hr>`
+
+### Message Rendering in `addMessage()`
+
+**User Messages:**
+- If `containsMarkdown()` detects markdown: render via `renderAgentHtml()` + `html-body` CSS class (pretty formatting)
+- Else: plain text with `textContent` (no rendering)
+- All text inside user bubble forced to white for readability on blue background
+
+**Agent Messages:**
+- Always rendered via `renderAgentHtml()` with `html-body` CSS class
+- Supports markdown + backward-compat HTML for legacy persisted messages
+
+**Tool / Error / System Messages:**
+- Collapsible `<details>` element with expandable summary
+- Summary shows 120-char preview (truncated with `…`)
+- Full content in scrollable `<pre>` block (max-height 400px)
+- JSON payloads auto-formatted with `JSON.stringify(..., null, 2)`
+- Badge shows `R{round} · call/result · role`
+
+### Page Refresh and Re-rendering
+
+`renderChatFromMessages()` is called on page load and session switch. It:
+1. Clears the message container
+2. Replays all stored messages through `addMessage()`
+3. Markdown detection + rendering applies every time, so persisted messages always render correctly even after code updates
+
+### Styling
+
+- **User bubble**: `rgba(51, 122, 210, 0.75)` (darker semi-transparent blue) with white text
+- **Agent bubble**: dark grey background with primary text color
+- **Code blocks**: dark overlay with bright blue text
+- **Tables**: styled with borders and dark header background
+- **Links**: bright blue with underline
+
 ## Safety + Prompt Injection
 
 - Tool outputs are treated as untrusted data.

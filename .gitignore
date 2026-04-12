@@ -27,6 +27,7 @@ coverage/
 *.tmp
 *.temp
 .cache/
+.clawd
 
 # Local progress notes (not tracked)
 progress/

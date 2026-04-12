@@ -2172,8 +2172,13 @@ function addMessage(role, content, round, isCall=false, isResult=false, hiddenTh
   if (role === 'user') {
     wrap.className = 'msg user';
     const bubble = document.createElement('div');
-    bubble.className = 'msg-content';
-    bubble.textContent = String(content || '');
+    if (containsMarkdown(content)) {
+      bubble.className = 'msg-content html-body';
+      bubble.innerHTML = renderAgentHtml(content);
+    } else {
+      bubble.className = 'msg-content';
+      bubble.textContent = String(content || '');
+    }
     wrap.appendChild(bubble);
   } else if (role === 'agent') {
     wrap.className = 'msg assistant';
@@ -2194,24 +2199,44 @@ function addMessage(role, content, round, isCall=false, isResult=false, hiddenTh
       wrap.appendChild(details);
     }
   } else {
-    // tool, error, system — monospace pill style
+    // tool, error, system — collapsible debug pill
     const cssRole = role === 'error' ? 'msg-error' : role === 'tool' ? 'msg-tool' : 'msg-system';
     wrap.className = `msg assistant ${cssRole}`;
     const bubble = document.createElement('div');
     bubble.className = 'msg-content msg-content-mono';
+
     const meta = [];
     if (round) meta.push(`R${round}`);
     if (isCall) meta.push('call');
     if (isResult) meta.push('result');
-    if (meta.length) {
-      const badge = document.createElement('span');
-      badge.className = 'msg-meta-badge';
-      badge.textContent = meta.join(' · ');
-      bubble.appendChild(badge);
-    }
-    const text = document.createElement('span');
-    text.textContent = String(content || '');
-    bubble.appendChild(text);
+    meta.push(role);
+
+    const badge = document.createElement('span');
+    badge.className = 'msg-meta-badge';
+    badge.textContent = meta.join(' · ');
+    bubble.appendChild(badge);
+
+    // Try to pretty-print JSON, otherwise show as-is
+    let prettyContent = String(content || '');
+    try {
+      const parsed = JSON.parse(prettyContent);
+      prettyContent = JSON.stringify(parsed, null, 2);
+    } catch { /* not JSON, use raw */ }
+
+    const details = document.createElement('details');
+    details.className = 'debug-details';
+    const summary = document.createElement('summary');
+    summary.className = 'debug-summary';
+    // Show a short preview in the summary line
+    const preview = prettyContent.length > 120 ? prettyContent.slice(0, 120).replace(/\n/g, ' ') + '…' : prettyContent.replace(/\n/g, ' ');
+    summary.textContent = preview;
+    details.appendChild(summary);
+    const pre = document.createElement('pre');
+    pre.className = 'debug-pre';
+    pre.textContent = prettyContent;
+    details.appendChild(pre);
+    bubble.appendChild(details);
+
     wrap.appendChild(bubble);
   }
 

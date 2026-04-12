@@ -7,6 +7,508 @@
   <style>
     :root {
       --bg: #0a1118;
+      --bg-light: #0f1724;
+      --panel: #111b27;
+      --panel-2: #172436;
+      --line: rgba(255, 255, 255, 0.08);
+      --line-strong: rgba(255, 255, 255, 0.12);
+      --text: #e8eef7;
+      --muted: #9caecc;
+      --accent: #337ad2;
+      --accent-bright: #5b9bfd;
+      --ok: #61d4a4;
+      --warn: #ffd27a;
+      --mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
+      --sans: "Segoe UI", "Inter", system-ui, sans-serif;
+      --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body { width: 100%; height: 100%; }
+
+    body {
+      background: linear-gradient(135deg, #0a1118 0%, #0f1724 40%, #0a1118 100%);
+      color: var(--text);
+      font: 14px/1.6 var(--sans);
+      padding: 40px 20px;
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: 32px;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 12px;
+      background: linear-gradient(135deg, var(--text), var(--accent-bright));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      font-weight: 700;
+    }
+
+    .sub {
+      color: var(--muted);
+      max-width: 900px;
+      margin-bottom: 32px;
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .badges {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 40px;
+    }
+
+    .badge {
+      padding: 8px 14px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, rgba(91, 155, 253, 0.1), rgba(51, 122, 210, 0.05));
+      border: 1px solid var(--accent-bright);
+      color: var(--accent-bright);
+      font: 11px var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+      transition: var(--transition);
+    }
+
+    .badge:hover {
+      background: linear-gradient(135deg, rgba(91, 155, 253, 0.15), rgba(51, 122, 210, 0.1));
+      transform: translateY(-2px);
+    }
+
+    .panel {
+      border: 1px solid var(--line-strong);
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(23, 36, 54, 0.5), rgba(17, 27, 39, 0.3));
+      backdrop-filter: blur(10px);
+      padding: 28px;
+      margin-bottom: 20px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      transition: var(--transition);
+    }
+
+    .panel:hover {
+      border-color: var(--line);
+      background: linear-gradient(180deg, rgba(23, 36, 54, 0.6), rgba(17, 27, 39, 0.4));
+      box-shadow: 0 12px 48px rgba(91, 155, 253, 0.08);
+    }
+
+    .panel h2 {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--accent-bright);
+      margin-bottom: 16px;
+      font-weight: 700;
+    }
+
+    .panel p {
+      color: var(--muted);
+      margin-bottom: 12px;
+      line-height: 1.7;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: linear-gradient(135deg, rgba(23, 36, 54, 0.4), rgba(17, 27, 39, 0.2));
+      padding: 16px;
+      transition: var(--transition);
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(91, 155, 253, 0.1), transparent);
+      transition: var(--transition);
+    }
+
+    .card:hover {
+      border-color: var(--accent-bright);
+      background: linear-gradient(135deg, rgba(51, 122, 210, 0.15), rgba(23, 36, 54, 0.3));
+      box-shadow: 0 8px 24px rgba(91, 155, 253, 0.1);
+      transform: translateY(-4px);
+    }
+
+    .card:hover::before {
+      left: 100%;
+    }
+
+    .card > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .k {
+      color: var(--accent-bright);
+      font: 10px var(--mono);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      letter-spacing: 0.1em;
+      font-weight: 700;
+    }
+
+    .v {
+      font-size: 15px;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .d {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    ul {
+      padding-left: 20px;
+    }
+
+    li {
+      color: var(--muted);
+      margin-bottom: 10px;
+      line-height: 1.7;
+    }
+
+    li strong {
+      color: var(--accent-bright);
+    }
+
+    .mermaid {
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: #0e1824;
+      padding: 16px;
+      overflow-x: auto;
+      margin: 20px 0;
+    }
+
+    code {
+      font-family: var(--mono);
+      font-size: 12px;
+      background: rgba(91, 155, 253, 0.12);
+      border: 1px solid rgba(91, 155, 253, 0.2);
+      color: var(--accent-bright);
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 500;
+    }
+
+    .section-divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
+      margin: 40px 0;
+    }
+
+    pre {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      overflow-x: auto;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    @media (max-width: 768px) {
+      h1 {
+        font-size: 24px;
+      }
+
+      .panel {
+        padding: 20px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .badges {
+        gap: 8px;
+      }
+
+      body {
+        padding: 20px 12px;
+      }
+    }
+
+    /* Smooth scroll */
+    html {
+      scroll-behavior: smooth;
+    }
+
+    /* Selection styling */
+    ::selection {
+      background: rgba(91, 155, 253, 0.3);
+      color: var(--text);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🤖 JS Agent Architecture</h1>
+    <p class="sub">
+      Comprehensive runtime architecture for a browser-first multi-step agent with semantic loop guards,
+      context-aware orchestration, modular skills, and intelligent prompt composition.
+    </p>
+
+    <div class="badges">
+      <div class="badge">🔄 Runtime: Browser</div>
+      <div class="badge">🎯 Loop: Multi-round tool orchestration</div>
+      <div class="badge">📝 Composer: Sectioned + dynamic boundary</div>
+      <div class="badge">🧩 Skills: Core + modules + groups</div>
+      <div class="badge">💾 Context: Budget + microcompact + summarize</div>
+      <div class="badge">🛡️ Safety: Injection-aware continuations</div>
+    </div>
+
+    <section class="panel">
+      <h2>📊 Overall Agent Loop</h2>
+      <p>
+        The bounded loop with intelligent state transitions, implemented in
+        <code>src/app/agent.js</code> and <code>src/skills/shared.js</code>.
+      </p>
+      <pre class="mermaid">flowchart TD
+  U["👤 User message"] --> P["🎯 Preflight plan"]
+  P --> E["🔍 Context enrichment"]
+  E --> L["🧠 LLM call"]
+  L --> T{Tool calls detected?}
+  T -- no --> A["✨ Final answer"]
+  T -- yes --> X["⚙️ Execute tool batches"]
+  X --> B["💾 Tool result budget"]
+  B --> N["📢 Inject runtime reminders"]
+  N --> M["🗜️ Microcompact old tool results"]
+  M --> C{Context over limit?}
+  C -- no --> L
+  C -- yes --> S["📊 Summarize context"]
+  S --> Q{Summary succeeded?}
+  Q -- yes --> L
+  Q -- no --> F["⏱️ Fallback tail compression"]
+  F --> L</pre>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <section class="panel">
+      <h2>🏗️ Layered Runtime Architecture</h2>
+      <pre class="mermaid">flowchart LR
+  subgraph UI["🎨 UI Layer"]
+    I["index.html"]
+    U1["ui-modern.js"]
+    S1["state.js"]
+  end
+
+  subgraph APP["🎯 App Loop Layer"]
+    A1["agent.js"]
+    T1["tools.js"]
+    L1["llm.js"]
+    B1["local-backend.js"]
+  end
+
+  subgraph CORE["⚙️ Core Prompt Layer"]
+    O1["orchestrator.js"]
+    P1["prompt-loader.js"]
+    R1["regex.js"]
+  end
+
+  subgraph SKILLS["🧩 Skills Layer"]
+    SH["shared.js"]
+    C1["core/intents.js"]
+    C2["core/tool-meta.js"]
+    M1["modules/web-runtime.js"]
+    M2["modules/data-runtime.js"]
+    M3["modules/registry-runtime.js"]
+    M4["modules/filesystem-runtime.js"]
+    G["groups/*.js"]
+  end
+
+  subgraph EXT["🌐 External IO"]
+    CL["☁️ Cloud providers"]
+    LB["💻 Local backend"]
+    FS["📁 File System"]
+  end
+
+  UI --> APP --> CORE --> SKILLS --> EXT</pre>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <section class="panel">
+      <h2>📐 Prompt Composition Pipeline</h2>
+      <p>Section-based system prompt construction with runtime state awareness.</p>
+      <pre class="mermaid">flowchart LR
+  A["📦 Snapshot snippets"] --> C["🔧 Build System Prompt"]
+  B["📄 Base templates"] --> C
+  D["💡 Runtime hints"] --> C
+  C --> E["📝 Sectioned prompt"]
+  E --> F["🔀 Dynamic boundary"]
+  F --> G["📢 Runtime reminders"]</pre>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <section class="panel">
+      <h2>🎯 Core Agentic Systems</h2>
+      <div class="grid">
+        <div class="card">
+          <div class="k">🎯 Preflight</div>
+          <div class="v">Intent + Query Steering</div>
+          <div class="d">Heuristic detection combined with short-timeout planner LLM to optimize first tool selection and query routing.</div>
+        </div>
+        <div class="card">
+          <div class="k">🔧 Tool Selection</div>
+          <div class="v">Risk-Aware Metadata</div>
+          <div class="d">Execution metadata controls batching and concurrency-safe parallel execution for read-only operations.</div>
+        </div>
+        <div class="card">
+          <div class="k">🧩 Skills Modularity</div>
+          <div class="v">Shared Orchestration</div>
+          <div class="d">Web/search/network logic isolated in runtime modules while shared.js focuses on orchestration and wiring.</div>
+        </div>
+        <div class="card">
+          <div class="k">💾 Context Manager</div>
+          <div class="v">Budget + Microcompact</div>
+          <div class="d">Large tool outputs compacted before storage; older results cleared; summarization runs only when needed.</div>
+        </div>
+        <div class="card">
+          <div class="k">🛡️ Loop Guardrails</div>
+          <div class="v">Semantic Anti-Repeat</div>
+          <div class="d">Near-duplicate web_search signatures blocked to prevent repetitive loops. Repeated failures disable tool calls.</div>
+        </div>
+        <div class="card">
+          <div class="k">🔐 Prompt Safety</div>
+          <div class="v">Injection-Aware Cont.</div>
+          <div class="d">Tool outputs treated as untrusted; suspicious payloads tagged and converted into safety reminders.</div>
+        </div>
+        <div class="card">
+          <div class="k">🧠 Memory</div>
+          <div class="v">Long-Term Persistence</div>
+          <div class="d">Sessions, cache, memories, preferences, and tasks persisted in localStorage with cross-tab sync.</div>
+        </div>
+        <div class="card">
+          <div class="k">📈 Query Strategy</div>
+          <div class="v">Bounded Orchestration</div>
+          <div class="d">Each round decides: execute tools, continue with evidence, compact context, or force final answer.</div>
+        </div>
+        <div class="card">
+          <div class="k">📦 Snapshot Port</div>
+          <div class="v">Dist Reuse + Adapt</div>
+          <div class="d">Snapshot skill metadata and prompt snippets reused directly in runtime prompt and tool orchestration.</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <section class="panel">
+      <h2>🔄 Query Strategy & Transition Rules</h2>
+      <ul>
+        <li><strong>Round-bounded loop</strong> with deterministic stop conditions.</li>
+        <li><strong>No usable tool call:</strong> loop asks for corrective continuation if model output has no usable intent.</li>
+        <li><strong>Repeated failures:</strong> exact tool signatures disabled; semantic signatures block near-duplicate web_search calls.</li>
+        <li><strong>Structured continuations:</strong> injected for tool summaries, permission denials, and compaction notes.</li>
+        <li><strong>Injection detection:</strong> suspicious patterns in tool results trigger explicit safety reminders before next model turn.</li>
+        <li><strong>Context management:</strong> runs after each tool execution phase to keep prompt growth controlled.</li>
+        <li><strong>Final answer forcing:</strong> at max rounds, model is forced to produce evidence-based answer.</li>
+      </ul>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <section class="panel">
+      <h2>📍 Implementation Anchors</h2>
+      <ul>
+        <li><code>src/app/agent.js</code> — loop state, tool execution, context manager pipeline, guardrails, final-answer forcing</li>
+        <li><code>src/core/orchestrator.js</code> — sectioned system prompt builder and runtime continuation composer</li>
+        <li><code>src/app/runtime-memory.js</code> — long-term memory manager and multi-scope retention cache</li>
+        <li><code>src/skills/snapshot-adapter.js</code> — sanitized snapshot prompt/skill bridge into runtime</li>
+        <li><code>scripts/build-snapshot.mjs</code> — snapshot transpile + prompt snippet extraction pipeline</li>
+        <li><code>src/skills/shared.js</code> — preflight plan, planner LLM call, runtime orchestration, registry wiring</li>
+        <li><code>src/skills/core/*</code> — intent detection and tool execution metadata</li>
+        <li><code>src/skills/modules/web-runtime.js</code> — search providers, web fetch, weather, geolocation, page utils</li>
+        <li><code>src/skills/modules/*</code> — filesystem/data/registry runtime responsibilities</li>
+        <li><code>src/skills/groups/*.js</code> — flattened UI group descriptors for tool families</li>
+      </ul>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <section class="panel">
+      <h2>🚀 Key Capabilities</h2>
+      <div class="grid">
+        <div class="card">
+          <div class="k">🌐 Web Context</div>
+          <div class="v">Search + Fetch</div>
+          <div class="d">Integrated search, page reading, link extraction, and metadata retrieval powered by multiple providers.</div>
+        </div>
+        <div class="card">
+          <div class="k">📁 Filesystem</div>
+          <div class="v">Full File Access</div>
+          <div class="d">Tree walk, read, write, search, copy, move, delete with browser File System Access API support.</div>
+        </div>
+        <div class="card">
+          <div class="k">🧮 Data Tools</div>
+          <div class="v">Parse + Transform</div>
+          <div class="d">JSON/CSV parsing, todos, tasks, and structured data transformation with validation.</div>
+        </div>
+        <div class="card">
+          <div class="k">⏰ Device Access</div>
+          <div class="v">Datetime + Location</div>
+          <div class="d">Current time, timezone detection, geolocation, weather, clipboard, and system notifications.</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.12.3/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      securityLevel: 'loose',
+      theme: 'dark',
+      themeVariables: {
+        primaryColor: '#172436',
+        primaryBorderColor: '#5b9bfd',
+        textColor: '#e8eef7',
+        fontSize: '14px'
+      }
+    });
+  </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JS Agent - Architecture</title>
+  <style>
+    :root {
+      --bg: #0a1118;
       --panel: #111b27;
       --panel-2: #172436;
       --line: rgba(255, 255, 255, 0.12);

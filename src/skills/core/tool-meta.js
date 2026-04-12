@@ -37,14 +37,14 @@
     'memory_list',
     'tool_search',
     'snapshot_skill_catalog',
-    'clawd_readFile',
-    'clawd_listDir',
-    'clawd_glob',
-    'clawd_searchCode',
-    'clawd_webFetch',
-    'clawd_getDiagnostics',
-    'clawd_memoryRead',
-    'clawd_lsp'
+    'runtime_readFile',
+    'runtime_listDir',
+    'runtime_glob',
+    'runtime_searchCode',
+    'runtime_webFetch',
+    'runtime_getDiagnostics',
+    'runtime_memoryRead',
+    'runtime_lsp'
   ]);
 
   const WRITE_CLASSIFIED_TOOLS = new Set([
@@ -69,13 +69,13 @@
     'task_create',
     'task_update',
     'memory_write',
-    'clawd_writeFile',
-    'clawd_editFile',
-    'clawd_multiEdit',
-    'clawd_runTerminal',
-    'clawd_todoWrite',
-    'clawd_memoryWrite',
-    'clawd_spawnAgent'
+    'runtime_writeFile',
+    'runtime_editFile',
+    'runtime_multiEdit',
+    'runtime_runTerminal',
+    'runtime_todoWrite',
+    'runtime_memoryWrite',
+    'runtime_spawnAgent'
   ]);
 
   const NON_CONCURRENT_TOOLS = new Set([
@@ -100,13 +100,13 @@
     'task_update',
     'worker_batch',
     'ask_user_question',
-    'clawd_writeFile',
-    'clawd_editFile',
-    'clawd_multiEdit',
-    'clawd_runTerminal',
-    'clawd_todoWrite',
-    'clawd_memoryWrite',
-    'clawd_spawnAgent'
+    'runtime_writeFile',
+    'runtime_editFile',
+    'runtime_multiEdit',
+    'runtime_runTerminal',
+    'runtime_todoWrite',
+    'runtime_memoryWrite',
+    'runtime_spawnAgent'
   ]);
 
   const BUILTIN_EXECUTION_META = {

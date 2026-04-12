@@ -441,7 +441,7 @@
 
     async function multiEditFiles({ edits }) {
       if (!Array.isArray(edits) || !edits.length) {
-        throw new Error('clawd_multiEdit requires a non-empty edits array.');
+        throw new Error('runtime_multiEdit requires a non-empty edits array.');
       }
 
       const workingCopies = new Map();
@@ -454,8 +454,8 @@
         const newValue = String(edit.newString ?? edit.newText ?? '');
         const replaceAll = edit.replaceAll === true;
 
-        if (!targetPath) throw new Error('clawd_multiEdit: each edit requires path.');
-        if (!oldValue) throw new Error(`clawd_multiEdit: edit for ${targetPath} requires oldString.`);
+        if (!targetPath) throw new Error('runtime_multiEdit: each edit requires path.');
+        if (!oldValue) throw new Error(`runtime_multiEdit: edit for ${targetPath} requires oldString.`);
 
         if (!workingCopies.has(targetPath)) {
           const { handle } = await resolveFile(targetPath, false);
@@ -470,10 +470,10 @@
         const entry = workingCopies.get(targetPath);
         const occurrenceCount = countOccurrences(entry.content, oldValue);
         if (!occurrenceCount) {
-          throw new Error(`clawd_multiEdit: oldString not found in "${targetPath}". Re-read the file and include exact context.`);
+          throw new Error(`runtime_multiEdit: oldString not found in "${targetPath}". Re-read the file and include exact context.`);
         }
         if (!replaceAll && occurrenceCount > 1) {
-          throw new Error(`clawd_multiEdit: oldString appears ${occurrenceCount} times in "${targetPath}". Add more context or set replaceAll:true.`);
+          throw new Error(`runtime_multiEdit: oldString appears ${occurrenceCount} times in "${targetPath}". Add more context or set replaceAll:true.`);
         }
 
         entry.content = replaceAll
@@ -488,7 +488,7 @@
       }
 
       return formatToolResult(
-        'clawd_multiEdit',
+        'runtime_multiEdit',
         orderedPaths.map(path => {
           const entry = workingCopies.get(path);
           return `Edited ${path} (${entry.applied} change${entry.applied === 1 ? '' : 's'})`;
@@ -507,7 +507,7 @@
     } = {}) {
       const rawQuery = String(query || '').trim();
       if (!rawQuery) {
-        throw new Error('clawd_searchCode requires query.');
+        throw new Error('runtime_searchCode requires query.');
       }
 
       const flags = caseSensitive ? 'g' : 'gi';
@@ -547,7 +547,7 @@
       }
 
       return formatToolResult(
-        'clawd_searchCode',
+        'runtime_searchCode',
         [
           `Path: ${path || '/'}`,
           `Query: ${rawQuery}`,

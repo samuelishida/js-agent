@@ -28,7 +28,7 @@
       --ease:    cubic-bezier(0.4,0,0.2,1);
     }
     *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
-    html { scroll-behavior:smooth; zoom:1.25; }
+    html { scroll-behavior:smooth; }
     body {
       background: var(--bg);
       color: var(--text);
@@ -320,15 +320,96 @@
     /* ── Selection ── */
     ::selection { background:rgba(91,155,253,0.25); color:var(--text); }
 
+    /* ── Mobile nav toggle button ── */
+    .nav-toggle {
+      display:none;
+      position:fixed; top:12px; right:12px; z-index:200;
+      width:40px; height:40px; border-radius:10px;
+      background:var(--panel2); border:1px solid var(--lines);
+      color:var(--text); font-size:18px; cursor:pointer;
+      align-items:center; justify-content:center;
+      transition:background 0.2s var(--ease);
+    }
+    .nav-toggle:hover { background:var(--panel3); }
+
+    /* ── Mobile overlay ── */
+    .nav-overlay {
+      display:none;
+      position:fixed; inset:0; z-index:99;
+      background:rgba(0,0,0,0.55); backdrop-filter:blur(2px);
+    }
+    .nav-overlay.open { display:block; }
+
     /* ── Mobile ── */
     @media (max-width:860px) {
-      nav { display:none; }
-      main { padding:28px 20px 60px; }
+      /* Show hamburger */
+      .nav-toggle { display:flex; }
+
+      /* Sidebar slides in as drawer */
+      nav {
+        position:fixed; top:0; left:0; z-index:100;
+        height:100vh; width:80vw; max-width:280px;
+        transform:translateX(-105%);
+        transition:transform 0.25s var(--ease);
+        box-shadow:4px 0 24px rgba(0,0,0,0.4);
+      }
+      nav.open { transform:translateX(0); }
+
+      main { padding:20px 16px 60px; }
       .card-grid { grid-template-columns:1fr; }
+
+      /* Hero */
+      .hero { margin-bottom:40px; }
+      .hero h1 { font-size:26px; }
+      .hero .lead { font-size:14px; }
+
+      /* Section headings */
+      section h2 { font-size:18px; }
+      section { margin-bottom:48px; }
+      .div { margin:36px 0; }
+
+      /* Layer card header stacks vertically */
+      .lcard-hd { flex-direction:column; align-items:flex-start; gap:10px; padding:14px 16px; }
+      .lcard-files, .lcard-bts { flex-wrap:wrap; }
+      .lcard-bd-inner { padding:14px 16px; }
+
+      /* Info rows stack on very small screens */
+      .ir { flex-direction:column; gap:4px; }
+      .ir-k { min-width:unset; }
+
+      /* Tables scroll horizontally */
+      table { display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+
+      /* Code blocks scroll horizontally */
+      .cb pre { font-size:11px; }
+
+      /* Mermaid diagrams scroll */
+      .mmd-wrap { padding:14px; }
+
+      /* Bigger tap targets for steps */
+      .step { padding:14px; }
+      .step::before { width:32px; height:32px; flex-shrink:0; }
+
+      /* Pill label row in layers section */
+      div[style*='display:flex'][style*='mono'] { flex-direction:column; align-items:flex-start; gap:6px; }
+    }
+
+    @media (max-width:480px) {
+      main { padding:16px 12px 60px; }
+      .hero h1 { font-size:22px; }
+      .card-hd { padding:13px 14px; }
+      .card-bd { padding:0 14px 13px; }
+      .lcard-bd-inner { padding:12px 14px; }
+      .lbadge { white-space:normal; word-break:break-word; }
+      .fp { white-space:normal; word-break:break-all; }
     }
   </style>
 </head>
 <body>
+
+<!-- ════════════════════ MOBILE NAV CONTROLS ════════════════════ -->
+<button class="nav-toggle" id="navToggle" aria-label="Open navigation">☰</button>
+<div class="nav-overlay" id="navOverlay"></div>
 
 <!-- ════════════════════ SIDEBAR NAV ════════════════════ -->
 <nav id="nav">
@@ -1811,6 +1892,17 @@ node --check src/app/llm.js</pre>
 <script>
   function tog(card) { card.classList.toggle('open'); }
   function togStep(s) { s.classList.toggle('open'); }
+
+  // Mobile nav drawer
+  const navToggle  = document.getElementById('navToggle');
+  const navEl      = document.getElementById('nav');
+  const navOverlay = document.getElementById('navOverlay');
+  function openNav()  { navEl.classList.add('open'); navOverlay.classList.add('open'); navToggle.textContent = '✕'; }
+  function closeNav() { navEl.classList.remove('open'); navOverlay.classList.remove('open'); navToggle.textContent = '☰'; }
+  navToggle.addEventListener('click', () => navEl.classList.contains('open') ? closeNav() : openNav());
+  navOverlay.addEventListener('click', closeNav);
+  // Close drawer when a nav link is tapped on mobile
+  navEl.querySelectorAll('a').forEach(a => a.addEventListener('click', () => { if (window.innerWidth <= 860) closeNav(); }));
 
   // Reveal sections on scroll
   const io = new IntersectionObserver(entries => {

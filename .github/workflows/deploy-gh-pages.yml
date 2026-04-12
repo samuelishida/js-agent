@@ -6,7 +6,7 @@ env:
 
 # Grant minimal permissions required so GITHUB_TOKEN can push pages
 permissions:
-  contents: read
+  contents: write
   pages: write
 
 on:

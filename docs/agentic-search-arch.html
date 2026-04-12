@@ -222,6 +222,40 @@
     .layer-files { display:flex; gap:6px; flex-wrap:wrap; }
     .arr { text-align:center; color:var(--dim); font-size:15px; line-height:1; margin:2px 0; }
 
+    /* ── Layer Cards ── */
+    .lstack { display:flex; flex-direction:column; }
+    .lstack-arr {
+      text-align:center; color:var(--dim); font:11px var(--mono);
+      padding:5px 0; letter-spacing:0.08em; text-transform:uppercase; user-select:none;
+    }
+    .lcard {
+      border:1px solid var(--line); border-radius:13px;
+      background:var(--panel); overflow:hidden; cursor:pointer;
+      transition:all 0.2s var(--ease);
+    }
+    .lcard:hover { border-color:rgba(91,155,253,0.3); background:var(--panel2); box-shadow:0 4px 20px rgba(0,0,0,0.2); }
+    .lcard.open  { border-color:rgba(91,155,253,0.4); box-shadow:0 6px 24px rgba(91,155,253,0.08); }
+    .lcard-hd    { display:flex; align-items:center; gap:14px; padding:18px 20px; flex-wrap:wrap; }
+    .lcard-n {
+      width:40px; height:40px; border-radius:11px; flex-shrink:0;
+      display:flex; align-items:center; justify-content:center;
+      font:800 16px var(--mono);
+    }
+    .lcard-info  { flex:1; min-width:180px; }
+    .lcard-name  { font-size:15px; font-weight:700; color:var(--text); margin-bottom:4px; }
+    .lcard-sub   { font-size:12px; color:var(--dim); line-height:1.5; }
+    .lcard-files { display:flex; gap:6px; flex-wrap:wrap; }
+    .lcard-bts   { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+    .lbadge      { font:600 10px var(--mono); padding:4px 9px; border-radius:5px; white-space:nowrap; }
+    .lbadge-pub  { background:rgba(97,212,164,0.1);  color:var(--green);  border:1px solid rgba(97,212,164,0.25); }
+    .lbadge-load { background:rgba(255,210,122,0.08); color:var(--amber); border:1px solid rgba(255,210,122,0.22); }
+    .lcard.open .card-tog { background:rgba(91,155,253,0.15); border-color:rgba(91,155,253,0.3); color:var(--blue); rotate:180deg; }
+    .lcard-bd    { display:none; border-top:1px solid var(--line); }
+    .lcard.open .lcard-bd { display:block; }
+    .lcard-bd-inner { padding:18px 20px; }
+    .lcard-desc  { font-size:13.5px; color:var(--muted); line-height:1.75; margin-bottom:14px; }
+    .lcard-rows  { margin-bottom:14px; }
+
     /* ── File Pill / Inline Code ── */
     .fp {
       display:inline-flex; align-items:center;
@@ -306,7 +340,6 @@
   <a href="#loop">Agent Loop</a>
   <a href="#layers">Architecture Layers</a>
   <div class="nav-group">Core Systems</div>
-  <a href="#bootstrap">Bootstrap Order</a>
   <a href="#prompts">Prompt Composition</a>
   <a href="#tools">Tool Execution</a>
   <a href="#context">Context Manager</a>
@@ -510,223 +543,165 @@
   <section id="layers" class="rv">
     <div class="sec-hd">
       <div class="sec-icon">🏗️</div>
-      <h2>Architecture Layers</h2>
+      <h2>Architecture Layers + Bootstrap Order</h2>
     </div>
     <p class="sec-desc">
       Six dependency layers assembled via ordered <code>defer</code> tags in <code>index.html</code>.
-      Each layer publishes one <code>window.*</code> surface consumed by the next.
-      The HTML <em>is</em> the dependency graph — no bundler needed.
+      Lower layers bootstrap first and publish a narrow <code>window.*</code> surface — upper layers
+      consume those surfaces. The script order in the HTML <em>is</em> the dependency graph.
+      No bundler needed. Click any layer to expand its published API, consumed surfaces, and loading notes.
     </p>
-    <div class="stack">
-      <div class="layer">
-        <div class="layer-l">
-          <div class="layer-n" style="background:rgba(167,139,250,0.14);color:var(--purple);border:1px solid rgba(167,139,250,0.28)">1</div>
-          <div>
-            <div class="layer-name">UI Layer</div>
-            <div class="layer-hint">Entry point, state, rendering</div>
-          </div>
-        </div>
-        <div class="layer-files">
-          <span class="fp">index.html</span>
-          <span class="fp">state.js</span>
-          <span class="fp">ui-modern.js</span>
-        </div>
-      </div>
-      <div class="arr">↓</div>
-      <div class="layer">
-        <div class="layer-l">
-          <div class="layer-n" style="background:rgba(91,155,253,0.14);color:var(--blue);border:1px solid rgba(91,155,253,0.28)">2</div>
-          <div>
-            <div class="layer-name">App Loop Layer</div>
-            <div class="layer-hint">Bounded loop, LLM dispatch, tools</div>
-          </div>
-        </div>
-        <div class="layer-files">
-          <span class="fp">agent.js</span>
-          <span class="fp">llm.js</span>
-          <span class="fp">tools.js</span>
-          <span class="fp">local-backend.js</span>
-        </div>
-      </div>
-      <div class="arr">↓</div>
-      <div class="layer">
-        <div class="layer-l">
-          <div class="layer-n" style="background:rgba(97,212,164,0.14);color:var(--green);border:1px solid rgba(97,212,164,0.28)">3</div>
-          <div>
-            <div class="layer-name">Core Prompt Layer</div>
-            <div class="layer-hint">System prompt builder, parser, template loader</div>
-          </div>
-        </div>
-        <div class="layer-files">
-          <span class="fp">orchestrator.js</span>
-          <span class="fp">prompt-loader.js</span>
-          <span class="fp">regex.js</span>
-        </div>
-      </div>
-      <div class="arr">↓</div>
-      <div class="layer">
-        <div class="layer-l">
-          <div class="layer-n" style="background:rgba(255,210,122,0.14);color:var(--amber);border:1px solid rgba(255,210,122,0.28)">4</div>
-          <div>
-            <div class="layer-name">Skills Assembly</div>
-            <div class="layer-hint">Preflight, registry wiring, groups</div>
-          </div>
-        </div>
-        <div class="layer-files">
-          <span class="fp">shared.js</span>
-          <span class="fp">index.js</span>
-          <span class="fp">groups/*.js</span>
-        </div>
-      </div>
-      <div class="arr">↓</div>
-      <div class="layer">
-        <div class="layer-l">
-          <div class="layer-n" style="background:rgba(248,113,113,0.14);color:var(--red);border:1px solid rgba(248,113,113,0.28)">5</div>
-          <div>
-            <div class="layer-name">Skills Runtime Modules</div>
-            <div class="layer-hint">Web, filesystem, data, registry factories</div>
-          </div>
-        </div>
-        <div class="layer-files">
-          <span class="fp">web-runtime.js</span>
-          <span class="fp">filesystem-runtime.js</span>
-          <span class="fp">data-runtime.js</span>
-          <span class="fp">registry-runtime.js</span>
-        </div>
-      </div>
-      <div class="arr">↓</div>
-      <div class="layer">
-        <div class="layer-l">
-          <div class="layer-n" style="background:rgba(97,212,164,0.14);color:var(--green);border:1px solid rgba(97,212,164,0.28)">6</div>
-          <div>
-            <div class="layer-name">Skills Core + Snapshot</div>
-            <div class="layer-hint">Intent metadata, tool-meta, snapshot adapter</div>
-          </div>
-        </div>
-        <div class="layer-files">
-          <span class="fp">intents.js</span>
-          <span class="fp">tool-meta.js</span>
-          <span class="fp">snapshot-adapter.js</span>
-          <span class="fp">snapshot-data.js</span>
-        </div>
-      </div>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;font:600 11px var(--mono);color:var(--dim);flex-wrap:wrap">
+      <span class="pill pill-p" style="font-size:10px">1 UI — highest consumer</span>
+      <span style="color:var(--line)">→</span>
+      <span style="color:var(--dim)">App Loop</span>
+      <span style="color:var(--line)">→</span>
+      <span style="color:var(--dim)">Core Prompt</span>
+      <span style="color:var(--line)">→</span>
+      <span style="color:var(--dim)">Skills Assembly</span>
+      <span style="color:var(--line)">→</span>
+      <span style="color:var(--dim)">Runtime Modules</span>
+      <span style="color:var(--line)">→</span>
+      <span class="pill pill-g" style="font-size:10px">6 Core — loads first</span>
     </div>
-  </section>
 
-  <div class="div"></div>
+    <div class="lstack">
 
-  <!-- ── BOOTSTRAP ORDER ── -->
-  <section id="bootstrap" class="rv">
-    <div class="sec-hd">
-      <div class="sec-icon">🚀</div>
-      <h2>Bootstrap Order</h2>
-    </div>
-    <p class="sec-desc">
-      The browser preserves the <code>defer</code> execution sequence from <code>index.html</code>.
-      Click each step to see what it publishes and why the ordering matters.
-    </p>
-    <ol class="steps">
-
-      <li class="step" onclick="togStep(this)">
-        <div class="step-c">
-          <div class="step-ttl">Core Parser + Prompt Loading</div>
-          <div class="step-sub"><code>src/core/regex.js</code> · <code>src/core/prompt-loader.js</code></div>
-          <div class="step-det">
-            <p style="color:var(--muted);font-size:13px;margin-bottom:12px">
-              Pure utilities with no cross-dependencies. Must load first so all later layers can call
-              <code>window.AgentRegex</code> for tool-call parsing and <code>window.AgentPromptLoader</code>
-              for template loading.
+      <!-- Layer 1: UI -->
+      <div class="lcard" onclick="tog(this)">
+        <div class="lcard-hd">
+          <div class="lcard-n" style="background:rgba(167,139,250,0.14);color:var(--purple);border:1px solid rgba(167,139,250,0.3)">1</div>
+          <div class="lcard-info">
+            <div class="lcard-name">UI Layer</div>
+            <div class="lcard-sub">Entry point · state wiring · message rendering · settings panel</div>
+          </div>
+          <div class="lcard-files">
+            <span class="fp">index.html</span>
+            <span class="fp">state.js</span>
+            <span class="fp">ui-modern.js</span>
+          </div>
+          <div class="lcard-bts">
+            <span class="lbadge lbadge-load">loads last</span>
+          </div>
+          <button class="card-tog">▼</button>
+        </div>
+        <div class="lcard-bd">
+          <div class="lcard-bd-inner">
+            <p class="lcard-desc">
+              Top consumer — depends on everything below. <code>index.html</code> declares the full ordered
+              <code>defer</code> sequence that bootstraps the runtime. <code>state.js</code> wires settings,
+              model selection, and session history to <code>localStorage</code> before the loop can start.
+              <code>ui-modern.js</code> binds the message container, input form, and settings panel to the
+              running agent once all lower layers are ready.
             </p>
-            <div class="cb">
-              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/core/regex.js — published surface</span></div>
-              <pre><span class="cm">// Publishes: window.AgentRegex</span>
-window.<span class="pr">AgentRegex</span> = {
-  <span class="fn">parseToolCalls</span>(text)  { <span class="cm">/* &lt;tool_call&gt; block extraction */</span> },
-  <span class="fn">normalizeCall</span>(raw)    { <span class="cm">/* JSON coercion + alias resolution */</span> },
-  <span class="fn">stripReasoning</span>(text)  { <span class="cm">/* removes &lt;thinking&gt; blocks */</span> },
-  <span class="fn">hasInjectionSignal</span>(t) { <span class="cm">/* unsafe payload detection */</span> },
-};</pre>
+            <div class="lcard-rows">
+              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>window.AgentOrchestrator</code>, <code>window.AgentSkills</code>, <code>window.AgentMemory</code>, <code>window.AgentRuntimeCache</code></span></div>
+              <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v">Nothing — top of the dependency stack, no lower layer consumes it</span></div>
+              <div class="ir"><span class="ir-k">Bootstrap note</span><span class="ir-v">All prior layers must be fully initialized before the UI binds event listeners</span></div>
             </div>
           </div>
         </div>
-      </li>
+      </div>
 
-      <li class="step" onclick="togStep(this)">
-        <div class="step-c">
-          <div class="step-ttl">Skill Metadata + Snapshot Data</div>
-          <div class="step-sub"><code>core/intents.js</code> · <code>core/tool-meta.js</code> · <code>generated/snapshot-data.js</code> · <code>snapshot-adapter.js</code></div>
-          <div class="step-det">
-            <p style="color:var(--muted);font-size:13px;margin-bottom:12px">
-              Static metadata declared here is consumed by the orchestrator to describe tools to the model.
-              <code>snapshot-data.js</code> is pre-built by <code>npm run build:snapshot</code> and must not
-              be edited by hand.
-            </p>
-            <div class="ir"><span class="ir-k">intents.js</span><span class="ir-v">Heuristic intent classes → preferred tool family mapping</span></div>
-            <div class="ir"><span class="ir-k">tool-meta.js</span><span class="ir-v">Risk level, <code>readOnly</code>, <code>concurrencySafe</code>, timeout floor per tool</span></div>
-            <div class="ir"><span class="ir-k">snapshot-data.js</span><span class="ir-v">Pre-transpiled skill docs and prompt snippets from build step</span></div>
-            <div class="ir"><span class="ir-k">snapshot-adapter.js</span><span class="ir-v">Sanitizes and bridges snapshot data into the runtime prompt surface</span></div>
+      <div class="lstack-arr">↓ depends on</div>
+
+      <!-- Layer 2: App Loop -->
+      <div class="lcard" onclick="tog(this)">
+        <div class="lcard-hd">
+          <div class="lcard-n" style="background:rgba(91,155,253,0.14);color:var(--blue);border:1px solid rgba(91,155,253,0.3)">2</div>
+          <div class="lcard-info">
+            <div class="lcard-name">App Loop Layer</div>
+            <div class="lcard-sub">Bounded loop · LLM dispatch · tool execution · context pipeline · memory surfaces</div>
           </div>
+          <div class="lcard-files">
+            <span class="fp">agent.js</span>
+            <span class="fp">llm.js</span>
+            <span class="fp">tools.js</span>
+            <span class="fp">local-backend.js</span>
+            <span class="fp">runtime-memory.js</span>
+          </div>
+          <div class="lcard-bts">
+            <span class="lbadge lbadge-pub">AgentMemory · AgentRuntimeCache</span>
+            <span class="lbadge lbadge-load">loads 6th group</span>
+          </div>
+          <button class="card-tog">▼</button>
         </div>
-      </li>
-
-      <li class="step" onclick="togStep(this)">
-        <div class="step-c">
-          <div class="step-ttl">Runtime Module Factories</div>
-          <div class="step-sub"><code>web-runtime.js</code> · <code>filesystem-runtime.js</code> · <code>data-runtime.js</code> · <code>registry-runtime.js</code></div>
-          <div class="step-det">
-            <p style="color:var(--muted);font-size:13px;margin-bottom:12px">
-              Each module registers a factory on <code>window.AgentSkillModules</code>. Factories are called
-              during skill assembly — not at load time. This keeps each module isolated.
+        <div class="lcard-bd">
+          <div class="lcard-bd-inner">
+            <p class="lcard-desc">
+              The execution core. <code>agent.js</code> runs the bounded multi-round loop: calls the LLM via
+              <code>llm.js</code>, parses tool calls with <code>AgentRegex</code>, dispatches through
+              <code>AgentSkills</code>, manages context, and enforces all guardrails.
+              <code>runtime-memory.js</code> publishes <code>AgentMemory</code> (long-term, durable) and
+              <code>AgentRuntimeCache</code> (multi-scope TTL cache). <code>local-backend.js</code> probes
+              local endpoints and caches the compatibility report.
             </p>
+            <div class="lcard-rows">
+              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>AgentOrchestrator</code>, <code>AgentSkills</code>, <code>AgentRegex</code>, <code>AgentPromptLoader</code></span></div>
+              <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v"><code>window.AgentMemory</code>, <code>window.AgentRuntimeCache</code></span></div>
+              <div class="ir"><span class="ir-k">Internal load order</span><span class="ir-v"><code>state.js</code> → <code>runtime-memory.js</code> → <code>local-backend.js</code> → <code>tools.js</code> → <code>llm.js</code> → <code>agent.js</code></span></div>
+              <div class="ir"><span class="ir-k">LLM fallback</span><span class="ir-v">Local lane failure → automatic cloud lane retry; both lanes return identical reply shape</span></div>
+            </div>
             <div class="cb">
-              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/skills/modules/web-runtime.js (pattern)</span></div>
-              <pre><span class="cm">// Registers factory — not the live tools themselves yet</span>
-window.<span class="pr">AgentSkillModules</span>.<span class="fn">register</span>(<span class="st">'web'</span>, () => ({
-  <span class="fn">web_search</span>:    <span class="kw">async</span> ({ query })  => { <span class="cm">/* ... */</span> },
-  <span class="fn">web_fetch</span>:     <span class="kw">async</span> ({ url })    => { <span class="cm">/* ... */</span> },
-  <span class="fn">read_page</span>:     <span class="kw">async</span> ({ url })    => { <span class="cm">/* readability extract */</span> },
-  <span class="fn">extract_links</span>: <span class="kw">async</span> ({ url })    => { <span class="cm">/* href list */</span> },
-  <span class="cm">// ... weather, geolocation, page_metadata, http_fetch</span>
-}));</pre>
+              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/app/agent.js — loop skeleton</span></div>
+              <pre><span class="kw">async function</span> <span class="fn">runAgentLoop</span>(userMessage) {
+  <span class="kw">const</span> <span class="op">preflight</span>     = <span class="kw">await</span> AgentSkills.<span class="fn">preflight</span>(userMessage, opts);
+  <span class="kw">const</span> <span class="op">systemPrompt</span>  = AgentOrchestrator.<span class="fn">buildSystemPrompt</span>({
+    <span class="pr">tools</span>:  AgentSkills.<span class="fn">describe</span>(),
+    <span class="pr">memory</span>: <span class="kw">await</span> AgentMemory.<span class="fn">search</span>(userMessage),
+    <span class="pr">hints</span>:  preflight.<span class="pr">hints</span>,
+  });
+  <span class="kw">let</span> <span class="op">round</span> = <span class="nm">0</span>;
+  <span class="kw">while</span> (round++ < MAX_ROUNDS) {
+    <span class="kw">const</span> <span class="op">reply</span>   = <span class="kw">await</span> <span class="fn">callLLM</span>({ messages: history, systemPrompt });
+    <span class="kw">const</span> <span class="op">calls</span>   = AgentRegex.<span class="fn">parseToolCalls</span>(reply);
+    <span class="kw">if</span> (!calls.<span class="pr">length</span>) <span class="kw">break</span>;          <span class="cm">// final answer — exit loop</span>
+    <span class="kw">const</span> <span class="op">results</span> = <span class="kw">await</span> <span class="fn">executeBatch</span>(calls);
+    <span class="fn">manageContext</span>(results);              <span class="cm">// budget → microcompact → summarize</span>
+    <span class="fn">injectContinuation</span>(round, results);  <span class="cm">// tool summary + denial + compact notes</span>
+  }
+}</pre>
             </div>
           </div>
         </div>
-      </li>
+      </div>
 
-      <li class="step" onclick="togStep(this)">
-        <div class="step-c">
-          <div class="step-ttl">Skill Assembly</div>
-          <div class="step-sub"><code>src/skills/shared.js</code> · <code>src/skills/groups/*.js</code> · <code>src/skills/index.js</code></div>
-          <div class="step-det">
-            <p style="color:var(--muted);font-size:13px;margin-bottom:12px">
-              <code>shared.js</code> calls all registered factories, builds the registry, wires preflight
-              planning, query_plan generation, memory-aware helpers, and source-compatible aliases.
-              Publishes <code>window.AgentSkills</code>.
-            </p>
-            <div class="cb">
-              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/skills/shared.js — published surface</span></div>
-              <pre><span class="cm">// Publishes: window.AgentSkills</span>
-window.<span class="pr">AgentSkills</span> = {
-  <span class="pr">registry</span>:  <span class="fn">buildRegistry</span>(modules),  <span class="cm">// all tools keyed by name</span>
-  <span class="fn">preflight</span>: <span class="kw">async</span> (msg, opts) => { <span class="cm">/* planner + hints */</span> },
-  <span class="fn">execute</span>:   <span class="kw">async</span> (call)       => { <span class="cm">/* dispatches to registry */</span> },
-  <span class="fn">describe</span>:  ()                  => { <span class="cm">/* tool docs for prompt */</span> },
-};</pre>
-            </div>
+      <div class="lstack-arr">↓ depends on</div>
+
+      <!-- Layer 3: Core Prompt -->
+      <div class="lcard" onclick="tog(this)">
+        <div class="lcard-hd">
+          <div class="lcard-n" style="background:rgba(97,212,164,0.14);color:var(--green);border:1px solid rgba(97,212,164,0.3)">3</div>
+          <div class="lcard-info">
+            <div class="lcard-name">Core Prompt Layer</div>
+            <div class="lcard-sub">Sectioned system prompt builder · tool-call parser · markdown template loader</div>
           </div>
+          <div class="lcard-files">
+            <span class="fp">orchestrator.js</span>
+            <span class="fp">prompt-loader.js</span>
+            <span class="fp">regex.js</span>
+          </div>
+          <div class="lcard-bts">
+            <span class="lbadge lbadge-pub">AgentOrchestrator · AgentRegex · AgentPromptLoader</span>
+          </div>
+          <button class="card-tog">▼</button>
         </div>
-      </li>
-
-      <li class="step" onclick="togStep(this)">
-        <div class="step-c">
-          <div class="step-ttl">Orchestrator</div>
-          <div class="step-sub"><code>src/core/orchestrator.js</code></div>
-          <div class="step-det">
-            <p style="color:var(--muted);font-size:13px;margin-bottom:12px">
-              Consumes <code>AgentSkills.describe()</code> to know what tools exist, then builds the
-              sectioned system prompt and runtime continuation blocks. Must load <em>after</em>
-              skills assembly. Publishes <code>window.AgentOrchestrator</code>.
+        <div class="lcard-bd">
+          <div class="lcard-bd-inner">
+            <p class="lcard-desc">
+              Split across two bootstrap steps. <code>regex.js</code> and <code>prompt-loader.js</code> are
+              pure stateless utilities — they load in <strong>step 1</strong> because every other layer
+              depends on them. <code>orchestrator.js</code> loads in <strong>step 5</strong>, after skills
+              assembly, because <code>buildSystemPrompt()</code> calls <code>AgentSkills.describe()</code>
+              to embed live tool documentation. All prompt templates are <code>.md</code> files fetched
+              and cached by the loader; embedded fallbacks are included in the loader itself.
             </p>
+            <div class="lcard-rows">
+              <div class="ir"><span class="ir-k">regex.js</span><span class="ir-v">Loads step 1 — publishes <code>window.AgentRegex</code>: parseToolCalls, normalizeCall, stripReasoning, hasInjectionSignal</span></div>
+              <div class="ir"><span class="ir-k">prompt-loader.js</span><span class="ir-v">Loads step 1 — publishes <code>window.AgentPromptLoader</code>: async fetch + cache of <code>prompts/*.md</code></span></div>
+              <div class="ir"><span class="ir-k">orchestrator.js</span><span class="ir-v">Loads step 5 (after skills) — publishes <code>window.AgentOrchestrator</code>: buildSystemPrompt + buildRuntimeContinuationPrompt</span></div>
+              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>AgentSkills.describe()</code> for live tool documentation embedded in system prompt</span></div>
+            </div>
             <div class="cb">
               <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/core/orchestrator.js — published surface</span></div>
               <pre>window.<span class="pr">AgentOrchestrator</span> = {
@@ -742,36 +717,173 @@ window.<span class="pr">AgentSkills</span> = {
   },
 
   <span class="fn">buildRuntimeContinuationPrompt</span>({ toolSummary, denials, compact }) {
-    <span class="cm">// Injected as system message before each next LLM call</span>
+    <span class="cm">// System message injected before each next LLM call</span>
+    <span class="cm">// Contains: tool summary, denial constraints, compaction notes, injection warnings</span>
   },
 };</pre>
             </div>
           </div>
         </div>
-      </li>
+      </div>
 
-      <li class="step" onclick="togStep(this)">
-        <div class="step-c">
-          <div class="step-ttl">App Runtime (final layer)</div>
-          <div class="step-sub"><code>state.js</code> → <code>runtime-memory.js</code> → <code>local-backend.js</code> → <code>tools.js</code> → <code>llm.js</code> → <code>agent.js</code> → <code>ui-modern.js</code></div>
-          <div class="step-det">
-            <p style="color:var(--muted);font-size:13px;margin-bottom:12px">
-              All prior layers must be complete. Loading order within this group still matters
-              — <code>agent.js</code> depends on <code>llm.js</code> and <code>tools.js</code>.
+      <div class="lstack-arr">↓ depends on</div>
+
+      <!-- Layer 4: Skills Assembly -->
+      <div class="lcard" onclick="tog(this)">
+        <div class="lcard-hd">
+          <div class="lcard-n" style="background:rgba(255,210,122,0.14);color:var(--amber);border:1px solid rgba(255,210,122,0.3)">4</div>
+          <div class="lcard-info">
+            <div class="lcard-name">Skills Assembly</div>
+            <div class="lcard-sub">Registry composition · preflight planning · query_plan · memory-aware helpers · source aliases</div>
+          </div>
+          <div class="lcard-files">
+            <span class="fp">shared.js</span>
+            <span class="fp">groups/*.js</span>
+            <span class="fp">index.js</span>
+          </div>
+          <div class="lcard-bts">
+            <span class="lbadge lbadge-pub">window.AgentSkills</span>
+            <span class="lbadge lbadge-load">loads step 4</span>
+          </div>
+          <button class="card-tog">▼</button>
+        </div>
+        <div class="lcard-bd">
+          <div class="lcard-bd-inner">
+            <p class="lcard-desc">
+              <code>shared.js</code> calls all registered module factories, builds the unified tool registry,
+              wires preflight planning (heuristic detection + optional short-timeout planner LLM call),
+              generates <code>query_plan</code> hints, adds memory-aware helper wrappers, and
+              source-compatible aliases for file/search operations across different tool naming conventions.
+              <code>groups/*.js</code> expose grouped UI metadata consumed by the settings panel.
+              <code>index.js</code> finalizes the <code>window.AgentSkills</code> surface.
             </p>
-            <ul class="sl">
-              <li><strong>state.js</strong> — wires settings and session state to <code>localStorage</code></li>
-              <li><strong>runtime-memory.js</strong> — publishes <code>AgentRuntimeCache</code> and <code>AgentMemory</code></li>
-              <li><strong>local-backend.js</strong> — probes local endpoints, publishes compatibility report</li>
-              <li><strong>tools.js</strong> — prompt/tool helper wrappers used by the loop</li>
-              <li><strong>llm.js</strong> — provider selection, shaping, retry, normalization</li>
-              <li><strong>agent.js</strong> — the bounded loop itself</li>
-              <li><strong>ui-modern.js</strong> — binds user input, renders messages, wires settings panel</li>
-            </ul>
+            <div class="lcard-rows">
+              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>window.AgentSkillModules</code> — the factory map registered by layer 5 runtime modules</span></div>
+              <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v"><code>window.AgentSkills</code> — registry, preflight, execute, describe, describeGrouped</span></div>
+              <div class="ir"><span class="ir-k">Planner LLM</span><span class="ir-v">Short-timeout, fail-open: if it times out the loop continues without query_plan hints</span></div>
+            </div>
+            <div class="cb">
+              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/skills/shared.js — published surface</span></div>
+              <pre>window.<span class="pr">AgentSkills</span> = {
+  <span class="pr">registry</span>:  <span class="fn">buildRegistry</span>(modules),  <span class="cm">// all tools keyed by name</span>
+  <span class="fn">preflight</span>: <span class="kw">async</span> (msg, opts) => { <span class="cm">/* heuristic + optional planner LLM */</span> },
+  <span class="fn">execute</span>:   <span class="kw">async</span> (call)       => { <span class="cm">/* dispatch to registry + cache check */</span> },
+  <span class="fn">describe</span>:  ()                  => { <span class="cm">/* tool docs array for system prompt */</span> },
+};</pre>
+            </div>
           </div>
         </div>
-      </li>
-    </ol>
+      </div>
+
+      <div class="lstack-arr">↓ depends on</div>
+
+      <!-- Layer 5: Runtime Modules -->
+      <div class="lcard" onclick="tog(this)">
+        <div class="lcard-hd">
+          <div class="lcard-n" style="background:rgba(248,113,113,0.14);color:var(--red);border:1px solid rgba(248,113,113,0.3)">5</div>
+          <div class="lcard-info">
+            <div class="lcard-name">Skills Runtime Modules</div>
+            <div class="lcard-sub">Tool implementation factories — web searches, filesystem, data parsing, device APIs</div>
+          </div>
+          <div class="lcard-files">
+            <span class="fp">web-runtime.js</span>
+            <span class="fp">filesystem-runtime.js</span>
+            <span class="fp">data-runtime.js</span>
+            <span class="fp">registry-runtime.js</span>
+          </div>
+          <div class="lcard-bts">
+            <span class="lbadge lbadge-pub">AgentSkillModules factories</span>
+            <span class="lbadge lbadge-load">loads step 3</span>
+          </div>
+          <button class="card-tog">▼</button>
+        </div>
+        <div class="lcard-bd">
+          <div class="lcard-bd-inner">
+            <p class="lcard-desc">
+              Each file registers a factory function on <code>window.AgentSkillModules</code>.
+              Factories are <strong>not</strong> called at load time — they are invoked during skill
+              assembly (step 4). This isolation means any module can be swapped or extended without
+              touching anything else. Each module uses browser APIs directly with no cross-module imports.
+            </p>
+            <div class="lcard-rows">
+              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v">Nothing from <code>window</code> — self-contained, browser APIs only</span></div>
+              <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v">Factories on <code>window.AgentSkillModules</code> (object created if missing)</span></div>
+              <div class="ir"><span class="ir-k">web-runtime.js</span><span class="ir-v"><code>web_search</code>, <code>web_fetch</code>, <code>read_page</code>, <code>http_fetch</code>, <code>extract_links</code>, <code>page_metadata</code></span></div>
+              <div class="ir"><span class="ir-k">filesystem-runtime.js</span><span class="ir-v"><code>fs_roots</code>, <code>fs_read</code>, <code>fs_write</code>, <code>fs_tree</code>, <code>fs_search</code>, <code>fs_stat</code>, <code>fs_copy</code>, <code>fs_move</code>, <code>fs_delete</code>, <code>fs_walk</code></span></div>
+              <div class="ir"><span class="ir-k">data-runtime.js</span><span class="ir-v"><code>parse_json</code>, <code>parse_csv</code>, <code>todo_list/add/complete</code>, <code>ask_user</code>, <code>tool_search</code></span></div>
+              <div class="ir"><span class="ir-k">registry-runtime.js</span><span class="ir-v"><code>get_datetime</code>, <code>get_location</code>, <code>get_weather</code>, <code>clipboard_read/write</code>, <code>storage_get/set</code>, <code>notify</code></span></div>
+            </div>
+            <div class="cb">
+              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">factory registration pattern</span></div>
+              <pre><span class="cm">// Lazy factory — tools are NOT live until assembly calls this</span>
+(window.<span class="pr">AgentSkillModules</span> ??= {}).<span class="fn">register</span>(<span class="st">'web'</span>, () => ({
+  <span class="fn">web_search</span>:    <span class="kw">async</span> ({ query })  => { <span class="cm">/* provider routing + dedup */</span> },
+  <span class="fn">web_fetch</span>:     <span class="kw">async</span> ({ url })    => { <span class="cm">/* DOM strip + size budget */</span> },
+  <span class="fn">read_page</span>:     <span class="kw">async</span> ({ url })    => { <span class="cm">/* Readability extraction */</span> },
+  <span class="fn">extract_links</span>: <span class="kw">async</span> ({ url })    => { <span class="cm">/* hrefs + anchor text */</span> },
+  <span class="cm">// ... page_metadata, http_fetch, weather, geolocation</span>
+}));</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lstack-arr">↓ depends on</div>
+
+      <!-- Layer 6: Skills Core + Snapshot -->
+      <div class="lcard" onclick="tog(this)">
+        <div class="lcard-hd">
+          <div class="lcard-n" style="background:rgba(97,212,164,0.14);color:var(--green);border:1px solid rgba(97,212,164,0.3)">6</div>
+          <div class="lcard-info">
+            <div class="lcard-name">Skills Core + Snapshot</div>
+            <div class="lcard-sub">Foundation layer — intent metadata · per-tool execution flags · pre-built prompt snippets</div>
+          </div>
+          <div class="lcard-files">
+            <span class="fp">intents.js</span>
+            <span class="fp">tool-meta.js</span>
+            <span class="fp">snapshot-data.js</span>
+            <span class="fp">snapshot-adapter.js</span>
+          </div>
+          <div class="lcard-bts">
+            <span class="lbadge lbadge-pub">AgentIntents · AgentToolMeta · AgentSnapshot</span>
+            <span class="lbadge lbadge-load">loads steps 1–2</span>
+          </div>
+          <button class="card-tog">▼</button>
+        </div>
+        <div class="lcard-bd">
+          <div class="lcard-bd-inner">
+            <p class="lcard-desc">
+              The foundation — pure data and pure adapters, no runtime dependencies.
+              <code>intents.js</code> maps heuristic intent classes (e.g. <em>search</em>, <em>file</em>)
+              to preferred tool families for preflight steering.
+              <code>tool-meta.js</code> declares per-tool execution metadata: <code>risk</code>,
+              <code>readOnly</code>, <code>concurrencySafe</code>, and <code>timeoutFloor</code> —
+              consumed by the agent loop dispatch logic.
+              <code>snapshot-data.js</code> is pre-generated by <code>npm run build:snapshot</code>;
+              editing it by hand will be overwritten on the next build.
+              <code>snapshot-adapter.js</code> sanitizes and bridges its prompt fragments into the
+              runtime surface consumed by the orchestrator.
+            </p>
+            <div class="lcard-rows">
+              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v">Nothing — foundation layer, no <code>window.*</code> dependencies at all</span></div>
+              <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v"><code>window.AgentIntents</code>, <code>window.AgentToolMeta</code>, <code>window.AgentSnapshot</code></span></div>
+              <div class="ir"><span class="ir-k">snapshot-data.js</span><span class="ir-v">Auto-generated by <code>npm run build:snapshot</code> — do not edit; verify with <code>npm run test:skills-smoke</code></span></div>
+            </div>
+            <div class="cb">
+              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/skills/core/tool-meta.js — example entries</span></div>
+              <pre><span class="cm">// Consumed by agent.js executeBatch() for dispatch decisions</span>
+<span class="kw">const</span> <span class="op">TOOL_META</span> = {
+  <span class="pr">web_search</span>:  { <span class="pr">readOnly</span>: <span class="kw">true</span>,  <span class="pr">concurrencySafe</span>: <span class="kw">true</span>,  <span class="pr">risk</span>: <span class="st">'low'</span>,    <span class="pr">cacheable</span>: <span class="kw">true</span>  },
+  <span class="pr">read_page</span>:   { <span class="pr">readOnly</span>: <span class="kw">true</span>,  <span class="pr">concurrencySafe</span>: <span class="kw">true</span>,  <span class="pr">risk</span>: <span class="st">'low'</span>,    <span class="pr">cacheable</span>: <span class="kw">true</span>  },
+  <span class="pr">fs_write</span>:    { <span class="pr">readOnly</span>: <span class="kw">false</span>, <span class="pr">concurrencySafe</span>: <span class="kw">false</span>, <span class="pr">risk</span>: <span class="st">'medium'</span>               },
+  <span class="pr">fs_delete</span>:   { <span class="pr">readOnly</span>: <span class="kw">false</span>, <span class="pr">concurrencySafe</span>: <span class="kw">false</span>, <span class="pr">risk</span>: <span class="st">'high'</span>                 },
+};</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
   </section>
 
   <div class="div"></div>
@@ -1739,835 +1851,5 @@ node --check src/app/llm.js</pre>
     }
   });
 </script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>JS Agent - Architecture</title>
-  <style>
-    :root {
-      --bg: #0a1118;
-      --bg-light: #0f1724;
-      --panel: #111b27;
-      --panel-2: #172436;
-      --line: rgba(255, 255, 255, 0.08);
-      --line-strong: rgba(255, 255, 255, 0.12);
-      --text: #e8eef7;
-      --muted: #9caecc;
-      --accent: #337ad2;
-      --accent-bright: #5b9bfd;
-      --ok: #61d4a4;
-      --warn: #ffd27a;
-      --mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
-      --sans: "Segoe UI", "Inter", system-ui, sans-serif;
-      --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    html, body { width: 100%; height: 100%; }
-
-    body {
-      background: linear-gradient(135deg, #0a1118 0%, #0f1724 40%, #0a1118 100%);
-      color: var(--text);
-      font: 14px/1.6 var(--sans);
-      padding: 40px 20px;
-      min-height: 100vh;
-    }
-
-    .wrap {
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-
-    h1 {
-      font-size: 32px;
-      line-height: 1.1;
-      letter-spacing: -0.03em;
-      margin-bottom: 12px;
-      background: linear-gradient(135deg, var(--text), var(--accent-bright));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      font-weight: 700;
-    }
-
-    .sub {
-      color: var(--muted);
-      max-width: 900px;
-      margin-bottom: 32px;
-      font-size: 15px;
-      line-height: 1.7;
-    }
-
-    .badges {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-bottom: 40px;
-    }
-
-    .badge {
-      padding: 8px 14px;
-      border-radius: 8px;
-      background: linear-gradient(135deg, rgba(91, 155, 253, 0.1), rgba(51, 122, 210, 0.05));
-      border: 1px solid var(--accent-bright);
-      color: var(--accent-bright);
-      font: 11px var(--mono);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      font-weight: 600;
-      transition: var(--transition);
-    }
-
-    .badge:hover {
-      background: linear-gradient(135deg, rgba(91, 155, 253, 0.15), rgba(51, 122, 210, 0.1));
-      transform: translateY(-2px);
-    }
-
-    .panel {
-      border: 1px solid var(--line-strong);
-      border-radius: 16px;
-      background: linear-gradient(180deg, rgba(23, 36, 54, 0.5), rgba(17, 27, 39, 0.3));
-      backdrop-filter: blur(10px);
-      padding: 28px;
-      margin-bottom: 20px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-      transition: var(--transition);
-    }
-
-    .panel:hover {
-      border-color: var(--line);
-      background: linear-gradient(180deg, rgba(23, 36, 54, 0.6), rgba(17, 27, 39, 0.4));
-      box-shadow: 0 12px 48px rgba(91, 155, 253, 0.08);
-    }
-
-    .panel h2 {
-      font-size: 14px;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--accent-bright);
-      margin-bottom: 16px;
-      font-weight: 700;
-    }
-
-    .panel p {
-      color: var(--muted);
-      margin-bottom: 12px;
-      line-height: 1.7;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 14px;
-      margin-top: 16px;
-    }
-
-    .card {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: linear-gradient(135deg, rgba(23, 36, 54, 0.4), rgba(17, 27, 39, 0.2));
-      padding: 16px;
-      transition: var(--transition);
-      cursor: pointer;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: -100%;
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(91, 155, 253, 0.1), transparent);
-      transition: var(--transition);
-    }
-
-    .card:hover {
-      border-color: var(--accent-bright);
-      background: linear-gradient(135deg, rgba(51, 122, 210, 0.15), rgba(23, 36, 54, 0.3));
-      box-shadow: 0 8px 24px rgba(91, 155, 253, 0.1);
-      transform: translateY(-4px);
-    }
-
-    .card:hover::before {
-      left: 100%;
-    }
-
-    .card > * {
-      position: relative;
-      z-index: 1;
-    }
-
-    .k {
-      color: var(--accent-bright);
-      font: 10px var(--mono);
-      text-transform: uppercase;
-      margin-bottom: 8px;
-      letter-spacing: 0.1em;
-      font-weight: 700;
-    }
-
-    .v {
-      font-size: 15px;
-      margin-bottom: 8px;
-      font-weight: 600;
-      color: var(--text);
-    }
-
-    .d {
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.6;
-    }
-
-    ul {
-      padding-left: 20px;
-    }
-
-    li {
-      color: var(--muted);
-      margin-bottom: 10px;
-      line-height: 1.7;
-    }
-
-    li strong {
-      color: var(--accent-bright);
-    }
-
-    .mermaid {
-      border: 1px solid var(--line-strong);
-      border-radius: 12px;
-      background: #0e1824;
-      padding: 16px;
-      overflow-x: auto;
-      margin: 20px 0;
-    }
-
-    code {
-      font-family: var(--mono);
-      font-size: 12px;
-      background: rgba(91, 155, 253, 0.12);
-      border: 1px solid rgba(91, 155, 253, 0.2);
-      color: var(--accent-bright);
-      padding: 2px 8px;
-      border-radius: 6px;
-      font-weight: 500;
-    }
-
-    .section-divider {
-      height: 1px;
-      background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
-      margin: 40px 0;
-    }
-
-    pre {
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 14px;
-      overflow-x: auto;
-      font-size: 12px;
-      color: var(--muted);
-      line-height: 1.5;
-    }
-
-    @media (max-width: 768px) {
-      h1 {
-        font-size: 24px;
-      }
-
-      .panel {
-        padding: 20px;
-      }
-
-      .grid {
-        grid-template-columns: 1fr;
-      }
-
-      .badges {
-        gap: 8px;
-      }
-
-      body {
-        padding: 20px 12px;
-      }
-    }
-
-    /* Smooth scroll */
-    html {
-      scroll-behavior: smooth;
-    }
-
-    /* Selection styling */
-    ::selection {
-      background: rgba(91, 155, 253, 0.3);
-      color: var(--text);
-    }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>🤖 JS Agent Architecture</h1>
-    <p class="sub">
-      Comprehensive runtime architecture for a browser-first multi-step agent with semantic loop guards,
-      context-aware orchestration, modular skills, and intelligent prompt composition.
-    </p>
-
-    <div class="badges">
-      <div class="badge">🔄 Runtime: Browser</div>
-      <div class="badge">🎯 Loop: Multi-round tool orchestration</div>
-      <div class="badge">📝 Composer: Sectioned + dynamic boundary</div>
-      <div class="badge">🧩 Skills: Core + modules + groups</div>
-      <div class="badge">💾 Context: Budget + microcompact + summarize</div>
-      <div class="badge">🛡️ Safety: Injection-aware continuations</div>
-    </div>
-
-    <section class="panel">
-      <h2>📊 Overall Agent Loop</h2>
-      <p>
-        The bounded loop with intelligent state transitions, implemented in
-        <code>src/app/agent.js</code> and <code>src/skills/shared.js</code>.
-      </p>
-      <pre class="mermaid">flowchart TD
-  U["👤 User message"] --> P["🎯 Preflight plan"]
-  P --> E["🔍 Context enrichment"]
-  E --> L["🧠 LLM call"]
-  L --> T{Tool calls detected?}
-  T -- no --> A["✨ Final answer"]
-  T -- yes --> X["⚙️ Execute tool batches"]
-  X --> B["💾 Tool result budget"]
-  B --> N["📢 Inject runtime reminders"]
-  N --> M["🗜️ Microcompact old tool results"]
-  M --> C{Context over limit?}
-  C -- no --> L
-  C -- yes --> S["📊 Summarize context"]
-  S --> Q{Summary succeeded?}
-  Q -- yes --> L
-  Q -- no --> F["⏱️ Fallback tail compression"]
-  F --> L</pre>
-    </section>
-
-    <div class="section-divider"></div>
-
-    <section class="panel">
-      <h2>🏗️ Layered Runtime Architecture</h2>
-      <pre class="mermaid">flowchart LR
-  subgraph UI["🎨 UI Layer"]
-    I["index.html"]
-    U1["ui-modern.js"]
-    S1["state.js"]
-  end
-
-  subgraph APP["🎯 App Loop Layer"]
-    A1["agent.js"]
-    T1["tools.js"]
-    L1["llm.js"]
-    B1["local-backend.js"]
-  end
-
-  subgraph CORE["⚙️ Core Prompt Layer"]
-    O1["orchestrator.js"]
-    P1["prompt-loader.js"]
-    R1["regex.js"]
-  end
-
-  subgraph SKILLS["🧩 Skills Layer"]
-    SH["shared.js"]
-    C1["core/intents.js"]
-    C2["core/tool-meta.js"]
-    M1["modules/web-runtime.js"]
-    M2["modules/data-runtime.js"]
-    M3["modules/registry-runtime.js"]
-    M4["modules/filesystem-runtime.js"]
-    G["groups/*.js"]
-  end
-
-  subgraph EXT["🌐 External IO"]
-    CL["☁️ Cloud providers"]
-    LB["💻 Local backend"]
-    FS["📁 File System"]
-  end
-
-  UI --> APP --> CORE --> SKILLS --> EXT</pre>
-    </section>
-
-    <div class="section-divider"></div>
-
-    <section class="panel">
-      <h2>📐 Prompt Composition Pipeline</h2>
-      <p>Section-based system prompt construction with runtime state awareness.</p>
-      <pre class="mermaid">flowchart LR
-  A["📦 Snapshot snippets"] --> C["🔧 Build System Prompt"]
-  B["📄 Base templates"] --> C
-  D["💡 Runtime hints"] --> C
-  C --> E["📝 Sectioned prompt"]
-  E --> F["🔀 Dynamic boundary"]
-  F --> G["📢 Runtime reminders"]</pre>
-    </section>
-
-    <div class="section-divider"></div>
-
-    <section class="panel">
-      <h2>🎯 Core Agentic Systems</h2>
-      <div class="grid">
-        <div class="card">
-          <div class="k">🎯 Preflight</div>
-          <div class="v">Intent + Query Steering</div>
-          <div class="d">Heuristic detection combined with short-timeout planner LLM to optimize first tool selection and query routing.</div>
-        </div>
-        <div class="card">
-          <div class="k">🔧 Tool Selection</div>
-          <div class="v">Risk-Aware Metadata</div>
-          <div class="d">Execution metadata controls batching and concurrency-safe parallel execution for read-only operations.</div>
-        </div>
-        <div class="card">
-          <div class="k">🧩 Skills Modularity</div>
-          <div class="v">Shared Orchestration</div>
-          <div class="d">Web/search/network logic isolated in runtime modules while shared.js focuses on orchestration and wiring.</div>
-        </div>
-        <div class="card">
-          <div class="k">💾 Context Manager</div>
-          <div class="v">Budget + Microcompact</div>
-          <div class="d">Large tool outputs compacted before storage; older results cleared; summarization runs only when needed.</div>
-        </div>
-        <div class="card">
-          <div class="k">🛡️ Loop Guardrails</div>
-          <div class="v">Semantic Anti-Repeat</div>
-          <div class="d">Near-duplicate web_search signatures blocked to prevent repetitive loops. Repeated failures disable tool calls.</div>
-        </div>
-        <div class="card">
-          <div class="k">🔐 Prompt Safety</div>
-          <div class="v">Injection-Aware Cont.</div>
-          <div class="d">Tool outputs treated as untrusted; suspicious payloads tagged and converted into safety reminders.</div>
-        </div>
-        <div class="card">
-          <div class="k">🧠 Memory</div>
-          <div class="v">Long-Term Persistence</div>
-          <div class="d">Sessions, cache, memories, preferences, and tasks persisted in localStorage with cross-tab sync.</div>
-        </div>
-        <div class="card">
-          <div class="k">📈 Query Strategy</div>
-          <div class="v">Bounded Orchestration</div>
-          <div class="d">Each round decides: execute tools, continue with evidence, compact context, or force final answer.</div>
-        </div>
-        <div class="card">
-          <div class="k">📦 Snapshot Port</div>
-          <div class="v">Dist Reuse + Adapt</div>
-          <div class="d">Snapshot skill metadata and prompt snippets reused directly in runtime prompt and tool orchestration.</div>
-        </div>
-      </div>
-    </section>
-
-    <div class="section-divider"></div>
-
-    <section class="panel">
-      <h2>🔄 Query Strategy & Transition Rules</h2>
-      <ul>
-        <li><strong>Round-bounded loop</strong> with deterministic stop conditions.</li>
-        <li><strong>No usable tool call:</strong> loop asks for corrective continuation if model output has no usable intent.</li>
-        <li><strong>Repeated failures:</strong> exact tool signatures disabled; semantic signatures block near-duplicate web_search calls.</li>
-        <li><strong>Structured continuations:</strong> injected for tool summaries, permission denials, and compaction notes.</li>
-        <li><strong>Injection detection:</strong> suspicious patterns in tool results trigger explicit safety reminders before next model turn.</li>
-        <li><strong>Context management:</strong> runs after each tool execution phase to keep prompt growth controlled.</li>
-        <li><strong>Final answer forcing:</strong> at max rounds, model is forced to produce evidence-based answer.</li>
-      </ul>
-    </section>
-
-    <div class="section-divider"></div>
-
-    <section class="panel">
-      <h2>📍 Implementation Anchors</h2>
-      <ul>
-        <li><code>src/app/agent.js</code> — loop state, tool execution, context manager pipeline, guardrails, final-answer forcing</li>
-        <li><code>src/core/orchestrator.js</code> — sectioned system prompt builder and runtime continuation composer</li>
-        <li><code>src/app/runtime-memory.js</code> — long-term memory manager and multi-scope retention cache</li>
-        <li><code>src/skills/snapshot-adapter.js</code> — sanitized snapshot prompt/skill bridge into runtime</li>
-        <li><code>scripts/build-snapshot.mjs</code> — snapshot transpile + prompt snippet extraction pipeline</li>
-        <li><code>src/skills/shared.js</code> — preflight plan, planner LLM call, runtime orchestration, registry wiring</li>
-        <li><code>src/skills/core/*</code> — intent detection and tool execution metadata</li>
-        <li><code>src/skills/modules/web-runtime.js</code> — search providers, web fetch, weather, geolocation, page utils</li>
-        <li><code>src/skills/modules/*</code> — filesystem/data/registry runtime responsibilities</li>
-        <li><code>src/skills/groups/*.js</code> — flattened UI group descriptors for tool families</li>
-      </ul>
-    </section>
-
-    <div class="section-divider"></div>
-
-    <section class="panel">
-      <h2>🚀 Key Capabilities</h2>
-      <div class="grid">
-        <div class="card">
-          <div class="k">🌐 Web Context</div>
-          <div class="v">Search + Fetch</div>
-          <div class="d">Integrated search, page reading, link extraction, and metadata retrieval powered by multiple providers.</div>
-        </div>
-        <div class="card">
-          <div class="k">📁 Filesystem</div>
-          <div class="v">Full File Access</div>
-          <div class="d">Tree walk, read, write, search, copy, move, delete with browser File System Access API support.</div>
-        </div>
-        <div class="card">
-          <div class="k">🧮 Data Tools</div>
-          <div class="v">Parse + Transform</div>
-          <div class="d">JSON/CSV parsing, todos, tasks, and structured data transformation with validation.</div>
-        </div>
-        <div class="card">
-          <div class="k">⏰ Device Access</div>
-          <div class="v">Datetime + Location</div>
-          <div class="d">Current time, timezone detection, geolocation, weather, clipboard, and system notifications.</div>
-        </div>
-      </div>
-    </section>
-  </div>
-
-  <script type="module">
-    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.12.3/dist/mermaid.esm.min.mjs';
-    mermaid.initialize({
-      startOnLoad: true,
-      securityLevel: 'loose',
-      theme: 'dark',
-      themeVariables: {
-        primaryColor: '#172436',
-        primaryBorderColor: '#5b9bfd',
-        textColor: '#e8eef7',
-        fontSize: '14px'
-      }
-    });
-  </script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>JS Agent - Architecture</title>
-  <style>
-    :root {
-      --bg: #0a1118;
-      --panel: #111b27;
-      --panel-2: #172436;
-      --line: rgba(255, 255, 255, 0.12);
-      --text: #e8eef7;
-      --muted: #9caecc;
-      --accent: #74b2ff;
-      --ok: #61d4a4;
-      --warn: #ffd27a;
-      --mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
-      --sans: "Segoe UI", "Inter", system-ui, sans-serif;
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      background: radial-gradient(circle at top left, #162437 0%, var(--bg) 48%);
-      color: var(--text);
-      font: 14px/1.6 var(--sans);
-      padding: 20px;
-    }
-
-    .wrap { max-width: 1120px; margin: 0 auto; }
-
-    h1 {
-      font-size: 28px;
-      line-height: 1.1;
-      letter-spacing: -0.02em;
-      margin-bottom: 8px;
-    }
-
-    .sub {
-      color: var(--muted);
-      max-width: 900px;
-      margin-bottom: 16px;
-    }
-
-    .badges {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 20px;
-    }
-
-    .badge {
-      padding: 6px 10px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.03);
-      color: var(--muted);
-      font: 12px var(--mono);
-    }
-
-    .panel {
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
-      padding: 16px;
-      margin-bottom: 14px;
-    }
-
-    .panel h2 {
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--muted);
-      margin-bottom: 10px;
-    }
-
-    .panel p {
-      color: var(--muted);
-      margin-bottom: 10px;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 10px;
-    }
-
-    .card {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: var(--panel-2);
-      padding: 12px;
-    }
-
-    .k {
-      color: var(--muted);
-      font: 11px var(--mono);
-      text-transform: uppercase;
-      margin-bottom: 6px;
-      letter-spacing: 0.08em;
-    }
-
-    .v {
-      font-size: 15px;
-      margin-bottom: 6px;
-      font-weight: 600;
-    }
-
-    .d { color: var(--muted); }
-
-    ul { padding-left: 18px; }
-    li { color: var(--muted); margin-bottom: 6px; }
-
-    .mermaid {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: #0e1824;
-      padding: 10px;
-      overflow-x: auto;
-    }
-
-    code {
-      font-family: var(--mono);
-      font-size: 12px;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid var(--line);
-      padding: 1px 6px;
-      border-radius: 6px;
-    }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>JS Agent Architecture</h1>
-    <p class="sub">
-      Updated architecture for the current browser runtime with Claude-style prompt composition,
-      modular skills, semantic loop guards, runtime continuation injection, and an explicit context-management pipeline.
-    </p>
-
-    <div class="badges">
-      <div class="badge">runtime: browser</div>
-      <div class="badge">loop: multi-round tool orchestration</div>
-      <div class="badge">prompt composer: sectioned + dynamic boundary</div>
-      <div class="badge">skills: core + modules + groups</div>
-      <div class="badge">context manager: budget + microcompact + summarize</div>
-      <div class="badge">safety: prompt-injection aware continuations</div>
-    </div>
-
-    <section class="panel">
-      <h2>Overall Agent Loop</h2>
-      <p>
-        This Mermaid diagram is valid for Mermaid <code>11.12.3</code> and represents the runtime flow implemented in
-        <code>src/app/agent.js</code> and <code>src/skills/shared.js</code>.
-      </p>
-      <pre class="mermaid">flowchart TD
-  U[User message] --> P[Preflight plan]
-  P --> E[Context enrichment]
-  E --> L[LLM call]
-  L --> T{Tool calls detected}
-  T -- no --> A[Final answer]
-  T -- yes --> X[Execute tool batches]
-  X --> B[Tool result budget]
-  B --> N[Inject runtime reminders]
-  N --> M[Microcompact old tool results]
-  M --> C{Context over limit}
-  C -- no --> L
-  C -- yes --> S[Summarize context]
-  S --> Q{Summary succeeded}
-  Q -- yes --> L
-  Q -- no --> F[Fallback tail compression]
-  F --> L</pre>
-    </section>
-
-    <section class="panel">
-      <h2>Layered Runtime Map</h2>
-      <pre class="mermaid">flowchart LR
-  subgraph UI[UI Layer]
-    I[index.html]
-    U1[ui-modern.js]
-    S1[state.js]
-  end
-
-  subgraph APP[App Loop Layer]
-    A1[agent.js]
-    T1[tools.js]
-    L1[llm.js]
-    B1[local-backend.js]
-  end
-
-  subgraph CORE[Core Prompt Layer]
-    O1[orchestrator.js]
-    P1[prompt-loader.js]
-    R1[regex.js]
-  end
-
-  subgraph SKILLS[Skills Layer]
-    SH[shared.js]
-    C1[core/intents.js]
-    C2[core/tool-meta.js]
-    M1[modules/filesystem-runtime.js]
-    M2[modules/data-runtime.js]
-    M3[modules/registry-runtime.js]
-    M4[modules/web-runtime.js]
-    G1[groups/web.js]
-    G2[groups/device.js]
-    G3[groups/data.js]
-    G4[groups/filesystem.js]
-  end
-
-  subgraph EXT[External IO]
-    CL[Cloud providers]
-    LB[Local backend]
-    FS[Browser File System Access]
-    BC[BroadcastChannel]
-    LS[localStorage]
-  end
-
-  UI --> APP --> CORE --> SKILLS
-  SKILLS --> EXT
-  APP --> EXT</pre>
-    </section>
-
-    <section class="panel">
-      <h2>Prompt Composition Pipeline</h2>
-      <p>
-        System prompt construction is now section-based and merges imported snapshot snippets with runtime state.
-      </p>
-      <pre class="mermaid">flowchart LR
-  A[Snapshot prompt snippets] --> C[orchestrator.buildSystemPrompt]
-  B[Base prompt templates] --> C
-  D[Runtime context hints] --> C
-  C --> E[Sectioned system prompt]
-  E --> F[Dynamic boundary]
-  F --> G[Runtime reminders and continuation prompts]</pre>
-    </section>
-
-    <section class="panel">
-      <h2>Core Agentic Systems</h2>
-      <div class="grid">
-        <div class="card">
-          <div class="k">Preflight</div>
-          <div class="v">Intent + query steering</div>
-          <div class="d">Combines heuristic detection with a short-timeout fail-open planner LLM call to improve first-tool selection.</div>
-        </div>
-        <div class="card">
-          <div class="k">Tool Selection</div>
-          <div class="v">Risk-aware metadata</div>
-          <div class="d">Tool execution meta controls batching and concurrency-safe parallel execution for read-only operations.</div>
-        </div>
-        <div class="card">
-          <div class="k">Skills Modularity</div>
-          <div class="v">Shared orchestration + runtime modules</div>
-          <div class="d">Web/search/network logic is isolated in <code>modules/web-runtime.js</code>, while <code>shared.js</code> focuses on orchestration and runtime wiring.</div>
-        </div>
-        <div class="card">
-          <div class="k">Context Manager</div>
-          <div class="v">Budget, microcompact, summarize</div>
-          <div class="d">Large tool outputs are compacted before storing; older tool results are cleared; summarize runs only when required.</div>
-        </div>
-        <div class="card">
-          <div class="k">Loop Guardrails</div>
-          <div class="v">Semantic anti-repeat</div>
-          <div class="d">Near-duplicate <code>web_search</code> signatures are blocked to avoid repetitive loops across rounds.</div>
-        </div>
-        <div class="card">
-          <div class="k">Prompt Safety</div>
-          <div class="v">Injection-aware continuation</div>
-          <div class="d">Tool outputs are treated as untrusted input; suspicious payloads are tagged and converted into runtime continuation safety reminders.</div>
-        </div>
-        <div class="card">
-          <div class="k">Memory</div>
-          <div class="v">Long-term + session persistence</div>
-          <div class="d">Sessions, runtime cache, long-term memories, preferences, tasks, and todos are persisted in <code>localStorage</code>.</div>
-        </div>
-        <div class="card">
-          <div class="k">Query Strategy</div>
-          <div class="v">Bounded recursive orchestration</div>
-          <div class="d">Each round decides: call tools, continue with evidence, compact context, or force final answer at max rounds.</div>
-        </div>
-        <div class="card">
-          <div class="k">Snapshot Port</div>
-          <div class="v">Dist reuse + adapted JS runtime</div>
-          <div class="d">Imported snapshot skill metadata and sanitized prompt snippets are reused directly in runtime prompt/tool orchestration.</div>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>Query Strategy and Transition Rules</h2>
-      <ul>
-        <li>Round-bounded loop with deterministic stop conditions.</li>
-        <li>If model output has no usable tool call and no final text, the loop asks for a corrective continuation.</li>
-        <li>Repeated failures disable exact tool signatures; semantic signatures disable near-duplicate <code>web_search</code> calls.</li>
-        <li>Structured continuation blocks are injected for tool summaries, permission denials, and compaction notes.</li>
-        <li>Suspicious prompt-injection patterns in tool results trigger explicit safety reminders before the next model turn.</li>
-        <li>Context manager runs after each tool execution phase to keep prompt growth controlled before hard-limit summarization.</li>
-        <li>When max rounds are reached, the model is forced to produce a final evidence-based answer.</li>
-      </ul>
-    </section>
-
-    <section class="panel">
-      <h2>Implementation Anchors</h2>
-      <ul>
-        <li><code>src/app/agent.js</code>: loop state, tool execution, context manager pipeline, guardrails, and final-answer forcing.</li>
-        <li><code>src/core/orchestrator.js</code>: sectioned system prompt builder and runtime continuation reminder composer.</li>
-        <li><code>src/app/runtime-memory.js</code>: long-term memory manager and multi-scope retention cache.</li>
-        <li><code>src/skills/snapshot-adapter.js</code>: sanitized snapshot prompt/skill bridge into runtime.</li>
-        <li><code>scripts/build-snapshot.mjs</code>: snapshot transpile + prompt snippet extraction pipeline.</li>
-        <li><code>src/skills/shared.js</code>: preflight plan, optional planner LLM call, runtime orchestration, and registry wiring.</li>
-        <li><code>src/skills/core/*</code>: intent detection and tool execution metadata.</li>
-        <li><code>src/skills/modules/web-runtime.js</code>: search providers, web fetch pipeline, weather/geolocation, and page utilities.</li>
-        <li><code>src/skills/modules/*</code>: filesystem/data/registry runtime responsibilities.</li>
-        <li><code>src/skills/groups/*.js</code>: flattened UI group descriptors for tool families.</li>
-      </ul>
-    </section>
-  </div>
-
-  <script type="module">
-    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.12.3/dist/mermaid.esm.min.mjs';
-    mermaid.initialize({
-      startOnLoad: true,
-      securityLevel: 'loose',
-      theme: 'dark'
-    });
-  </script>
 </body>
 </html>

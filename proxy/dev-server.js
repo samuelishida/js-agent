@@ -6,7 +6,7 @@ import path from 'node:path';
 import { URL } from 'node:url';
 import { spawn } from 'node:child_process';
 
-const PORT = Number(process.env.PORT || 5501);
+const PORT = Number(process.env.PORT || 5500);
 const ROOT = process.cwd();
 const OLLAMA_BASE = 'https://ollama.com';
 const API_PREFIX = '/api/ollama/v1';const GNEWS_PREFIX = '/api/gnews';

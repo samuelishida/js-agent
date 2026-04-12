@@ -469,6 +469,42 @@
       return entries.length ? formatToolResult('DuckDuckGo search', entries.join('\n\n')) : null;
     }
 
+    async function searchGoogleNewsRss(query) {
+      const terms = String(query || '').trim();
+      if (!terms) return null;
+
+      try {
+        return await retryWithBackoff(async () => {
+          const url = `https://news.google.com/rss/search?q=${encodeURIComponent(terms)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`;
+          const res = await window.fetchWithTimeout(url, { cache: 'no-store' }, 8000);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+          const xml = await res.text();
+          const doc = new DOMParser().parseFromString(xml, 'text/xml');
+          const items = [...doc.querySelectorAll('item')].slice(0, 6);
+
+          console.debug(`Google News: found ${items.length} articles`);
+
+          if (!items.length) return null;
+
+          const entries = items.map((item, index) => {
+            const title = normalizeSearchSnippet(item.querySelector('title')?.textContent || 'Untitled');
+            const link = normalizeSearchSnippet(item.querySelector('link')?.textContent || '');
+            const pubDate = normalizeSearchSnippet(item.querySelector('pubDate')?.textContent || '');
+            const source = normalizeSearchSnippet(item.querySelector('source')?.textContent || 'Google News');
+
+            const snippet = pubDate ? `Published: ${pubDate}` : 'Published date unavailable';
+            return formatSearchEntry(index + 1, title, snippet, link, source);
+          });
+
+          return formatToolResult('Google News RSS', entries.join('\n\n'));
+        }, 2, 150);
+      } catch (error) {
+        console.debug('Google News search failed:', error.message);
+        return null;
+      }
+    }
+
     async function searchReadableWebFallback(query) {
       const terms = String(query || '').trim();
       if (!terms) return null;
@@ -624,12 +660,14 @@
       const searchQuery = originalQuery;
       const isCodingQuery = detectCodingIntent(searchQuery);
       const isBioFactQuery = detectBiographicalFactIntent(searchQuery);
+      const isRecentQuery = detectRecencyIntent(searchQuery);
       const hasFxIntent = !!detectFxPair(searchQuery);
       const hasWeatherIntent = detectWeatherIntent(searchQuery);
 
       const runners = [
         { name: 'weather_current', enabled: () => hasWeatherIntent, run: () => getCurrentWeather({}) },
         { name: 'fx_rate', enabled: () => hasFxIntent, run: () => searchFxRate(searchQuery) },
+        { name: 'google_news', enabled: () => (isRecentQuery || isBioFactQuery), run: () => searchGoogleNewsRss(searchQuery) },
         { name: 'wikipedia', enabled: () => true, run: () => searchWikipedia(searchQuery) },
         { name: 'wikidata', enabled: () => true, run: () => searchWikidata(searchQuery) },
         { name: 'duckduckgo', enabled: () => true, run: () => searchDuckDuckGo(searchQuery) },

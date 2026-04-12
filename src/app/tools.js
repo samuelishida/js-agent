@@ -52,6 +52,10 @@ function getCloudReadiness() {
   const provider = getSelectedCloudProvider();
 
   if (provider === 'ollama') {
+    const ollamaKey = typeof getOllamaCloudApiKey === 'function' ? getOllamaCloudApiKey() : '';
+    if (!ollamaKey) {
+      return { ready: false, reason: 'Ollama Cloud requires an API key. Save your key in Settings.' };
+    }
     return { ready: true, reason: '' };
   }
 

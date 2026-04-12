@@ -371,51 +371,13 @@ async function refreshOllamaCloudModels(silent = false) {
   const modelSelect = document.getElementById('ollama-cloud-model-select');
   if (!modelSelect) return;
   
-  const apiKey = getOllamaCloudApiKey();
-  if (!apiKey) {
-    if (!silent) addNotice('Please save your Ollama Cloud API key first.');
-    return;
-  }
-
-  try {
-    const baseUrl = (() => {
-      const proxyUrl = new URL('/api/ollama/v1', window.location.origin).toString().replace(/\/+$/, '');
-      if (proxyUrl && proxyUrl.startsWith(window.location.origin)) {
-        return proxyUrl;
-      }
-      return 'https://ollama.com/v1';
-    })();
-
-    const response = await fetch(`${baseUrl}/tags`, {
-      headers: { 'Authorization': `Bearer ${apiKey}` }
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
-    const models = data.models || [];
-    
-    if (models.length > 0) {
-      const currentValue = modelSelect.value;
-      modelSelect.innerHTML = models
-        .map(m => `<option value="${m.name}">${m.name}</option>`)
-        .join('');
-      
-      if (models.some(m => m.name === currentValue)) {
-        modelSelect.value = currentValue;
-      } else {
-        saveOllamaCloudModelSelection();
-      }
-      
-      if (!silent) addNotice(`Updated Ollama Cloud models. Found ${models.length} model(s).`);
-    }
-  } catch (error) {
-    if (!silent) {
-      addNotice(`Failed to refresh Ollama Cloud models: ${error.message}`);
-    }
-    console.debug(`[Ollama] Model refresh failed:`, error);
+  // Note: Ollama Cloud doesn't expose a public /tags endpoint.
+  // Users must manually select from the available models list.
+  // This is a placeholder that could be expanded if Ollama Cloud
+  // provides an API for listing available models in the future.
+  
+  if (!silent) {
+    addNotice('Model list is manually maintained. Select the model you want to use from the dropdown.');
   }
 }
 

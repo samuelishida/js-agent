@@ -128,7 +128,7 @@
 }
 
 .msg.user .msg-content {
-  background: var(--blue);
+  background: rgba(51, 122, 210, 0.75);
   color: #fff;
   border-radius: var(--radius-lg);
 }

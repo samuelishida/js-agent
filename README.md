@@ -232,6 +232,32 @@ Recommended setup:
 - Configured API key for cloud lanes (also needed if local lane fallback should continue the run)
 - Optional local backend or Ollama proxy endpoint for local/cloud hybrid routing
 
+### Quick Start with Ollama Cloud
+
+```bash
+# From the Agent directory
+cd "/media/samuel/PNY 1TB/Code/Agent"
+
+# Set your Ollama Cloud API key
+export OLLAMA_API_KEY="your-api-key-from-ollama.com/account/api-keys"
+
+# Start the dev server (includes same-origin proxy for CORS bypass)
+./start-agent.sh
+# or manually:
+# node proxy/dev-server.js
+
+# Open in browser
+# http://127.0.0.1:5500
+```
+
+Then in Settings:
+1. Select **Ollama Cloud** from the "Cloud Model" dropdown
+2. Paste your API key in "Ollama Cloud API Key" and click Save
+3. Select a model from "Ollama Cloud Model" dropdown
+4. Start chatting
+
+For detailed setup and troubleshooting, see [OLLAMA_CLOUD_SETUP.md](OLLAMA_CLOUD_SETUP.md) and [FIX_ERRORS.md](FIX_ERRORS.md).
+
 ## Local Ollama Troubleshooting
 
 If local calls fail with errors like `500` and `{"error":"EOF"}` on `/api/chat` or `/api/generate`:

@@ -130,11 +130,11 @@
     </div>
     
     <div class="modal-body">
-      <!-- Cloud Model Section -->
+      <!-- Cloud Providers Section -->
       <div class="settings-section">
-        <h3 class="settings-title">Cloud Model</h3>
-        <p class="settings-desc">Connect a hosted LLM for browser-based inference</p>
-        
+        <h3 class="settings-title">Cloud Providers</h3>
+        <p class="settings-desc">Gemini, OpenAI, Claude — browser-direct API calls</p>
+
         <div class="settings-group">
           <label class="settings-label">API Key</label>
           <div class="settings-row">
@@ -144,8 +144,8 @@
         </div>
 
         <div class="settings-group">
-          <label class="settings-label">Model Provider & Version</label>
-          <select id="model-select" class="settings-select" onchange="updateOllamaControlsVisibility()">
+          <label class="settings-label">Provider &amp; Model</label>
+          <select id="model-select" class="settings-select">
             <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
             <option value="gemini/gemini-2.5-pro">Gemini 2.5 Pro</option>
             <option value="gemini/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
@@ -155,64 +155,127 @@
             <option value="runtime/runtime-3-7-sonnet-latest">Runtime 3.7 Sonnet</option>
             <option value="runtime/runtime-3-5-haiku-latest">Runtime 3.5 Haiku</option>
             <option value="azure/gpt-4.1-mini">Azure GPT-4.1 Mini</option>
-            <option value="ollama/__selected__">Ollama Cloud</option>
           </select>
-        </div>
-
-        <div id="ollama-cloud-controls" style="display:none">
-          <div class="settings-group">
-            <label class="settings-label">Ollama Cloud API Key</label>
-            <div class="settings-row">
-              <input class="settings-input" id="ollama-cloud-api-key" type="password" placeholder="Enter your Ollama Cloud API key" autocomplete="off" />
-              <button class="btn-primary btn-sm" onclick="saveOllamaCloudApiKey()">Save</button>
-            </div>
-            <div class="settings-hint">Your API key is used for authentication with Ollama Cloud.</div>
-          </div>
-
-          <div class="settings-group">
-            <label class="settings-label">Ollama Cloud Model</label>
-            <select id="ollama-cloud-model-select" class="settings-select" onchange="saveOllamaCloudModelSelection()">
-              <option value="llama3.1:8b">llama3.1:8b</option>
-              <option value="llama2:13b">llama2:13b</option>
-              <option value="neural-chat">neural-chat</option>
-              <option value="mistral">mistral</option>
-            </select>
-          </div>
+          <div class="settings-hint">Active only when Ollama and LM Studio are both disabled.</div>
         </div>
       </div>
 
       <div class="settings-divider"></div>
 
-      <!-- Local Model Section -->
+      <!-- Ollama Section -->
       <div class="settings-section">
-        <h3 class="settings-title">Local Model</h3>
-        <p class="settings-desc">Use LM Studio or Ollama for private inference</p>
-        
+        <h3 class="settings-title">Ollama</h3>
+        <p class="settings-desc">Your local Ollama app — handles both local and ☁️ cloud models</p>
+
         <div class="settings-group">
-          <label class="settings-label">Local Server URL</label>
+          <label class="settings-label">Server URL</label>
           <div class="settings-row">
-            <input class="settings-input" id="local-url" type="text" placeholder="http://localhost:11434" value="http://localhost:11434" />
+            <input class="settings-input" id="ollama-url" type="text" placeholder="http://localhost:11434" autocomplete="off" />
+            <button class="btn-primary btn-sm" onclick="probeOllama()">Probe</button>
+          </div>
+          <div style="margin-top:6px;display:flex;align-items:center;gap:6px">
+            <span class="status-dot" id="ollama-dot"></span>
+            <span id="ollama-status-label" class="status-indicator">not probed</span>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <label class="settings-label">Model</label>
+          <select id="ollama-model-select" class="settings-select" onchange="saveOllamaCloudModelSelection()">
+            <option value="">&#8212; Probe to load installed models &#8212;</option>
+            <optgroup label="&#x2601; Cloud models (requires API key)" id="ollama-cloud-optgroup">
+              <option value="qwen3.5:9b">qwen3.5:9b</option>
+              <option value="qwen3.5:27b">qwen3.5:27b</option>
+              <option value="qwen3.5:35b">qwen3.5:35b</option>
+              <option value="qwen3.5:122b">qwen3.5:122b &#x2601;</option>
+              <option value="qwen3:235b">qwen3:235b &#x2601;</option>
+              <option value="qwen3-coder-next">qwen3-coder-next &#x2601;</option>
+              <option value="qwen3-next:80b">qwen3-next:80b &#x2601;</option>
+              <option value="qwen3-vl:2b">qwen3-vl:2b &#x2601;</option>
+              <option value="qwen3-vl:4b">qwen3-vl:4b &#x2601;</option>
+              <option value="qwen3-vl:8b">qwen3-vl:8b &#x2601;</option>
+              <option value="qwen3-vl:30b">qwen3-vl:30b &#x2601;</option>
+              <option value="qwen3-vl:235b">qwen3-vl:235b &#x2601;</option>
+              <option value="gemma4:31b">gemma4:31b &#x2601;</option>
+              <option value="deepseek-v3.2">deepseek-v3.2 &#x2601;</option>
+              <option value="deepseek-v3.1">deepseek-v3.1 &#x2601;</option>
+              <option value="mistral-large-3:42b">mistral-large-3:42b &#x2601;</option>
+              <option value="devstral-small-2:24b">devstral-small-2:24b &#x2601;</option>
+              <option value="devstral-2:123b">devstral-2:123b &#x2601;</option>
+              <option value="ministral-3:3b">ministral-3:3b &#x2601;</option>
+              <option value="ministral-3:8b">ministral-3:8b &#x2601;</option>
+              <option value="ministral-3:14b">ministral-3:14b &#x2601;</option>
+              <option value="nemotron-3-super:120b">nemotron-3-super:120b &#x2601;</option>
+              <option value="glm-5.1">glm-5.1 &#x2601;</option>
+              <option value="glm-5">glm-5 &#x2601;</option>
+              <option value="glm-4.7">glm-4.7 &#x2601;</option>
+              <option value="glm-4.6">glm-4.6 &#x2601;</option>
+              <option value="glm-ocr">glm-ocr &#x2601;</option>
+              <option value="kimi-k2.5">kimi-k2.5 &#x2601;</option>
+              <option value="kimi-k2-thinking">kimi-k2-thinking &#x2601;</option>
+              <option value="minimax-m2.7">minimax-m2.7 &#x2601;</option>
+              <option value="minimax-m2.5">minimax-m2.5 &#x2601;</option>
+              <option value="minimax-m2.1">minimax-m2.1 &#x2601;</option>
+              <option value="gpt-oss:20b">gpt-oss:20b &#x2601;</option>
+              <option value="gpt-oss:120b">gpt-oss:120b &#x2601;</option>
+              <option value="gpt-oss-safeguard:20b">gpt-oss-safeguard:20b &#x2601;</option>
+              <option value="gpt-oss-safeguard:120b">gpt-oss-safeguard:120b &#x2601;</option>
+              <option value="gemini-3-flash-preview">gemini-3-flash-preview &#x2601;</option>
+              <option value="rnj-1:8b">rnj-1:8b &#x2601;</option>
+            </optgroup>
+          </select>
+          <div class="settings-hint">Probe fills in your installed models above. &#x2601; models route through Ollama Cloud and require the API key below.</div>
+        </div>
+
+        <div class="settings-group">
+          <label class="settings-label">API Key <span style="font-weight:400;color:var(--text-tertiary)">(optional — for ☁ cloud models only)</span></label>
+          <div class="settings-row">
+            <input class="settings-input" id="ollama-cloud-api-key" type="password" placeholder="Ollama Cloud API key" autocomplete="off" />
+            <button class="btn-primary btn-sm" onclick="saveOllamaCloudApiKey()">Save</button>
+          </div>
+          <div class="settings-hint">Only required for ☁ cloud models. Local models work without a key.</div>
+        </div>
+
+        <div class="settings-group">
+          <label class="settings-checkbox">
+            <input type="checkbox" id="toggle-ollama" onchange="toggleOllamaBackend()" />
+            <span>Use Ollama as active provider</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- LM Studio Section -->
+      <div class="settings-section">
+        <h3 class="settings-title">LM Studio</h3>
+        <p class="settings-desc">Local OpenAI-compatible endpoint (LM Studio, llama.cpp)</p>
+
+        <div class="settings-group">
+          <label class="settings-label">Server URL</label>
+          <div class="settings-row">
+            <input class="settings-input" id="local-url" type="text" placeholder="http://localhost:1234" value="http://localhost:1234" />
             <button class="btn-primary btn-sm" onclick="probeLocal()">Probe</button>
           </div>
-          <div class="settings-hint">Ollama: 11434 · LM Studio: 1234</div>
+          <div class="settings-hint">LM Studio: 1234 · llama.cpp: 8080 · generic: 5000</div>
         </div>
 
         <div class="settings-group">
           <label class="settings-checkbox">
             <input type="checkbox" id="toggle-local" onchange="toggleLocalBackend()" />
-            <span>Use local model when available</span>
+            <span>Use LM Studio as active provider</span>
           </label>
         </div>
 
         <div id="local-model-row" style="display:none">
-          <label class="settings-label">Local Model</label>
+          <label class="settings-label">Detected Model</label>
           <select id="local-model-select" class="settings-select">
-            <option value="">— detect automatically —</option>
+            <option value="">&#8212; detect automatically &#8212;</option>
           </select>
         </div>
 
-        <div class="settings-status">
-          <span>Status: </span>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:6px">
+          <span class="status-dot" id="local-dot"></span>
           <span id="local-status-label" class="status-indicator">not probed</span>
         </div>
       </div>

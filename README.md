@@ -224,39 +224,47 @@ node --check src/app/agent.js
 
 ## Running
 
-Open `index.html` in a Chromium-based browser. No build step required.
+> **Do not open `index.html` directly in the browser or use Live Server.**
+> The app requires the Node dev server so that Ollama Cloud API requests can be proxied server-side (browsers block cross-origin POST to `https://ollama.com`).
 
-Recommended setup:
-
-- Chrome/Edge for full File System Access API support
-- Configured API key for cloud lanes (also needed if local lane fallback should continue the run)
-- Optional local backend or Ollama proxy endpoint for local/cloud hybrid routing
-
-### Quick Start with Ollama Cloud
+### Start the dev server
 
 ```bash
-# From the Agent directory
 cd "/media/samuel/PNY 1TB/Code/Agent"
-
-# Set your Ollama Cloud API key
-export OLLAMA_API_KEY="your-api-key-from-ollama.com/account/api-keys"
-
-# Start the dev server (includes same-origin proxy for CORS bypass)
-./start-agent.sh
-# or manually:
-# node proxy/dev-server.js
-
-# Open in browser
-# http://127.0.0.1:5500
+node proxy/dev-server.js
 ```
 
-Then in Settings:
-1. Select **Ollama Cloud** from the "Cloud Model" dropdown
-2. Paste your API key in "Ollama Cloud API Key" and click Save
-3. Select a model from "Ollama Cloud Model" dropdown
-4. Start chatting
+Then open **http://127.0.0.1:5500** in Chrome or Edge.
 
-For detailed setup and troubleshooting, see [OLLAMA_CLOUD_SETUP.md](OLLAMA_CLOUD_SETUP.md) and [FIX_ERRORS.md](FIX_ERRORS.md).
+The server serves all static files on port 5500 and proxies `POST /api/ollama/v1/*` → `https://ollama.com/v1/*`.
+
+#### Optional: set your Ollama Cloud API key via environment
+
+```bash
+OLLAMA_API_KEY="your-key" node proxy/dev-server.js
+```
+
+The server forwards the key as an `Authorization: Bearer` header when the client does not send one. You can also paste it directly in the Settings panel.
+
+#### Use a different port
+
+```bash
+PORT=8080 node proxy/dev-server.js
+# open http://127.0.0.1:8080
+```
+
+### First-time setup (Ollama Cloud)
+
+1. In Settings → **Ollama**, paste your API key and click **Save**  
+   (get a key at [ollama.com/settings/api-keys](https://ollama.com/settings/api-keys))
+2. Click **Probe** to detect any locally installed models
+3. Select a model from the dropdown (local or ☁ cloud)
+4. Click **Enable Ollama** and start chatting
+
+### Requirements
+
+- Node.js 18+ (no npm install needed — dev-server.js uses only built-in modules)
+- Chrome or Edge recommended (required for File System Access API)
 
 ## Local Ollama Troubleshooting
 

@@ -88,36 +88,47 @@
 
   function tryParseToolObject(raw) {
     const parsed = parseJsonSafely(raw);
-    if (parsed?.tool) {
-      const parsedArgs = parsed.args && typeof parsed.args === 'object' && !Array.isArray(parsed.args)
-        ? parsed.args
-        : {
-            ...(parsed.path && { path: parsed.path }),
-            ...(parsed.url && { url: parsed.url }),
-            ...(parsed.query && { query: parsed.query }),
-            ...(parsed.expression && { expression: parsed.expression }),
-            ...(parsed.text && { text: parsed.text }),
-            ...(parsed.offset !== undefined && { offset: parsed.offset }),
-            ...(parsed.length !== undefined && { length: parsed.length })
-          };
+    if (parsed) {
+      // Resolve field aliases used by different model families:
+      //   tool name: "tool" (primary) | "name" (OpenAI/Mistral-style — accepted only
+      //              when paired with a recognized args field to avoid false positives)
+      //   tool args: "args" | "parameters" | "input" | "inputs" | "arguments"
+      const argsVal = parsed.args ?? parsed.parameters ?? parsed.input ?? parsed.inputs ?? parsed.arguments ?? null;
+      const toolName = parsed.tool
+        || (parsed.name && argsVal !== null ? parsed.name : null);
 
-      return {
-        tool: String(parsed.tool),
-        args: parsedArgs
-      };
+      if (toolName) {
+        const parsedArgs = argsVal && typeof argsVal === 'object' && !Array.isArray(argsVal)
+          ? argsVal
+          : {
+              ...(parsed.path && { path: parsed.path }),
+              ...(parsed.url && { url: parsed.url }),
+              ...(parsed.query && { query: parsed.query }),
+              ...(parsed.expression && { expression: parsed.expression }),
+              ...(parsed.text && { text: parsed.text }),
+              ...(parsed.offset !== undefined && { offset: parsed.offset }),
+              ...(parsed.length !== undefined && { length: parsed.length })
+            };
+        return { tool: String(toolName), args: parsedArgs };
+      }
     }
 
-    const tool = extractJsonString(raw, 'tool');
+    // Regex-based fallback for raw strings that are not clean JSON.
+    const tool = extractJsonString(raw, 'tool') || extractJsonString(raw, 'name');
     if (!tool) return null;
 
-    const argsRaw = extractBalancedObjectAfterKey(raw, 'args');
+    const argsRaw = extractBalancedObjectAfterKey(raw, 'args')
+      || extractBalancedObjectAfterKey(raw, 'parameters')
+      || extractBalancedObjectAfterKey(raw, 'input')
+      || extractBalancedObjectAfterKey(raw, 'arguments');
     const args = argsRaw ? (parseJsonSafely(argsRaw) || {}) : {};
     return { tool, args };
   }
 
   function findBalancedJsonObjectWithTool(text) {
     const value = String(text || '');
-    const toolIndex = value.search(/"tool"\s*:/i);
+    // Search for "tool": or "name": — "name" is used by OpenAI/Mistral-style models.
+    const toolIndex = value.search(/"tool"\s*:|"name"\s*:/i);
     if (toolIndex < 0) return null;
 
     let start = value.lastIndexOf('{', toolIndex);
@@ -257,12 +268,57 @@
       }
     };
   }
+  // Scans `text` for all balanced JSON objects that look like tool calls.
+  // Used as a fallback when no structured block markers (<tool_call>, <|tool_call>)
+  // are present — handles models that emit bare JSON or multiple tool objects in prose.
+  function scanForStandaloneToolCalls(text) {
+    const value = String(text || '');
+    const results = [];
+    let i = 0;
+
+    while (i < value.length) {
+      const bracePos = value.indexOf('{', i);
+      if (bracePos < 0) break;
+
+      // Walk forward to find the matching closing '}'
+      let depth = 0, inStr = false, esc = false, end = -1;
+      for (let j = bracePos; j < value.length; j++) {
+        const ch = value[j];
+        if (inStr) {
+          if (esc) { esc = false; continue; }
+          if (ch === '\\') { esc = true; continue; }
+          if (ch === '"') inStr = false;
+          continue;
+        }
+        if (ch === '"') { inStr = true; continue; }
+        if (ch === '{') depth++;
+        else if (ch === '}') { depth--; if (depth === 0) { end = j; break; } }
+      }
+
+      if (end < 0) break;
+
+      const candidate = value.slice(bracePos, end + 1);
+      if (/"tool"\s*:|"name"\s*:/i.test(candidate)) {
+        const parsed = tryParseToolObject(candidate);
+        if (parsed?.tool) {
+          results.push(parsed);
+          i = end + 1;
+          continue;
+        }
+      }
+      i = bracePos + 1;
+    }
+
+    return results;
+  }
+
   function extractAllToolCalls(text) {
     const calls = [];
     let match;
 
     while ((match = TOOL_BLOCK_GLOBAL.exec(String(text || ''))) !== null) {
-      const parsed = parseJsonSafely(match[1]);
+      // Use tryParseToolObject so field aliases (name/parameters/input) are resolved.
+      const parsed = tryParseToolObject(match[1]);
       if (parsed?.tool) calls.push(parsed);
     }
 
@@ -273,6 +329,13 @@
       const tool = pm[1];
       const args = parsePipeArgs(pm[2]);
       if (tool) calls.push({ tool, args });
+    }
+
+    // Final fallback: when no structured blocks were found, scan for bare JSON tool
+    // objects interspersed with prose.  This covers models that output
+    // {"tool":"...","args":{...}} or {"name":"...","parameters":{...}} without wrappers.
+    if (!calls.length) {
+      calls.push(...scanForStandaloneToolCalls(String(text || '')));
     }
 
     return calls;

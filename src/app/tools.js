@@ -38,7 +38,19 @@ function loadPersistedEnabledTools() {
 }
 
 function isLocalModeActive() {
+  if (typeof ollamaBackend !== 'undefined' && ollamaBackend.enabled) return true;
   return localBackend.enabled && !!localBackend.url;
+}
+
+function isOllamaReady() {
+  if (typeof ollamaBackend === 'undefined' || !ollamaBackend.enabled) return { ready: false, reason: '' };
+  // ☁ cloud model selected → need API key
+  const isCloud = typeof isSelectedOllamaModelCloud === 'function' && isSelectedOllamaModelCloud();
+  if (isCloud) {
+    const key = typeof getOllamaCloudApiKey === 'function' ? getOllamaCloudApiKey() : '';
+    if (!key) return { ready: false, reason: '☁ Ollama Cloud model selected — enter your Ollama API key in Settings → Ollama and click Save.' };
+  }
+  return { ready: true, reason: '' };
 }
 
 function getSelectedCloudProvider() {
@@ -50,14 +62,6 @@ function getSelectedCloudProvider() {
 
 function getCloudReadiness() {
   const provider = getSelectedCloudProvider();
-
-  if (provider === 'ollama') {
-    const ollamaKey = typeof getOllamaCloudApiKey === 'function' ? getOllamaCloudApiKey() : '';
-    if (!ollamaKey) {
-      return { ready: false, reason: 'Ollama Cloud requires an API key. Save your key in Settings.' };
-    }
-    return { ready: true, reason: '' };
-  }
 
   if (provider === 'azure') {
     if (!apiKey) {

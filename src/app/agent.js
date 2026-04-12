@@ -2300,6 +2300,12 @@ async function sendMessage() {
       addMessage('error', cloudReadiness.reason || 'Cloud provider is not ready.', null);
       return;
     }
+  } else if (typeof isOllamaReady === 'function') {
+    const ollamaReadiness = isOllamaReady();
+    if (!ollamaReadiness.ready) {
+      addMessage('error', ollamaReadiness.reason, null);
+      return;
+    }
   }
 
   input.value = '';
@@ -2416,11 +2422,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (typeof loadCloudModelSelection === 'function') {
     loadCloudModelSelection();
   }
-  if (typeof loadOllamaCloudKey === 'function') {
-    loadOllamaCloudKey();
-  }
-  if (typeof loadOllamaCloudModelSelection === 'function') {
-    loadOllamaCloudModelSelection();
+  if (typeof loadOllamaBackendState === 'function') {
+    loadOllamaBackendState();
   }
   if (!chatSessions.length) createSession();
   if (!getActiveSession()) activeSessionId = chatSessions[0]?.id || createSession().id;
@@ -2431,15 +2434,6 @@ document.addEventListener('DOMContentLoaded', () => {
   if (apiKey) {
     document.getElementById('api-key').value = apiKey;
     setStatus('ok', 'key set');
-  }
-  if (typeof refreshOllamaCloudModels === 'function') {
-    const shouldRefreshOllamaModels = (typeof getSelectedCloudProvider === 'function' && getSelectedCloudProvider() === 'ollama')
-      || (typeof getOllamaCloudApiKey === 'function' && !!getOllamaCloudApiKey());
-    if (shouldRefreshOllamaModels) {
-      refreshOllamaCloudModels(true).catch(error => {
-        console.debug(`[Ollama] Startup model refresh skipped: ${error.message}`);
-      });
-    }
   }
   if (localBackend.url) {
     document.getElementById('local-url').value = localBackend.url;

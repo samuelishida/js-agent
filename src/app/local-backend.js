@@ -1,5 +1,4 @@
 const LOCAL_CANDIDATES = [
-  { port: 11434, paths: ['/api/tags'],  name: 'Ollama',    chatPath: '/api/chat' },
   { port: 1234,  paths: ['/v1/models'], name: 'LM Studio', chatPath: '/v1/chat/completions' },
   { port: 8080,  paths: ['/v1/models'], name: 'llama.cpp', chatPath: '/v1/chat/completions' },
   { port: 5000,  paths: ['/v1/models'], name: 'generic',   chatPath: '/v1/chat/completions' },
@@ -254,7 +253,7 @@ async function probeLocal() {
   localStorage.removeItem('agent_local_backend_model');
   localStorage.removeItem('agent_local_backend_chat_path');
   localStorage.removeItem('agent_local_backend_name');
-  setLocalStatus('error', 'nothing found on :11434 / :1234 / :8080 / :5000');
+  setLocalStatus('error', 'nothing found on :1234 / :8080 / :5000 — check LM Studio is running');
 }
 
 function setLocalStatus(state, label) {

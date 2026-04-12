@@ -27,6 +27,10 @@ function executeLane(lane, msgs, options, outerSignal) {
   return scheduleLaneExecution(lane, minIntervalMs, outerSignal, async () => {
     return retryWithBackoff(async () => {
       return runWithTimeout(async signal => {
+        if (lane === 'ollama') {
+          console.debug(`[callLLM] Executing on OLLAMA lane at ${ollamaBackend.url}`);
+          return callOllamaCloud(msgs, signal, options);
+        }
         if (lane === 'local') {
           console.debug(`[callLLM] Executing on LOCAL lane at ${localBackend.url}`);
           return callLocal(msgs, signal, options);
@@ -244,7 +248,56 @@ function summarizeLocalPayloadShape(data) {
   ].filter(Boolean).join(' | ') || 'empty-object';
 }
 
+// Converts an OpenAI-style tool_calls array (from function-calling API responses)
+// into <tool_call> XML blocks that the agent's regex parser understands.
+// Handles model quirks:
+//  - glm-5.1: encodes full {tool,args} JSON in function.name, arguments is "{}"
+//  - standard: function.name is the tool name, function.arguments is the args JSON string
+//  - alias: function.name JSON may use "name"+"parameters" instead of "tool"+"args"
+function normalizeFunctionCallsToXml(toolCallsArr) {
+  if (!Array.isArray(toolCallsArr) || !toolCallsArr.length) return '';
+  const blocks = toolCallsArr.map(tc => {
+    const fn = tc?.function;
+    if (!fn) return '';
+
+    // Try parsing function.name as JSON (glm-5.1 quirk and similar)
+    let nameJson = null;
+    try { nameJson = JSON.parse(fn.name); } catch { /* not JSON — normal */ }
+    if (nameJson && typeof nameJson === 'object') {
+      const toolName = nameJson.tool || nameJson.name || null;
+      if (toolName) {
+        const args = nameJson.args ?? nameJson.parameters ?? nameJson.input ?? nameJson.arguments ?? {};
+        return `<tool_call>\n${JSON.stringify({ tool: String(toolName), args: args || {} })}\n</tool_call>`;
+      }
+    }
+
+    // Standard OpenAI function-calling: name = tool name, arguments = JSON string
+    const toolName = String(fn.name || '').trim();
+    if (!toolName) return '';
+    let args = {};
+    try { args = JSON.parse(fn.arguments || '{}'); } catch { /* malformed args */ }
+    // arguments may itself use alias keys (parameters/input) — normalise them.
+    const argsVal = args.args ?? args.parameters ?? args.input ?? args.inputs ?? args.arguments ?? args;
+    return `<tool_call>\n${JSON.stringify({ tool: toolName, args: argsVal })}\n</tool_call>`;
+  }).filter(Boolean);
+
+  if (!blocks.length) return '';
+  console.debug(`[LLM] normalizeFunctionCallsToXml: converted ${blocks.length} tool_call(s)`);
+  return blocks.join('\n');
+}
+
 function extractLocalVisibleReply(data) {
+  // Check for OpenAI function-calling format: content is empty but tool_calls is populated.
+  // Any local or Ollama model that uses the function-calling API returns data this way.
+  const toolCallsArr = data?.choices?.[0]?.message?.tool_calls;
+  if (Array.isArray(toolCallsArr) && toolCallsArr.length) {
+    const rawContent = String(data?.choices?.[0]?.message?.content || '').trim();
+    if (!rawContent) {
+      const xml = normalizeFunctionCallsToXml(toolCallsArr);
+      if (xml) return { text: xml, hiddenReasoningOnly: false };
+    }
+  }
+
   const visibleCandidates = [
     data?.choices?.[0]?.message?.content,
     data?.choices?.[0]?.message,
@@ -281,6 +334,11 @@ function extractLocalVisibleReply(data) {
 }
 
 function getLaneForRequest() {
+  if (typeof ollamaBackend !== 'undefined' && ollamaBackend.enabled) {
+    console.debug(`[LLM Route] ollamaBackend.enabled=true, url='${ollamaBackend.url}' → lane='ollama'`);
+    return { lane: 'ollama', error: '' };
+  }
+
   if (localBackend.enabled) {
     const localUrlState = validateAndNormalizeLocalUrl(localBackend.url);
     if (!localUrlState.valid) {
@@ -953,17 +1011,12 @@ async function callAzureOpenAiCloud(msgs, signal, options = {}, initialDeploymen
 }
 
 async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
-  // Get API key and model from settings
-  const ollamaApiKey = typeof getOllamaCloudApiKey === 'function' 
-    ? getOllamaCloudApiKey() 
+  const ollamaApiKey = typeof getOllamaCloudApiKey === 'function'
+    ? getOllamaCloudApiKey()
     : '';
   const ollamaModel = typeof getOllamaCloudModel === 'function'
     ? getOllamaCloudModel()
     : String(initialModel || 'llama3.1:8b').trim();
-
-  if (!ollamaApiKey) {
-    throw new Error('Ollama Cloud API key is required. Please save your API key in Settings.');
-  }
 
   const model = ollamaModel;
   const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
@@ -976,81 +1029,82 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
     stream: false
   };
 
-  // Build endpoint list: try same-origin proxy first, then Ollama Cloud directly
-  const endpoints = [];
-  const proxyUrl = new URL('/api/ollama/v1', window.location.origin).toString().replace(/\/+$/, '');
-  if (proxyUrl && proxyUrl.startsWith(window.location.origin)) {
-    endpoints.push(proxyUrl);
+  const isCloudModel = (typeof isSelectedOllamaModelCloud === 'function') && isSelectedOllamaModelCloud();
+
+  // Routing:
+  // ☁ cloud models  → dev-server proxy at /api/ollama/v1 (avoids CORS with ollama.com)
+  //   fallback if proxy unavailable → reject with clear message
+  // local models     → local Ollama daemon at ollamaBackend.url (localhost:11434)
+  let endpoint;
+  if (isCloudModel) {
+    const proxyBase = new URL('/api/ollama/v1', window.location.origin).toString().replace(/\/+$/, '');
+    endpoint = `${proxyBase}/chat/completions`;
+  } else {
+    const rawLocalUrl = (typeof ollamaBackend !== 'undefined' && ollamaBackend.url)
+      ? ollamaBackend.url
+      : 'http://localhost:11434';
+    const baseUrl = rawLocalUrl.replace(/\/+$/, '');
+    endpoint = `${baseUrl}/v1/chat/completions`;
   }
-  endpoints.push('https://ollama.com/v1');
+  console.debug(`[Ollama] POST ${endpoint} model='${model}' cloud=${isCloudModel}`);
 
   const headers = { 'Content-Type': 'application/json' };
-  headers.Authorization = `Bearer ${ollamaApiKey}`;
+  if (ollamaApiKey) {
+    headers.Authorization = `Bearer ${ollamaApiKey}`;
+  }
 
-  const attempts = [];
-  for (const endpoint of endpoints) {
-    try {
-      const res = await fetch(`${endpoint}/chat/completions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal
-      });
+  let res, text;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal
+    });
+    text = await res.text();
+  } catch (e) {
+    if (signal?.aborted || e?.name === 'AbortError') throw e;
+    const connError = isCloudModel
+      ? new Error('Cannot reach the Ollama Cloud proxy. Make sure the dev server is running (node proxy/dev-server.js).')
+      : new Error(`Cannot reach Ollama at the local daemon. Make sure Ollama is running (ollama serve).`);
+    connError.code = 'OLLAMA_UNREACHABLE';
+    throw connError;
+  }
 
-      const text = await res.text();
-      if (!res.ok) {
-        attempts.push({ endpoint, status: res.status, detail: text.slice(0, 300) });
-        const isSameOriginProxy = endpoint.startsWith(window.location.origin);
-        if (isSameOriginProxy && [404, 405].includes(Number(res.status))) {
-          console.debug(`[Ollama] Same-origin proxy returned ${res.status}, trying Ollama Cloud directly.`);
-          continue;
-        }
-        if (res.status === 401 || res.status === 403) {
-          const authError = new Error('Ollama Cloud authentication failed. Check your API key in Settings.');
-          authError.status = res.status;
-          throw authError;
-        }
-        continue;
-      }
-
-      const data = JSON.parse(text);
-      if (data.error) {
-        const detail = String(data.error?.message || data.error || 'payload error').slice(0, 200);
-        attempts.push({ endpoint, status: 200, detail });
-        continue;
-      }
-
-      return data.choices?.[0]?.message?.content
-        || data.choices?.[0]?.text
-        || data.message?.content
-        || data.response
-        || '';
-    } catch (e) {
-      if (signal?.aborted || e?.name === 'AbortError') throw e;
-      attempts.push({ endpoint, status: 0, detail: e?.message || 'network error' });
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      const authError = new Error('Ollama authentication failed. Check your API key in Settings.');
+      authError.status = res.status;
+      throw authError;
     }
+    throw new Error(`Ollama returned HTTP ${res.status}: ${text.slice(0, 200)}`);
   }
 
-  // All attempts failed
-  const attemptSummary = attempts
-    .map(a => `${a.endpoint} (${a.status || 'network'}${a.detail ? `: ${String(a.detail).slice(0, 80)}` : ''})`)
-    .join(' | ');
-
-  const networkBlocked = attempts.every(a => !a.status);
-  if (networkBlocked) {
-    const error = new Error(
-      `Ollama Cloud request failed due to network/CORS issues. Attempts: ${attemptSummary}`
-    );
-    error.code = 'OLLAMA_CLOUD_CORS_BLOCKED';
-    throw error;
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`Ollama returned non-JSON response: ${text.slice(0, 200)}`);
   }
 
-  const lastHttp = attempts.find(a => a.status);
-  const error = new Error(
-    `Ollama Cloud request failed. ${lastHttp ? `HTTP ${lastHttp.status}: ${lastHttp.detail}` : 'No response.'}`
-  );
-  if (lastHttp?.status) error.status = lastHttp.status;
-  throw error;
+  if (data.error) {
+    throw new Error(String(data.error?.message || data.error || 'Ollama API error').slice(0, 200));
+  }
+
+  const rawContent = data.choices?.[0]?.message?.content
+    || data.choices?.[0]?.text
+    || data.message?.content
+    || data.response
+    || '';
+
+  // Convert function-calling format (content:"" + tool_calls:[...]) to <tool_call> XML.
+  // normalizeFunctionCallsToXml handles all known model quirks (glm-5.1, standard, alias fields).
+  if (!rawContent.trim()) {
+    const xml = normalizeFunctionCallsToXml(data.choices?.[0]?.message?.tool_calls);
+    if (xml) return xml;
+  }
+
+  return rawContent;
 }
 
 function updateModelBadgeForLocal(modelName) {

@@ -159,7 +159,15 @@ let localBackend = {
   detected: false,
   corsBlocked: false
 };
+let ollamaBackend = {
+  enabled: safeGet('agent_ollama_enabled') === 'true',
+  url: safeGet('agent_ollama_url') || 'http://localhost:11434',
+};
+// Set of model names confirmed installed locally via /api/tags probe.
+// Used by isSelectedOllamaModelCloud() for reliable local-vs-cloud routing.
+const ollamaInstalledModels = new Set();
 console.debug(`[State Init] localBackend: enabled=${localBackend.enabled}, url='${localBackend.url}', model='${localBackend.model}'`);
+console.debug(`[State Init] ollamaBackend: enabled=${ollamaBackend.enabled}, url='${ollamaBackend.url}'`);
 let chatSessions = [];
 let activeSessionId = safeGet(ACTIVE_SESSION_KEY) || null;
 
@@ -317,36 +325,26 @@ function saveKey() {
 function saveOllamaCloudApiKey() {
   const input = document.getElementById('ollama-cloud-api-key');
   if (!input) return;
-  
   const key = String(input.value || '').trim();
   if (key) {
     localStorage.setItem('agent_ollama_cloud_api_key', key);
-    setStatus('ok', 'Ollama Cloud API key saved');
+    setStatus('ok', 'Ollama API key saved');
   } else {
     localStorage.removeItem('agent_ollama_cloud_api_key');
-    setStatus('ok', 'Ollama Cloud API key cleared');
+    setStatus('ok', 'Ollama API key cleared');
   }
 }
 
 function loadOllamaCloudApiKey() {
   const input = document.getElementById('ollama-cloud-api-key');
   if (!input) return;
-  const stored = localStorage.getItem('agent_ollama_cloud_api_key') || '';
-  input.value = stored;
+  input.value = localStorage.getItem('agent_ollama_cloud_api_key') || '';
 }
 
 function saveOllamaCloudModelSelection() {
-  const select = document.getElementById('ollama-cloud-model-select');
-  if (!select) return;
-  const model = String(select.value || 'llama3.1:8b').trim();
-  localStorage.setItem('agent_ollama_cloud_model', model);
-}
-
-function loadOllamaCloudModelSelection() {
-  const select = document.getElementById('ollama-cloud-model-select');
-  if (!select) return;
-  const stored = localStorage.getItem('agent_ollama_cloud_model') || 'llama3.1:8b';
-  select.value = stored;
+  const select = document.getElementById('ollama-model-select');
+  const model = (select && select.value) || '';
+  if (model) localStorage.setItem('agent_ollama_cloud_model', model);
 }
 
 function getOllamaCloudApiKey() {
@@ -354,31 +352,130 @@ function getOllamaCloudApiKey() {
 }
 
 function getOllamaCloudModel() {
-  return localStorage.getItem('agent_ollama_cloud_model') || 'llama3.1:8b';
+  const select = document.getElementById('ollama-model-select');
+  if (select && select.value) return select.value;
+  return localStorage.getItem('agent_ollama_cloud_model') || 'qwen3.5:9b';
 }
 
-function updateOllamaControlsVisibility() {
-  const modelSelect = document.getElementById('model-select');
-  const ollamaControls = document.getElementById('ollama-cloud-controls');
-  
-  if (!modelSelect || !ollamaControls) return;
-  
-  const isOllama = modelSelect.value && modelSelect.value.startsWith('ollama/');
-  ollamaControls.style.display = isOllama ? 'block' : 'none';
+function getOllamaCloudProxyUrl() {
+  const stored = localStorage.getItem('agent_ollama_cloud_proxy_url') || '';
+  if (stored) return stored;
+  return (ollamaBackend.url || 'http://localhost:11434').replace(/\/+$/, '');
 }
 
-async function refreshOllamaCloudModels(silent = false) {
-  const modelSelect = document.getElementById('ollama-cloud-model-select');
-  if (!modelSelect) return;
-  
-  // Note: Ollama Cloud doesn't expose a public /tags endpoint.
-  // Users must manually select from the available models list.
-  // This is a placeholder that could be expanded if Ollama Cloud
-  // provides an API for listing available models in the future.
-  
-  if (!silent) {
-    addNotice('Model list is manually maintained. Select the model you want to use from the dropdown.');
+// Returns true when the currently-selected Ollama model needs cloud routing.
+// Primary check: model name NOT in the ollamaInstalledModels Set (populated by probe).
+// Secondary check (when Set is empty / never probed): DOM optgroup id.
+function isSelectedOllamaModelCloud() {
+  const select = document.getElementById('ollama-model-select');
+  if (!select || !select.options.length) return false;
+  const idx = select.selectedIndex;
+  if (idx < 0) return false;
+  const model = select.options[idx].value;
+  if (!model) return false; // placeholder selected
+
+  // If we have probe data, trust it: anything not in the installed set is cloud.
+  if (ollamaInstalledModels.size > 0) {
+    return !ollamaInstalledModels.has(model);
   }
+
+  // Fallback: check which optgroup the option belongs to.
+  const group = select.options[idx].parentElement;
+  return !!(group && group.id === 'ollama-cloud-optgroup');
+}
+
+// -- OLLAMA BACKEND ------------------------------------------------------------
+
+function toggleOllamaBackend() {
+  const checkbox = document.getElementById('toggle-ollama');
+  ollamaBackend.enabled = checkbox ? checkbox.checked : !ollamaBackend.enabled;
+  localStorage.setItem('agent_ollama_enabled', ollamaBackend.enabled ? 'true' : 'false');
+  if (ollamaBackend.enabled && localBackend.enabled) {
+    // Disable LM Studio when Ollama is turned on
+    localBackend.enabled = false;
+    localStorage.setItem('agent_prefer_local_backend', 'false');
+    const lmToggle = document.getElementById('toggle-local');
+    if (lmToggle) lmToggle.checked = false;
+  }
+  updateBadge();
+}
+
+async function probeOllama() {
+  const urlInput = document.getElementById('ollama-url');
+  const statusLabel = document.getElementById('ollama-status-label');
+  const dot = document.getElementById('ollama-dot');
+  const select = document.getElementById('ollama-model-select');
+
+  const rawUrl = (urlInput ? urlInput.value.trim() : '') || ollamaBackend.url || 'http://localhost:11434';
+  const baseUrl = rawUrl.replace(/\/+$/, '');
+
+  ollamaBackend.url = baseUrl;
+  localStorage.setItem('agent_ollama_url', baseUrl);
+  if (urlInput) urlInput.value = baseUrl;
+
+  if (statusLabel) statusLabel.textContent = 'probing\u2026';
+  if (dot) dot.className = 'status-dot busy';
+
+  try {
+    const res = await fetchWithTimeout(`${baseUrl}/api/tags`, {}, 5000);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const models = Array.isArray(data.models) ? data.models : [];
+
+    // Update the installed-models Set (used for reliable local-vs-cloud routing).
+    ollamaInstalledModels.clear();
+    models.forEach(m => ollamaInstalledModels.add(m.name));
+
+    if (select) {
+      const saved = localStorage.getItem('agent_ollama_cloud_model') || '';
+      // Remove any previous "Installed" optgroup, keep the static cloud optgroup
+      const existing = select.querySelector('optgroup[label="Installed (local)"]');
+      if (existing) existing.remove();
+      const cloudGroup = select.querySelector('#ollama-cloud-optgroup');
+
+      if (models.length) {
+        const localGroup = document.createElement('optgroup');
+        localGroup.label = 'Installed (local)';
+        models.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.name;
+          opt.textContent = m.name;
+          if (m.name === saved) opt.selected = true;
+          localGroup.appendChild(opt);
+        });
+        // Prepend before the cloud optgroup (or at top if no cloud group)
+        cloudGroup ? select.insertBefore(localGroup, cloudGroup) : select.prepend(localGroup);
+        if (saved && !select.value) select.value = saved;
+      }
+      console.debug(`[Ollama] Probe complete: ${models.length} local models, cloud routing guard updated.`);
+    }
+
+    if (statusLabel) statusLabel.textContent = `${models.length} model${models.length !== 1 ? 's' : ''} installed`;
+    if (dot) dot.className = 'status-dot ok';
+  } catch (e) {
+    if (statusLabel) statusLabel.textContent = `unreachable: ${e.message}`;
+    if (dot) dot.className = 'status-dot error';
+  }
+}
+
+function loadOllamaBackendState() {
+  const urlInput = document.getElementById('ollama-url');
+  if (urlInput) urlInput.value = ollamaBackend.url || 'http://localhost:11434';
+  const toggle = document.getElementById('toggle-ollama');
+  if (toggle) toggle.checked = ollamaBackend.enabled;
+  loadOllamaCloudApiKey();
+  // Restore saved selection in the select (cloud optgroup is always present)
+  const saved = localStorage.getItem('agent_ollama_cloud_model') || '';
+  if (saved) {
+    const sel = document.getElementById('ollama-model-select');
+    if (sel) {
+      // Try to select the saved model — it may be in the cloud optgroup already
+      const existing = Array.from(sel.options).find(o => o.value === saved);
+      if (existing) sel.value = saved;
+    }
+  }
+  // If Ollama is enabled, auto-probe on startup to load installed models
+  if (ollamaBackend.enabled) probeOllama().catch(() => {});
 }
 
 function saveGithubToken() {

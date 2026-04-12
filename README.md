@@ -74,14 +74,12 @@ Agent/
 |- assets/
 |- prompts/
 |- docs/
-|  |- agentic-search-arch.html
-|  `- ollama-cloud-cors-proxy.md
+|  `- agentic-search-arch.html
 |- scripts/
 |  |- build-snapshot.mjs
 |  `- test-skills-smoke.mjs
 |- proxy/
-|  |- dev-server.js
-|  `- ollama-cloud-worker.js
+|  `- dev-server.js
 `- src/
    |- app/
    |  |- agent.js

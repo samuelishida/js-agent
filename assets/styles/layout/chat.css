@@ -30,7 +30,7 @@
 .empty-logo {
   width: 56px;
   height: 56px;
-  background: linear-gradient(135deg, var(--accent-primary), var(--green));
+  background: linear-gradient(135deg, #1da1f2, #5b9bfd);
   border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
@@ -128,8 +128,8 @@
 }
 
 .msg.user .msg-content {
-  background: var(--accent-primary);
-  color: white;
+  background: #1da1f2;
+  color: #fff;
   border-radius: var(--radius-lg);
 }
 

@@ -475,8 +475,11 @@
 
       try {
         return await retryWithBackoff(async () => {
-          const url = `https://news.google.com/rss/search?q=${encodeURIComponent(terms)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`;
-          const res = await window.fetchWithTimeout(url, { cache: 'no-store' }, 8000);
+          // Google News blocks direct browser requests (CORS + 403).
+          // Route through the same-origin dev-server proxy at /api/gnews.
+          const rssPath = `/rss/search?q=${encodeURIComponent(terms)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`;
+          const proxyUrl = new URL(`/api/gnews${rssPath}`, window.location.origin).toString();
+          const res = await window.fetchWithTimeout(proxyUrl, { cache: 'no-store' }, 8000);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
           const xml = await res.text();

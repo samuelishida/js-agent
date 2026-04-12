@@ -6,11 +6,11 @@ import path from 'node:path';
 import { URL } from 'node:url';
 import { spawn } from 'node:child_process';
 
-const PORT = Number(process.env.PORT || 5500);
+const PORT = Number(process.env.PORT || 5501);
 const ROOT = process.cwd();
 const OLLAMA_BASE = 'https://ollama.com';
-const API_PREFIX = '/api/ollama/v1';
-const TERMINAL_PREFIX = '/api/terminal';
+const API_PREFIX = '/api/ollama/v1';const GNEWS_PREFIX = '/api/gnews';
+const GNEWS_BASE = 'https://news.google.com';const TERMINAL_PREFIX = '/api/terminal';
 const DIAGNOSTICS_PREFIX = '/api/diagnostics';
 
 const MIME_TYPES = {
@@ -335,11 +335,59 @@ function serveStatic(req, res, parsedUrl) {
   });
 }
 
+async function proxyGoogleNews(req, res, parsedUrl) {
+  if (req.method === 'OPTIONS') {
+    send(res, 204, '', {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET,OPTIONS',
+      'Access-Control-Max-Age': '86400'
+    });
+    return;
+  }
+
+  const suffix = parsedUrl.pathname.slice(GNEWS_PREFIX.length) || '';
+  const upstreamUrl = new URL(`${suffix}${parsedUrl.search || ''}`, GNEWS_BASE);
+
+  const options = {
+    protocol: 'https:',
+    hostname: upstreamUrl.hostname,
+    port: 443,
+    path: upstreamUrl.pathname + upstreamUrl.search,
+    method: 'GET',
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (compatible; js-agent-proxy/1.0)',
+      'Accept': 'application/rss+xml, application/xml, text/xml, */*'
+    }
+  };
+
+  const upstreamReq = https.request(options, upstreamRes => {
+    const passHeaders = {};
+    const contentType = upstreamRes.headers['content-type'];
+    if (contentType) passHeaders['Content-Type'] = contentType;
+    passHeaders['Cache-Control'] = 'no-store';
+    passHeaders['Access-Control-Allow-Origin'] = '*';
+    res.writeHead(upstreamRes.statusCode || 502, passHeaders);
+    upstreamRes.pipe(res);
+  });
+
+  upstreamReq.on('error', err => {
+    send(res, 502, JSON.stringify({ error: `Google News proxy error: ${err.message}` }), {
+      'Content-Type': 'application/json; charset=utf-8'
+    });
+  });
+
+  upstreamReq.end();
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || `127.0.0.1:${PORT}`}`);
     if (parsedUrl.pathname.startsWith(API_PREFIX)) {
       await proxyOllama(req, res, parsedUrl);
+      return;
+    }
+    if (parsedUrl.pathname.startsWith(GNEWS_PREFIX)) {
+      await proxyGoogleNews(req, res, parsedUrl);
       return;
     }
     if (parsedUrl.pathname === TERMINAL_PREFIX) {
@@ -359,6 +407,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`[dev-server] running at http://127.0.0.1:${PORT}`);
   console.log(`[dev-server] proxy route: ${API_PREFIX} -> ${OLLAMA_BASE}/v1`);
+  console.log(`[dev-server] proxy route: ${GNEWS_PREFIX} -> ${GNEWS_BASE}`);
   console.log(`[dev-server] compat routes: ${TERMINAL_PREFIX}, ${DIAGNOSTICS_PREFIX}`);
   if (!process.env.OLLAMA_API_KEY) {
     console.log('[dev-server] no OLLAMA_API_KEY env var detected; browser Authorization header will be forwarded if provided.');

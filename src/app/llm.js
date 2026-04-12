@@ -577,6 +577,21 @@ function looksLikeHtmlFragment(text) {
   return /<\/?[a-z][^>]*>/i.test(String(text || ''));
 }
 
+function containsMarkdown(text) {
+  const s = String(text || '');
+  return (
+    /^#{1,4}\s+\S/m.test(s)       ||   // ## headings
+    /^\s*\|.+\|\s*$/m.test(s)     ||   // | table rows |
+    /^```/m.test(s)                ||   // ``` fenced code
+    /^\s*[-*+]\s+\S/m.test(s)     ||   // - unordered list
+    /^\s*\d+\.\s+\S/m.test(s)     ||   // 1. ordered list
+    /\*\*[^*\n]+\*\*/m.test(s)    ||   // **bold**
+    /`[^`\n]+`/.test(s)            ||   // `inline code`
+    /^\s*>/m.test(s)               ||   // > blockquote
+    /^---+\s*$/m.test(s)               // --- horizontal rule
+  );
+}
+
 function escapeInlineHtml(text) {
   return escHtml(String(text || ''));
 }
@@ -814,13 +829,18 @@ function sanitizeHtmlFragment(html) {
 
 function renderAgentHtml(text) {
   const raw = String(text || '');
+  // Markdown syntax detected — always go through the markdown engine,
+  // even if the text also contains HTML-like fragments.
+  if (containsMarkdown(raw)) {
+    return sanitizeHtmlFragment(renderMarkdownBlocks(raw));
+  }
+  // Backward-compatible path: messages that were stored as raw HTML
+  // (no markdown syntax present).
   if (looksLikeHtmlFragment(raw)) {
-    // Backward-compatible rendering for historical messages persisted as HTML.
     return sanitizeHtmlFragment(raw);
   }
-
-  const source = renderMarkdownBlocks(raw);
-  return sanitizeHtmlFragment(source);
+  // Plain prose with no markdown and no HTML — still wrap in <p> via the engine.
+  return sanitizeHtmlFragment(renderMarkdownBlocks(raw));
 }
 
 async function callLLM(msgs, options = {}) {

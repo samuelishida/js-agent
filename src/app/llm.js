@@ -952,78 +952,20 @@ async function callAzureOpenAiCloud(msgs, signal, options = {}, initialDeploymen
   return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || '';
 }
 
-function normalizeOllamaCloudEndpoint(rawEndpoint) {
-  let configured = String(rawEndpoint || '').trim();
-  if (!configured) configured = 'https://ollama.com';
-
-  if (!/^https?:\/\//i.test(configured) && !configured.startsWith('/')) {
-    configured = `https://${configured}`;
-  }
-
-  let normalized;
-  try {
-    const resolved = new URL(configured, window.location.origin);
-    normalized = `${resolved.origin}${resolved.pathname}`.replace(/\/+$/, '');
-  } catch {
-    normalized = configured.replace(/\/+$/, '');
-  }
-
-  // api.ollama.com redirects preflight; canonical host avoids that branch.
-  normalized = normalized.replace(/^https:\/\/api\.ollama\.com$/i, 'https://ollama.com');
-  return /\/v1$/i.test(normalized) ? normalized : `${normalized}/v1`;
-}
-
-function buildOllamaCloudEndpoints(rawEndpoint) {
-  const input = String(rawEndpoint || '').trim();
-  const endpoints = [];
-
-  const proxyCandidate = new URL('/api/ollama/v1', window.location.origin).toString().replace(/\/+$/, '');
-
-  const isLocalEndpoint    = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(input);
-  const isSameOriginProxy  = input.startsWith('/');
-  const isDefaultCloudHost = /^(https:\/\/)?(api\.)?ollama\.com(\/v1)?$/i.test(input);
-  const isEmpty            = !input;
-
-  // 1. Explicit local address (http://localhost:* or http://127.0.0.1:*)
-  //    → hit it directly, no proxy, no fallback.
-  if (isLocalEndpoint) {
-    endpoints.push(normalizeOllamaCloudEndpoint(input));
-    return [...new Set(endpoints)];
-  }
-
-  // 2. Same-origin relative proxy path (e.g. /api/ollama/v1 stored by default on localhost)
-  //    → use the configured path first, then default proxy path as fallback.
-  if (isSameOriginProxy) {
-    endpoints.push(normalizeOllamaCloudEndpoint(input));
-    endpoints.push(proxyCandidate);
-    return [...new Set(endpoints)];
-  }
-
-  // 3. Nothing configured, or explicit ollama.com cloud host.
-  //    Use same-origin proxy first (browser-safe), then cloud endpoint directly.
-  if (isEmpty || isDefaultCloudHost) {
-    endpoints.push(proxyCandidate);
-    endpoints.push(normalizeOllamaCloudEndpoint(input));
-    return [...new Set(endpoints)];
-  }
-
-  // 4. Arbitrary cloud URL — try it, then proxy as CORS fallback.
-  const configured = normalizeOllamaCloudEndpoint(input);
-  endpoints.push(configured);
-  try {
-    if (new URL(configured).origin !== window.location.origin) {
-      endpoints.push(proxyCandidate);
-    }
-  } catch {
-    endpoints.push(proxyCandidate);
-  }
-  return [...new Set(endpoints)];
-}
-
 async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
-  const endpoints = buildOllamaCloudEndpoints(localStorage.getItem('agent_ollama_cloud_endpoint'));
+  // Get API key and model from settings
+  const ollamaApiKey = typeof getOllamaCloudApiKey === 'function' 
+    ? getOllamaCloudApiKey() 
+    : '';
+  const ollamaModel = typeof getOllamaCloudModel === 'function'
+    ? getOllamaCloudModel()
+    : String(initialModel || 'llama3.1:8b').trim();
 
-  const model = String(initialModel || 'llama3.1:8b').trim();
+  if (!ollamaApiKey) {
+    throw new Error('Ollama Cloud API key is required. Please save your API key in Settings.');
+  }
+
+  const model = ollamaModel;
   const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
   const body = {
@@ -1034,10 +976,16 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
     stream: false
   };
 
-  const headers = { 'Content-Type': 'application/json' };
-  if (apiKey) {
-    headers.Authorization = `Bearer ${apiKey}`;
+  // Build endpoint list: try same-origin proxy first, then Ollama Cloud directly
+  const endpoints = [];
+  const proxyUrl = new URL('/api/ollama/v1', window.location.origin).toString().replace(/\/+$/, '');
+  if (proxyUrl && proxyUrl.startsWith(window.location.origin)) {
+    endpoints.push(proxyUrl);
   }
+  endpoints.push('https://ollama.com/v1');
+
+  const headers = { 'Content-Type': 'application/json' };
+  headers.Authorization = `Bearer ${ollamaApiKey}`;
 
   const attempts = [];
   for (const endpoint of endpoints) {
@@ -1052,23 +1000,13 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
       const text = await res.text();
       if (!res.ok) {
         attempts.push({ endpoint, status: res.status, detail: text.slice(0, 300) });
-        const isSameOriginProxy = (() => {
-          try {
-            const parsed = new URL(endpoint, window.location.origin);
-            return parsed.origin === window.location.origin && /\/api\/ollama\/v1$/i.test(parsed.pathname);
-          } catch {
-            return false;
-          }
-        })();
-        // Proxy not installed — log and try the next endpoint (e.g. localhost:11434).
+        const isSameOriginProxy = endpoint.startsWith(window.location.origin);
         if (isSameOriginProxy && [404, 405].includes(Number(res.status))) {
-          console.debug(`[Ollama] Same-origin proxy returned ${res.status}, trying next endpoint.`);
+          console.debug(`[Ollama] Same-origin proxy returned ${res.status}, trying Ollama Cloud directly.`);
           continue;
         }
         if (res.status === 401 || res.status === 403) {
-          const authError = new Error(
-            'Ollama Cloud authentication failed. Set a valid API key or use a same-origin proxy that injects OLLAMA_API_KEY.'
-          );
+          const authError = new Error('Ollama Cloud authentication failed. Check your API key in Settings.');
           authError.status = res.status;
           throw authError;
         }
@@ -1093,17 +1031,15 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
     }
   }
 
+  // All attempts failed
   const attemptSummary = attempts
     .map(a => `${a.endpoint} (${a.status || 'network'}${a.detail ? `: ${String(a.detail).slice(0, 80)}` : ''})`)
     .join(' | ');
 
-  // Only treat as CORS-blocked if every attempt was a network failure (no HTTP response at all).
   const networkBlocked = attempts.every(a => !a.status);
   if (networkBlocked) {
     const error = new Error(
-      'Ollama Cloud request failed in browser due CORS/preflight restrictions. ' +
-      'Set Ollama Cloud Endpoint to a same-origin proxy such as /api/ollama/v1 (dev-server or worker). ' +
-      `Attempts: ${attemptSummary}`
+      `Ollama Cloud request failed due to network/CORS issues. Attempts: ${attemptSummary}`
     );
     error.code = 'OLLAMA_CLOUD_CORS_BLOCKED';
     throw error;

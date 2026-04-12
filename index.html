@@ -145,7 +145,7 @@
 
         <div class="settings-group">
           <label class="settings-label">Model Provider & Version</label>
-          <select id="model-select" class="settings-select">
+          <select id="model-select" class="settings-select" onchange="updateOllamaControlsVisibility()">
             <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
             <option value="gemini/gemini-2.5-pro">Gemini 2.5 Pro</option>
             <option value="gemini/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
@@ -155,17 +155,29 @@
             <option value="runtime/runtime-3-7-sonnet-latest">Runtime 3.7 Sonnet</option>
             <option value="runtime/runtime-3-5-haiku-latest">Runtime 3.5 Haiku</option>
             <option value="azure/gpt-4.1-mini">Azure GPT-4.1 Mini</option>
-            <option value="ollama/llama3.1:8b">Ollama Cloud llama3.1:8b</option>
+            <option value="ollama/__selected__">Ollama Cloud</option>
           </select>
         </div>
 
-        <div class="settings-group">
-          <label class="settings-label">Ollama Cloud Endpoint (optional)</label>
-          <div class="settings-row">
-            <input class="settings-input" id="ollama-cloud-endpoint" type="text" placeholder="empty = auto (proxy → cloud)" autocomplete="off" />
-            <button class="btn-primary btn-sm" onclick="saveOllamaCloudEndpoint()">Save</button>
+        <div id="ollama-cloud-controls" style="display:none">
+          <div class="settings-group">
+            <label class="settings-label">Ollama Cloud API Key</label>
+            <div class="settings-row">
+              <input class="settings-input" id="ollama-cloud-api-key" type="password" placeholder="Enter your Ollama Cloud API key" autocomplete="off" />
+              <button class="btn-primary btn-sm" onclick="saveOllamaCloudApiKey()">Save</button>
+            </div>
+            <div class="settings-hint">Your API key is used for authentication with Ollama Cloud.</div>
           </div>
-          <div class="settings-hint">Used only when provider is <code>ollama/*</code>. Browser mode may require a same-origin proxy. Default flow: /api/ollama/v1 then https://ollama.com/v1.</div>
+
+          <div class="settings-group">
+            <label class="settings-label">Ollama Cloud Model</label>
+            <select id="ollama-cloud-model-select" class="settings-select">
+              <option value="llama3.1:8b">llama3.1:8b</option>
+              <option value="llama2:13b">llama2:13b</option>
+              <option value="neural-chat">neural-chat</option>
+              <option value="mistral">mistral</option>
+            </select>
+          </div>
         </div>
       </div>
 

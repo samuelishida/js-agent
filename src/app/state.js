@@ -314,53 +314,109 @@ function saveKey() {
   maybeRequestNotifPermission();
 }
 
-function saveOllamaCloudEndpoint() {
-  const input = document.getElementById('ollama-cloud-endpoint');
+function saveOllamaCloudApiKey() {
+  const input = document.getElementById('ollama-cloud-api-key');
   if (!input) return;
-
-  const raw = String(input.value || '').trim();
-  if (!raw) {
-    localStorage.removeItem('agent_ollama_cloud_endpoint');
-    setStatus('ok', 'ollama endpoint reset');
-    return;
-  }
-
-  // Allow same-origin relative paths (example: /api/ollama/v1) for browser CORS-safe proxying.
-  if (raw.startsWith('/')) {
-    const normalizedPath = raw.replace(/\/+$/, '') || '/api/ollama/v1';
-    localStorage.setItem('agent_ollama_cloud_endpoint', normalizedPath);
-    input.value = normalizedPath;
-    setStatus('ok', 'ollama endpoint saved');
-    return;
-  }
-
-  let endpoint = raw;
-  if (!/^https?:\/\//i.test(endpoint)) {
-    endpoint = `https://${endpoint}`;
-  }
-
-  try {
-    const parsed = new URL(endpoint);
-    let normalized = `${parsed.protocol}//${parsed.host}${parsed.pathname}`.replace(/\/+$/, '');
-    normalized = normalized.replace(/^https:\/\/api\.ollama\.com$/i, 'https://ollama.com');
-    localStorage.setItem('agent_ollama_cloud_endpoint', normalized);
-    input.value = normalized;
-    setStatus('ok', 'ollama endpoint saved');
-  } catch {
-    setStatus('error', 'invalid ollama endpoint');
-    addNotice('Invalid Ollama endpoint URL. Use https://ollama.com/v1 or /api/ollama/v1');
+  
+  const key = String(input.value || '').trim();
+  if (key) {
+    localStorage.setItem('agent_ollama_cloud_api_key', key);
+    setStatus('ok', 'Ollama Cloud API key saved');
+  } else {
+    localStorage.removeItem('agent_ollama_cloud_api_key');
+    setStatus('ok', 'Ollama Cloud API key cleared');
   }
 }
 
-function loadOllamaCloudEndpoint() {
-  const input = document.getElementById('ollama-cloud-endpoint');
+function loadOllamaCloudApiKey() {
+  const input = document.getElementById('ollama-cloud-api-key');
   if (!input) return;
-  // No default — empty means auto: proxy if available, then cloud.
-  // User must explicitly set an endpoint to pin behaviour.
-  const stored = localStorage.getItem('agent_ollama_cloud_endpoint') || '';
-  input.value = stored.startsWith('/')
-    ? stored
-    : stored.replace(/^https:\/\/api\.ollama\.com/i, 'https://ollama.com');
+  const stored = localStorage.getItem('agent_ollama_cloud_api_key') || '';
+  input.value = stored;
+}
+
+function saveOllamaCloudModelSelection() {
+  const select = document.getElementById('ollama-cloud-model-select');
+  if (!select) return;
+  const model = String(select.value || 'llama3.1:8b').trim();
+  localStorage.setItem('agent_ollama_cloud_model', model);
+}
+
+function loadOllamaCloudModelSelection() {
+  const select = document.getElementById('ollama-cloud-model-select');
+  if (!select) return;
+  const stored = localStorage.getItem('agent_ollama_cloud_model') || 'llama3.1:8b';
+  select.value = stored;
+}
+
+function getOllamaCloudApiKey() {
+  return localStorage.getItem('agent_ollama_cloud_api_key') || '';
+}
+
+function getOllamaCloudModel() {
+  return localStorage.getItem('agent_ollama_cloud_model') || 'llama3.1:8b';
+}
+
+function updateOllamaControlsVisibility() {
+  const modelSelect = document.getElementById('model-select');
+  const ollamaControls = document.getElementById('ollama-cloud-controls');
+  
+  if (!modelSelect || !ollamaControls) return;
+  
+  const isOllama = modelSelect.value && modelSelect.value.startsWith('ollama/');
+  ollamaControls.style.display = isOllama ? 'block' : 'none';
+}
+
+async function refreshOllamaCloudModels(silent = false) {
+  const modelSelect = document.getElementById('ollama-cloud-model-select');
+  if (!modelSelect) return;
+  
+  const apiKey = getOllamaCloudApiKey();
+  if (!apiKey) {
+    if (!silent) addNotice('Please save your Ollama Cloud API key first.');
+    return;
+  }
+
+  try {
+    const baseUrl = (() => {
+      const proxyUrl = new URL('/api/ollama/v1', window.location.origin).toString().replace(/\/+$/, '');
+      if (proxyUrl && proxyUrl.startsWith(window.location.origin)) {
+        return proxyUrl;
+      }
+      return 'https://ollama.com/v1';
+    })();
+
+    const response = await fetch(`${baseUrl}/tags`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const models = data.models || [];
+    
+    if (models.length > 0) {
+      const currentValue = modelSelect.value;
+      modelSelect.innerHTML = models
+        .map(m => `<option value="${m.name}">${m.name}</option>`)
+        .join('');
+      
+      if (models.some(m => m.name === currentValue)) {
+        modelSelect.value = currentValue;
+      } else {
+        saveOllamaCloudModelSelection();
+      }
+      
+      if (!silent) addNotice(`Updated Ollama Cloud models. Found ${models.length} model(s).`);
+    }
+  } catch (error) {
+    if (!silent) {
+      addNotice(`Failed to refresh Ollama Cloud models: ${error.message}`);
+    }
+    console.debug(`[Ollama] Model refresh failed:`, error);
+  }
 }
 
 function saveGithubToken() {

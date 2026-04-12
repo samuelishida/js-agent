@@ -21,7 +21,9 @@ Use this JavaScript Cloudflare Worker as a same-origin CORS proxy for Ollama Clo
 In Settings:
 
 1. Choose model provider `ollama/...`.
-2. Set Ollama Cloud Endpoint to:
-   - `https://my-ollama-proxy.my-account.workers.dev/v1`
+2. Save your Ollama Cloud API key in the dedicated Ollama field.
+3. Pick an Ollama Cloud model from the Ollama model selector.
 
 If you configured `OLLAMA_API_KEY` in the Worker, the browser app does not need to send the key.
+
+Advanced: if you want to force a custom Worker URL instead of the built-in `/api/ollama/v1` auto-routing, set `localStorage.agent_ollama_cloud_endpoint` manually to `https://my-ollama-proxy.my-account.workers.dev/v1`.

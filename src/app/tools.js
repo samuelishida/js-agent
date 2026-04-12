@@ -52,16 +52,7 @@ function getCloudReadiness() {
   const provider = getSelectedCloudProvider();
 
   if (provider === 'ollama') {
-    const endpoint = String(localStorage.getItem('agent_ollama_cloud_endpoint') || '').trim();
-    // Ollama can run keyless when endpoint is same-origin proxy or left empty (auto proxy first).
-    if (apiKey || !endpoint || endpoint.startsWith('/')) {
-      return { ready: true, reason: '' };
-    }
-
-    return {
-      ready: false,
-      reason: 'Ollama Cloud direct endpoints require an API key. Set API key, or use a same-origin proxy endpoint like /api/ollama/v1.'
-    };
+    return { ready: true, reason: '' };
   }
 
   if (provider === 'azure') {

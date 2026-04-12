@@ -2413,8 +2413,14 @@ document.addEventListener('DOMContentLoaded', () => {
   initBusySync();
   updateFileAccessStatus();
   loadGithubTokenStatus();
-  if (typeof loadOllamaCloudEndpoint === 'function') {
-    loadOllamaCloudEndpoint();
+  if (typeof loadCloudModelSelection === 'function') {
+    loadCloudModelSelection();
+  }
+  if (typeof loadOllamaCloudKey === 'function') {
+    loadOllamaCloudKey();
+  }
+  if (typeof loadOllamaCloudModelSelection === 'function') {
+    loadOllamaCloudModelSelection();
   }
   if (!chatSessions.length) createSession();
   if (!getActiveSession()) activeSessionId = chatSessions[0]?.id || createSession().id;
@@ -2425,6 +2431,15 @@ document.addEventListener('DOMContentLoaded', () => {
   if (apiKey) {
     document.getElementById('api-key').value = apiKey;
     setStatus('ok', 'key set');
+  }
+  if (typeof refreshOllamaCloudModels === 'function') {
+    const shouldRefreshOllamaModels = (typeof getSelectedCloudProvider === 'function' && getSelectedCloudProvider() === 'ollama')
+      || (typeof getOllamaCloudApiKey === 'function' && !!getOllamaCloudApiKey());
+    if (shouldRefreshOllamaModels) {
+      refreshOllamaCloudModels(true).catch(error => {
+        console.debug(`[Ollama] Startup model refresh skipped: ${error.message}`);
+      });
+    }
   }
   if (localBackend.url) {
     document.getElementById('local-url').value = localBackend.url;

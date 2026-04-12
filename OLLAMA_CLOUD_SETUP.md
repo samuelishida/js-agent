@@ -1,88 +1,76 @@
 # Ollama Cloud Setup Guide
 
-## Overview
+## Starting the Dev Server
 
-The Agent now uses a simplified UI for Ollama Cloud:
-- **No more endpoint configuration** — the app automatically tries the same-origin proxy first, then falls back to `https://ollama.com/v1`
-- **Simple API Key input** — just paste your Ollama Cloud API key
-- **Model selector** — choose which model to use from a dropdown
-
-## Quick Start
-
-### 1. Open Settings
-Click the settings icon (⚙️) in the bottom-left corner.
-
-### 2. Select Ollama Cloud Provider
-In the **Cloud Model** section, select `Ollama Cloud` from the dropdown.
-- The "Ollama Cloud API Key" and "Ollama Cloud Model" controls will appear below
-
-### 3. Save Your API Key
-1. Paste your Ollama Cloud API key into the "Ollama Cloud API Key" field
-2. Click **Save**
-
-**Where to get your API key:**
-- Visit https://ollama.com/account/api-keys
-- Copy your API key
-- Paste it into the Agent settings
-
-### 4. Select a Model
-1. Click the **Refresh** button to fetch available models from your Ollama Cloud account
-2. Select a model from the "Ollama Cloud Model" dropdown
-   - The selection auto-saves instantly
-
-### 5. Send a Message
-Start chatting! The Agent will use:
-- Your Ollama Cloud API key for authentication
-- The selected model for inference
-- The same-origin proxy (`/api/ollama/v1`) if available, otherwise direct connection
-
-## Troubleshooting
-
-### "Ollama Cloud API key is required"
-- You must save your API key in Settings before using Ollama Cloud
-
-### "Ollama Cloud authentication failed"
-- Double-check your API key is correct
-- Verify the key hasn't expired on https://ollama.com/account/api-keys
-
-### "Ollama Cloud request failed ... HTTP 401/403"
-- Your API key is invalid or expired
-- Generate a new key at https://ollama.com/account/api-keys
-
-### "Ollama Cloud request failed due to CORS"
-- The same-origin proxy is not running or not available
-- The Agent will try direct connection to `https://ollama.com/v1` as fallback
-- This should work in modern browsers with proper CORS headers
-
-## Advanced: Local Proxy Setup
-
-If you want to run a local proxy for added privacy or performance:
+**⚠️ CRITICAL: Run the server from the Agent directory**
 
 ```bash
-# Start the Agent dev server with Ollama Cloud proxy
+# Navigate to the Agent directory (MUST be in /media/samuel/PNY\ 1TB/Code/Agent)
 cd "/media/samuel/PNY 1TB/Code/Agent"
-export OLLAMA_API_KEY="your-ollama-cloud-api-key"
+
+# Set your Ollama Cloud API key
+export OLLAMA_API_KEY="YOUR_OLLAMA_CLOUD_API_KEY"
+
+# Start the server
 node proxy/dev-server.js
 ```
 
-This serves:
-- **UI**: http://127.0.0.1:5500
-- **Proxy**: http://127.0.0.1:5500/api/ollama/v1
+You should see:
+```
+[dev-server] running at http://127.0.0.1:5500
+[dev-server] proxy route: /api/ollama/v1 -> https://ollama.com/v1
+```
 
-Then in Settings, you can optionally set:
-- Ollama Cloud Endpoint: `/api/ollama/v1` (local proxy)
+Then open http://127.0.0.1:5500 in your browser.
+
+## Troubleshooting
+
+### Server won't start / "Cannot find module"
+```bash
+# Make sure you're in the Agent directory
+cd "/media/samuel/PNY 1TB/Code/Agent"
+node proxy/dev-server.js
+```
+
+### "404 Not Found" on script files or "Agent" in the path
+- **Cause**: Server started from wrong directory
+- **Fix**: 
+  ```bash
+  cd "/media/samuel/PNY 1TB/Code/Agent"  # Must be this exact directory
+  node proxy/dev-server.js
+  ```
+
+### "Ollama Cloud API key is required"
+- You haven't saved your API key in Settings
+- Paste the key and click **Save** in the "Ollama Cloud API Key" field
+
+### "Ollama Cloud authentication failed" (HTTP 401/403)
+- Your API key is invalid or expired
+- Check https://ollama.com/account/api-keys for your current key
+- Generate a new key if needed
+- Update the saved key in Settings
+
+### "Access to fetch at 'https://ollama.com/v1/...' has been blocked by CORS"
+- This is expected when the local proxy isn't available
+- The browser cannot make direct requests to ollama.com due to CORS
+- **Solution**: Make sure the dev-server is running from the correct directory (see "Server won't start" above)
+
+### "POST http://127.0.0.1:5500/api/ollama/v1/chat/completions 405 (Method Not Allowed)"
+- The local proxy isn't handling requests correctly
+- **Likely cause**: Server was started from the wrong directory
+- **Fix**: Stop the server and restart it from `/media/samuel/PNY 1TB/Code/Agent`
 
 ## How It Works
 
 **Endpoint routing (automatic):**
-1. Try same-origin proxy at `/api/ollama/v1` (if available)
-2. Fall back to `https://ollama.com/v1` (direct connection)
+1. Try same-origin proxy at `/api/ollama/v1` → `https://ollama.com/v1` (local forwarding)
+2. If proxy is unavailable, try direct connection to `https://ollama.com/v1` (fails with CORS in browser)
 
 **Authentication:**
 - Your API key is sent via `Authorization: Bearer <your-key>` header
-- The key is stored in browser `localStorage` (not transmitted to third parties)
+- The key is stored in browser `localStorage` (never sent to third parties)
 
 **Model selection:**
-- You choose which Ollama Cloud model to use
-- Refresh button fetches real-time list from your account
+- You manually select from a curated list of Ollama Cloud models
 - Selection persists across page reloads
+- The selected model is sent with each API request

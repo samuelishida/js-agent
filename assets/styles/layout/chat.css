@@ -180,6 +180,41 @@
   border-bottom-color: rgba(255, 255, 255, 0.3);
 }
 
+/* Force all text inside user bubble to be readable on blue background */
+.msg.user .msg-content,
+.msg.user .msg-content p,
+.msg.user .msg-content li,
+.msg.user .msg-content blockquote,
+.msg.user .msg-content th,
+.msg.user .msg-content td,
+.msg.user .msg-content strong,
+.msg.user .msg-content em {
+  color: #fff;
+}
+.msg.user .msg-content blockquote {
+  border-left-color: rgba(255, 255, 255, 0.5);
+}
+.msg.user .msg-content code {
+  background: rgba(0, 0, 0, 0.25);
+  color: #fff;
+}
+.msg.user .msg-content pre {
+  background: rgba(0, 0, 0, 0.25);
+}
+.msg.user .msg-content pre code {
+  color: #fff;
+}
+.msg.user .msg-content table {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.msg.user .msg-content th,
+.msg.user .msg-content td {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+.msg.user .msg-content th {
+  background: rgba(0, 0, 0, 0.15);
+}
+
 /* LISTS */
 .msg-content ul,
 .msg-content ol {

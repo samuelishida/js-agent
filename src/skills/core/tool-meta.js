@@ -44,7 +44,8 @@
     'runtime_webFetch',
     'runtime_getDiagnostics',
     'runtime_memoryRead',
-    'runtime_lsp'
+    'runtime_lsp',
+    'runtime_fileDiff'
   ]);
 
   const WRITE_CLASSIFIED_TOOLS = new Set([
@@ -103,11 +104,31 @@
     'runtime_writeFile',
     'runtime_editFile',
     'runtime_multiEdit',
+    'runtime_fileDiff',
     'runtime_runTerminal',
     'runtime_todoWrite',
     'runtime_memoryWrite',
     'runtime_spawnAgent'
   ]);
+
+  const TOOL_DEPENDENCY_META = {
+    'runtime_readFile': { reads: [], writes: [] },
+    'runtime_writeFile': { reads: [], writes: ['$path'] },
+    'runtime_editFile': { reads: ['$path'], writes: ['$path'] },
+    'runtime_multiEdit': { reads: [], writes: ['$paths'] },
+    'runtime_fileDiff': { reads: ['$path'], writes: [] },
+    'runtime_listDir': { reads: [], writes: [] },
+    'runtime_glob': { reads: [], writes: [] },
+    'runtime_searchCode': { reads: [], writes: [] },
+    'runtime_runTerminal': { reads: [], writes: ['$cwd'] },
+    'runtime_webFetch': { reads: [], writes: [] },
+    'runtime_getDiagnostics': { reads: [], writes: [] },
+    'runtime_memoryRead': { reads: [], writes: [] },
+    'runtime_memoryWrite': { reads: [], writes: [] },
+    'runtime_lsp': { reads: [], writes: [] },
+    'runtime_spawnAgent': { reads: [], writes: [] },
+    'runtime_todoWrite': { reads: [], writes: [] }
+  };
 
   const BUILTIN_EXECUTION_META = {
     calc: { readOnly: true, concurrencySafe: true, destructive: false, riskLevel: 'normal' },
@@ -170,6 +191,7 @@
     SAFE_CLASSIFIED_TOOLS,
     WRITE_CLASSIFIED_TOOLS,
     NON_CONCURRENT_TOOLS,
+    TOOL_DEPENDENCY_META,
     BUILTIN_EXECUTION_META,
     classifyRecommendedTools,
     getToolExecutionMeta,

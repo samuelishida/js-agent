@@ -122,6 +122,9 @@ let runMaxOutputTokensRecoveryCount = 0;
 let runToolCallRepairAttempts = new Set();
 let runQueryTracking = null;
 let runPermissionMode = 'default';
+let runReadPaths = new Set(); // Track files that have been read (P3.2)
+let runPendingConfirmations = new Map(); // Track tools awaiting user confirmation (P3.1)
+let runRiskApprovals = new Map(); // Cache user approvals for irreversible/shared tools
 
 const TOOL_RESULT_CONTEXT_BUDGET = {
   inlineMaxChars: 6000,
@@ -628,6 +631,9 @@ function resetRunGuards() {
   runMaxOutputTokensRecoveryCount = 0;
   runToolCallRepairAttempts = new Set();
   runQueryTracking = null;
+  runReadPaths = new Set(); // P3.2: Reset read path tracking
+  runPendingConfirmations = new Map(); // P3.1: Reset confirmation tracking
+  runRiskApprovals = new Map(); // P3.1: Reset approval cache
   const sessionPermissionMode = typeof getActiveSession === 'function'
     ? getActiveSession()?.context?.permissionMode
     : 'default';
@@ -1191,6 +1197,132 @@ function canRunToolConcurrently(call) {
   return !!meta.concurrencySafe;
 }
 
+function getToolPaths(call) {
+  const { tool, args } = call;
+  const dep = window.AgentSkillCore?.toolMeta?.TOOL_DEPENDENCY_META?.[tool];
+  if (!dep) return { reads: new Set(), writes: new Set() };
+
+  const reads = new Set();
+  const writes = new Set();
+
+  for (const pathKey of (dep.reads || [])) {
+    if (pathKey === '$path' && args.path) reads.add(String(args.path));
+    else if (pathKey === '$cwd' && args.cwd) reads.add(String(args.cwd));
+  }
+
+  for (const pathKey of (dep.writes || [])) {
+    if (pathKey === '$path' && args.path) writes.add(String(args.path));
+    else if (pathKey === '$paths' && Array.isArray(args.edits)) {
+      for (const edit of args.edits) {
+        if (edit.path) writes.add(String(edit.path));
+      }
+    }
+    else if (pathKey === '$cwd' && args.cwd) writes.add(String(args.cwd));
+  }
+
+  return { reads, writes };
+}
+
+function hasPathConflict(call1, call2) {
+  const p1 = getToolPaths(call1);
+  const p2 = getToolPaths(call2);
+
+  for (const w of p1.writes) {
+    if (p2.reads.has(w) || p2.writes.has(w)) return true;
+  }
+  for (const w of p2.writes) {
+    if (p1.reads.has(w) || p1.writes.has(w)) return true;
+  }
+
+  return false;
+}
+
+// ─ P3.2: Read-before-write enforcement ───────────────────────────────────
+function trackReadPaths(call) {
+  const { tool, args } = call;
+  if (tool === 'runtime_readFile' && args.path) {
+    runReadPaths.add(String(args.path));
+  } else if (tool === 'runtime_listDir' && args.path) {
+    runReadPaths.add(String(args.path));
+  } else if (tool === 'runtime_glob' && args.pattern) {
+    // Track glob patterns as reads
+    runReadPaths.add(`(glob)${String(args.pattern)}`);
+  }
+}
+
+function checkReadBeforeWriteWarning(call) {
+  const { tool, args } = call;
+  const pathKey = args.path ? String(args.path) : null;
+  
+  if ((tool === 'runtime_writeFile' || tool === 'runtime_editFile') && pathKey && !runReadPaths.has(pathKey)) {
+    return `⚠️  [READ-BEFORE-WRITE] You are about to write to '${pathKey}' but you have not read it in this session. Read the file first to verify the current content.`;
+  }
+  return '';
+}
+
+// ─ P3.1: Blast-radius confirmation gate ──────────────────────────────────
+function getToolRisk(tool) {
+  const riskMap = {
+    runtime_writeFile: 'irreversible',
+    runtime_editFile: 'irreversible',
+    runtime_multiEdit: 'irreversible',
+    runtime_deleteFile: 'irreversible',
+    runtime_renamePath: 'irreversible',
+    runtime_makeDirectory: 'reversible',
+    runtime_runTerminal: 'shared',
+    runtime_spawnAgent: 'shared'
+  };
+  return riskMap[tool] || 'safe';
+}
+
+function requiresConfirmation(tool) {
+  const risk = getToolRisk(tool);
+  return risk === 'irreversible' || risk === 'shared';
+}
+
+function needsUserConfirmation(call) {
+  const { tool } = call;
+  if (!requiresConfirmation(tool)) return false;
+  
+  const sig = getToolCallSignature(call);
+  // Check if already approved in this run
+  if (runRiskApprovals.has(sig)) return false;
+  
+  return true;
+}
+
+function injectConfirmationGate(call) {
+  const { tool, args } = call;
+  const risk = getToolRisk(tool);
+  const sig = getToolCallSignature(call);
+  
+  if (needsUserConfirmation(call)) {
+    const toolDesc = risk === 'irreversible' 
+      ? 'destructive (irreversible, affects files)'
+      : 'shared resource (may affect other systems)';
+    const msg = `[CONFIRMATION_REQUIRED] Tool '${tool}' is ${toolDesc}. Approve or reject before proceeding.\nArgs: ${JSON.stringify(args).slice(0, 200)}`;
+    runPendingConfirmations.set(sig, { tool, args, risk, message: msg });
+    return msg;
+  }
+  return '';
+}
+
+function approveConfirmation(toolSignature) {
+  if (runPendingConfirmations.has(toolSignature)) {
+    runPendingConfirmations.delete(toolSignature);
+    runRiskApprovals.set(toolSignature, true);
+    return true;
+  }
+  return false;
+}
+
+// Expose confirmation gate to UI
+window.AgentConfirmation = {
+  approve: approveConfirmation,
+  pending: () => Array.from(runPendingConfirmations.values()),
+  clearPending: () => runPendingConfirmations.clear()
+};
+
 function partitionToolCallBatches(calls) {
   const batches = [];
 
@@ -1198,12 +1330,21 @@ function partitionToolCallBatches(calls) {
     const concurrencySafe = canRunToolConcurrently(call);
     const lastBatch = batches[batches.length - 1];
 
-    if (concurrencySafe && lastBatch?.concurrencySafe) {
-      lastBatch.calls.push(call);
-      continue;
+    let canBatch = concurrencySafe && lastBatch?.concurrencySafe;
+    if (canBatch && lastBatch) {
+      for (const existing of lastBatch.calls) {
+        if (hasPathConflict(call, existing)) {
+          canBatch = false;
+          break;
+        }
+      }
     }
 
-    batches.push({ concurrencySafe, calls: [call] });
+    if (canBatch) {
+      lastBatch.calls.push(call);
+    } else {
+      batches.push({ concurrencySafe, calls: [call] });
+    }
   }
 
   return batches;
@@ -1321,6 +1462,12 @@ async function executeTool(call) {
     return `${runtimeHotCache}\n\n[cache hit/runtime]`;
   }
 
+  // P3.1: Check confirmation gate for high-risk tools
+  const confirmationMsg = injectConfirmationGate(call);
+  if (confirmationMsg) {
+    return confirmationMsg;
+  }
+
   const result = await orchestrator.executeSkill(call, {
     localBackend,
     enabledTools,
@@ -1329,6 +1476,9 @@ async function executeTool(call) {
     permissionMode: runPermissionMode,
     sessionId: getActiveSessionIdSafe()
   });
+
+  // P3.2: Track file reads for read-before-write enforcement
+  trackReadPaths(call);
 
   const cacheableRuntimeResult =
     !executionMeta.destructive &&
@@ -1694,7 +1844,104 @@ async function applyContextManagementPipeline({ round, userMessage, ctxLimit }) 
   return compactionNotes;
 }
 
-// -- AGENTIC LOOP --------------------------------------------------------------
+// -- CHILD AGENT SPAWNING -------------------------------------------------------
+async function spawnAgentChild({ task = '', tools = [], maxIterations = 10 } = {}) {
+  // Creates an isolated child agent with its own message history, run state, and tool set.
+  // Used by parent via runtime_spawnAgent tool for bounded sub-task delegation.
+  if (!task) return { success: false, error: 'task is required' };
+  if (!Array.isArray(tools)) tools = [];
+  if (maxIterations < 1 || maxIterations > 50) maxIterations = Math.min(50, Math.max(1, maxIterations));
+
+  const childState = {
+    messages: [],
+    round: 0,
+    maxRounds: maxIterations,
+    tools: new Set(tools),
+    results: [],
+    succeeded: false,
+    error: null,
+    startedAt: new Date().toISOString()
+  };
+
+  try {
+    assertRuntimeReady();
+    const { skills, orchestrator } = getRuntimeModules();
+
+    // Initialize child context with system prompt
+    const sysPrompt = await buildSystemPrompt(task);
+    childState.messages.push({ role: 'system', content: sysPrompt });
+    childState.messages.push({ role: 'user', content: task });
+
+    while (childState.round < childState.maxRounds) {
+      childState.round++;
+
+      // Call LLM with child-scoped options (lower max tokens, shorter timeout)
+      let rawReply;
+      try {
+        rawReply = await callLLM(childState.messages, {
+          maxTokens: 800,
+          temperature: 0.3,
+          timeoutMs: 22000,
+          retries: 1
+        });
+      } catch (e) {
+        childState.error = `LLM call failed: ${e?.message || 'unknown'}`;
+        break;
+      }
+
+      const parsedReply = splitModelReply(rawReply);
+      const reply = parsedReply.visible;
+      childState.messages.push({ role: 'assistant', content: reply });
+
+      // Parse tool calls
+      let toolCalls = resolveToolCallsFromModelReply(reply, rawReply);
+      if (!toolCalls.length) {
+        // No more tool calls — child has finished or given final answer
+        childState.results.push({ type: 'final_answer', content: reply });
+        childState.succeeded = true;
+        break;
+      }
+
+      // Execute child-scoped tools (filtered by allowed tools set)
+      const filteredCalls = toolCalls.filter(call => !childState.tools.size || childState.tools.has(call.tool));
+      if (!filteredCalls.length) {
+        childState.results.push({ type: 'tool_calls_blocked', content: `Attempted tools not in allowed set: ${toolCalls.map(c => c.tool).join(', ')}` });
+        break;
+      }
+
+      // Execute tools sequentially in child (no batching to keep simple)
+      for (const call of filteredCalls) {
+        let toolResult;
+        try {
+          toolResult = await executeTool(call);
+        } catch (e) {
+          toolResult = `ERROR: ${e?.message || 'tool execution failed'}`;
+        }
+        childState.results.push({ type: 'tool_result', tool: call.tool, result: toolResult });
+        childState.messages.push({ role: 'user', content: `<tool_result tool="${call.tool}">\n${toolResult}\n</tool_result>` });
+      }
+    }
+
+    if (!childState.succeeded && childState.round >= childState.maxRounds) {
+      childState.error = `Max iterations (${childState.maxRounds}) reached without completion`;
+    }
+  } catch (e) {
+    childState.error = `Child agent spawn failed: ${e?.message || 'unknown'}`;
+  }
+
+  return {
+    success: childState.succeeded && !childState.error,
+    task,
+    iterations: childState.round,
+    status: childState.succeeded ? 'completed' : (childState.error ? 'error' : 'timeout'),
+    result: childState.results.length ? childState.results : childState.error,
+    toolsSummary: `Executed ${childState.results.filter(r => r.type === 'tool_result').length} tool(s) across ${childState.round} iteration(s)`,
+    childState: { messages: childState.messages.length, round: childState.round, maxRounds: childState.maxRounds }
+  };
+}
+
+window.spawnAgentChild = spawnAgentChild;
+// ================================================================
 async function agentLoop(userMessage) {
   assertRuntimeReady();
   throwIfStopRequested();
@@ -2022,6 +2269,13 @@ async function agentLoop(userMessage) {
 
         if (!/^ERROR\b/i.test(String(result || ''))) {
           runSuccessfulToolCount += 1;
+        }
+
+        // P3.2: Check for read-before-write violations
+        const readWarning = checkReadBeforeWriteWarning(toolCall);
+        if (readWarning && !roundPromptInjectionNotes.includes(readWarning)) {
+          roundPromptInjectionNotes.push(readWarning);
+          addNotice(readWarning);
         }
 
         if (toolCall.tool === 'fs_list_dir' && !/^ERROR\b/i.test(String(result || ''))) {

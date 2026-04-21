@@ -1413,6 +1413,23 @@
     );
   }
 
+  async function runtimeFileDiff({ path, newContent } = {}) {
+    try {
+      const fsRuntime = window.AgentSkillModules?.createFilesystemRuntime?.({
+        state: { roots: new Map(), defaultRootId: null },
+        formatToolResult,
+        supportsFsAccess: () => !!window.showDirectoryPicker,
+        supportsTextPreview: () => true
+      });
+      if (!fsRuntime?.fileDiff) {
+        throw new Error('File system runtime not available.');
+      }
+      return await fsRuntime.fileDiff({ path, newContent });
+    } catch (error) {
+      return formatToolResult('runtime_fileDiff', `ERROR: ${error.message}`);
+    }
+  }
+
   async function runtimeSpawnAgent(args = {}, context = {}) {
     const task = String(args.task || '').trim();
     if (!task) {
@@ -1611,6 +1628,12 @@
       signature: 'runtime_getDiagnostics(path?, severity?)',
       description: 'Gets diagnostics from the local dev server bridge when available.',
       run: runtimeGetDiagnostics
+    },
+    {
+      name: 'runtime_fileDiff',
+      signature: 'runtime_fileDiff(path, newContent)',
+      description: 'Computes a line-by-line diff of a file before editing.',
+      run: runtimeFileDiff
     },
     {
       name: 'runtime_todoWrite',

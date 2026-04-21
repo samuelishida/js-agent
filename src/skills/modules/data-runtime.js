@@ -226,6 +226,37 @@
       );
     }
 
+    async function runtimeSpawnAgent({ task, tools, maxIterations }, context = {}) {
+      const childConfig = {
+        task: String(task || '').trim(),
+        tools: Array.isArray(tools) ? tools : [],
+        maxIterations: Math.min(Math.max(1, Number(maxIterations) || 10), 50),
+        parentContext: context
+      };
+
+      if (!childConfig.task) {
+        throw new Error('runtime_spawnAgent requires task description.');
+      }
+
+      try {
+        const childResult = await window.spawnAgentChild?.(childConfig);
+        if (!childResult) {
+          throw new Error('spawnAgent is not available in this runtime.');
+        }
+
+        return formatToolResult('runtime_spawnAgent', JSON.stringify({
+          success: true,
+          task: childConfig.task,
+          iterations: childResult.iterations || 0,
+          status: childResult.status || 'completed',
+          result: childResult.result || '',
+          toolsSummary: childResult.toolsSummary || []
+        }, null, 2));
+      } catch (error) {
+        return formatToolResult('runtime_spawnAgent', `ERROR: ${error.message}`);
+      }
+    }
+
     return {
       parseJsonText,
       parseCsvText,
@@ -239,7 +270,8 @@
       taskGet,
       taskList,
       taskUpdate,
-      askUserQuestion
+      askUserQuestion,
+      runtimeSpawnAgent
     };
   };
 })();

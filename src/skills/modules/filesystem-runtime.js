@@ -410,19 +410,35 @@
       const replacement = String(newText ?? newString ?? '');
       const { handle } = await resolveFile(targetPath, false);
       const content = await readFileAsText(handle);
-      if (!String(content).includes(before)) {
-        throw new Error('file_edit could not find oldText in file.');
+      
+      // Escape regex special chars manually
+      const regexChars = '[.*+?^${}()|[]\\\\]';
+      let escapedBefore = '';
+      for (let i = 0; i < before.length; i++) {
+        const ch = before[i];
+        if (regexChars.includes(ch)) escapedBefore += '\\';
+        escapedBefore += ch;
+      }
+      
+      const matches = (content.match(new RegExp(escapedBefore, 'g')) || []).length;
+
+      if (matches === 0) {
+        throw new Error('file_edit: oldString not found in file.');
+      }
+
+      if (matches > 1 && !replaceAll) {
+        throw new Error(`file_edit: oldString matches ${matches} locations. Set replaceAll:true to replace all.`);
       }
 
       const updated = replaceAll
-        ? String(content).split(before).join(replacement)
-        : String(content).replace(before, replacement);
+        ? content.replace(new RegExp(escapedBefore, 'g'), replacement)
+        : content.replace(before, replacement);
 
       await writeFile(handle, updated);
 
       return formatToolResult(
         'file_edit',
-        `Edited file: ${targetPath}\nReplace all: ${replaceAll ? 'yes' : 'no'}\nOld length: ${before.length}\nNew length: ${replacement.length}`
+        `Edited file: ${targetPath}\nReplacements: ${matches}\nOld length: ${before.length}\nNew length: ${replacement.length}`
       );
     }
 
@@ -446,6 +462,7 @@
 
       const workingCopies = new Map();
       const orderedPaths = [];
+      const diffs = [];
 
       for (const rawEdit of edits) {
         const edit = rawEdit && typeof rawEdit === 'object' ? rawEdit : {};
@@ -461,6 +478,7 @@
           const { handle } = await resolveFile(targetPath, false);
           workingCopies.set(targetPath, {
             handle,
+            original: await readFileAsText(handle),
             content: await readFileAsText(handle),
             applied: 0
           });
@@ -485,15 +503,64 @@
       for (const targetPath of orderedPaths) {
         const entry = workingCopies.get(targetPath);
         await writeFile(entry.handle, entry.content);
+        diffs.push(`${targetPath}: ${entry.applied} edit${entry.applied === 1 ? '' : 's'}`);
       }
 
       return formatToolResult(
         'runtime_multiEdit',
-        orderedPaths.map(path => {
-          const entry = workingCopies.get(path);
-          return `Edited ${path} (${entry.applied} change${entry.applied === 1 ? '' : 's'})`;
-        }).join('\n')
+        `Atomically applied ${edits.length} edits across ${orderedPaths.length} file${orderedPaths.length === 1 ? '' : 's'}:\n${diffs.join('\n')}`
       );
+    }
+
+    async function computeFileDiff({ path, newContent }) {
+      const targetPath = String(path || '').trim();
+      if (!targetPath) throw new Error('runtime_fileDiff requires path.');
+      
+      const newText = String(newContent || '').trim();
+      if (!newText) throw new Error('runtime_fileDiff requires newContent.');
+
+      const { handle } = await resolveFile(targetPath, false);
+      const oldText = await readFileAsText(handle);
+
+      const oldLines = oldText.split('\n');
+      const newLines = newText.split('\n');
+      const result = [];
+
+      let i = 0;
+      let j = 0;
+      const maxLines = Math.max(oldLines.length, newLines.length);
+
+      while (i < oldLines.length || j < newLines.length) {
+        const oldLine = i < oldLines.length ? oldLines[i] : null;
+        const newLine = j < newLines.length ? newLines[j] : null;
+
+        if (oldLine === newLine) {
+          result.push(`  ${oldLine}`);
+          i++;
+          j++;
+        } else if (i < oldLines.length && j < newLines.length) {
+          result.push(`- ${oldLine}`);
+          result.push(`+ ${newLine}`);
+          i++;
+          j++;
+        } else if (i < oldLines.length) {
+          result.push(`- ${oldLine}`);
+          i++;
+        } else {
+          result.push(`+ ${newLine}`);
+          j++;
+        }
+      }
+
+      const unified = result.join('\n');
+      return formatToolResult(
+        'runtime_fileDiff',
+        `Diff for ${targetPath}:\n${unified}`
+      );
+    }
+
+    async function fileDiff(args = {}, context = {}) {
+      return computeFileDiff(args, context);
     }
 
     async function searchCode({
@@ -642,6 +709,19 @@
         const { handle } = await resolveDirectory(path, false);
         const entries = await collectEntries(handle);
         return formatToolResult('fs_stat', `Path: ${path || '/'}\nKind: directory\nEntries: ${entries.length}`);
+      }
+    }
+
+    async function getDiagnostics(args = {}, context = {}) {
+      try {
+        const diagnostics = [];
+        return formatToolResult('runtime_getDiagnostics', JSON.stringify({
+          success: true,
+          diagnostics,
+          message: 'Browser environment: diagnostics require dev-server bridge (npm run build:snapshot)'
+        }, null, 2));
+      } catch (error) {
+        return formatToolResult('runtime_getDiagnostics', `ERROR: ${error.message}`);
       }
     }
 
@@ -822,7 +902,9 @@
       directoryTree,
       walkPaths,
       savePickedUpload,
-      pickDirectory
+      pickDirectory,
+      fileDiff,
+      getDiagnostics
     };
   };
 })();

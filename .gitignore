@@ -28,6 +28,7 @@ coverage/
 *.temp
 .cache/
 .clawd
+.raptor
 
 # Local progress notes (not tracked)
 progress/

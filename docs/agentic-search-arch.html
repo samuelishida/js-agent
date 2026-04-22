@@ -697,31 +697,40 @@
           <div class="lcard-files">
             <span class="fp">agent.js</span>
             <span class="fp">llm.js</span>
+            <span class="fp">constants.js</span>
+            <span class="fp">permissions.js</span>
+            <span class="fp">compaction.js</span>
+            <span class="fp">steering.js</span>
+            <span class="fp">tool-execution.js</span>
             <span class="fp">tools.js</span>
             <span class="fp">local-backend.js</span>
             <span class="fp">runtime-memory.js</span>
+            <span class="fp">ui-modern.js</span>
           </div>
           <div class="lcard-bts">
-            <span class="lbadge lbadge-pub">AgentMemory · AgentRuntimeCache</span>
-            <span class="lbadge lbadge-load">loads 6th group</span>
+            <span class="lbadge lbadge-pub">CONSTANTS · AgentPermissions · AgentCompaction · AgentSteering · AgentToolExecution · AgentMemory · AgentRuntimeCache · AgentLLMControl</span>
+            <span class="lbadge lbadge-load">loads last</span>
           </div>
           <button class="card-tog">▼</button>
         </div>
         <div class="lcard-bd">
           <div class="lcard-bd-inner">
             <p class="lcard-desc">
-              The execution core. <code>agent.js</code> runs the bounded multi-round loop: calls the LLM via
-              <code>llm.js</code>, parses tool calls with <code>AgentRegex</code>, dispatches through
-              <code>AgentSkills</code>, manages context, and enforces all guardrails.
-              <code>runtime-memory.js</code> publishes <code>AgentMemory</code> (long-term, durable) and
-              <code>AgentRuntimeCache</code> (multi-scope TTL cache). <code>local-backend.js</code> probes
-              local endpoints and caches the compatibility report.
+              The execution core. After the refactor, <code>agent.js</code> is focused on the bounded
+              multi-round loop and UI wiring. Its stateful subsystems were extracted into dedicated IIFE
+              modules, each publishing a narrow API on <code>window</code>:
+              <code>constants.js</code> (all magic numbers), <code>permissions.js</code> (denial tracking,
+              escalation), <code>compaction.js</code> (context compaction, injection detection),
+              <code>steering.js</code> (mid-flight guidance buffer), <code>tool-execution.js</code>
+              (dispatch, batching, filesystem guards). <code>llm.js</code> adds multi-lane routing and
+              abort control. <code>runtime-memory.js</code> publishes durable long-term memory and the
+              multi-scope TTL cache. <code>ui-modern.js</code> binds the settings panel.
             </p>
             <div class="lcard-rows">
-              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>AgentOrchestrator</code>, <code>AgentSkills</code>, <code>AgentRegex</code>, <code>AgentPromptLoader</code></span></div>
-              <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v"><code>window.AgentMemory</code>, <code>window.AgentRuntimeCache</code></span></div>
-              <div class="ir"><span class="ir-k">Internal load order</span><span class="ir-v"><code>state.js</code> → <code>runtime-memory.js</code> → <code>local-backend.js</code> → <code>tools.js</code> → <code>llm.js</code> → <code>agent.js</code></span></div>
-              <div class="ir"><span class="ir-k">LLM fallback</span><span class="ir-v">Local lane failure → automatic cloud lane retry; both lanes return identical reply shape</span></div>
+              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>AgentOrchestrator</code>, <code>AgentSkills</code>, <code>AgentRegex</code>, <code>AgentPrompts</code></span></div>
+              <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v"><code>window.CONSTANTS</code>, <code>window.AgentPermissions</code>, <code>window.AgentCompaction</code>, <code>window.AgentSteering</code>, <code>window.AgentToolExecution</code>, <code>window.AgentLLMControl</code>, <code>window.AgentMemory</code>, <code>window.AgentRuntimeCache</code></span></div>
+              <div class="ir"><span class="ir-k">Internal load order</span><span class="ir-v"><code>state.js</code> → <code>constants.js</code> → <code>runtime-memory.js</code> → <code>permissions.js</code> → <code>compaction.js</code> → <code>steering.js</code> → <code>local-backend.js</code> → <code>tools.js</code> → <code>tool-execution.js</code> → <code>llm.js</code> → <code>agent.js</code> → <code>ui-modern.js</code></span></div>
+              <div class="ir"><span class="ir-k">LLM lanes</span><span class="ir-v">Three lanes: <code>local</code> (LM Studio / custom Ollama), <code>ollama</code> (Ollama Cloud via proxy), <code>cloud</code> (Gemini, OpenAI, Claude, Azure). Local → cloud fallback automatic.</span></div>
             </div>
             <div class="cb">
               <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/app/agent.js — loop skeleton</span></div>
@@ -1118,7 +1127,7 @@
       </tbody>
     </table>
     <div class="cb" style="margin-top:18px">
-      <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/app/agent.js — full dispatch logic</span></div>
+      <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/app/tool-execution.js — dispatch logic</span></div>
       <pre><span class="kw">async function</span> <span class="fn">executeBatch</span>(calls) {
   <span class="cm">// Check cache first for cacheable calls</span>
   calls = calls.<span class="fn">map</span>(c => c.<span class="pr">meta</span>.<span class="pr">cacheable</span>
@@ -1369,8 +1378,9 @@
       <h2>Model Routing</h2>
     </div>
     <p class="sec-desc">
-      Two lanes normalized through <code>llm.js</code>. The local lane auto-falls back to cloud on failure.
-      The dev server proxies Ollama Cloud requests to bypass browser CORS restrictions.
+      Three lanes normalized through <code>llm.js</code>. The local and Ollama lanes auto-fall back to
+      cloud on failure. The dev server proxies Ollama Cloud requests to bypass browser CORS restrictions.
+      Each lane has its own rate-limit queue so calls don't share backpressure.
     </p>
     <table>
       <thead>
@@ -1378,13 +1388,18 @@
       </thead>
       <tbody>
         <tr>
-          <td><span class="pill pill-b">Cloud</span></td>
-          <td><code>gemini/*</code> · <code>openai/*</code> · <code>claude/*</code> · <code>azure/*</code> · <code>ollama/*</code></td>
+          <td><span class="pill pill-b">cloud</span></td>
+          <td><code>gemini/*</code> · <code>openai/*</code> · <code>claude/*</code> · <code>azure/*</code></td>
           <td>—</td>
         </tr>
         <tr>
-          <td><span class="pill pill-g">Local</span></td>
-          <td>LM Studio · Ollama · any OpenAI-compatible endpoint</td>
+          <td><span class="pill pill-p">ollama</span></td>
+          <td>Ollama Cloud (<code>ollama/*</code>) — proxied through <code>/api/ollama/v1/*</code></td>
+          <td>Falls back to cloud lane on error</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-g">local</span></td>
+          <td>LM Studio · local Ollama · any OpenAI-compatible endpoint</td>
           <td>Falls back to cloud lane on any error</td>
         </tr>
       </tbody>
@@ -1870,7 +1885,10 @@ node proxy/dev-server.js
           <div class="card-det">
             <div class="cb">
               <div class="cb-hd"><span class="cb-lang">Shell</span></div>
-              <pre><span class="cm"># Full skills assembly smoke test</span>
+              <pre><span class="cm"># Comprehensive smoke test (all runtime layers)</span>
+npm run test:smoke
+
+<span class="cm"># Focused skills / snapshot / memory smoke test</span>
 npm run test:skills-smoke
 
 <span class="cm"># Rebuild snapshot after skill changes</span>
@@ -1879,7 +1897,12 @@ npm run build:snapshot
 <span class="cm"># Syntax checks on key files</span>
 node --check src/core/orchestrator.js
 node --check src/app/agent.js
-node --check src/app/llm.js</pre>
+node --check src/app/llm.js
+node --check src/app/constants.js
+node --check src/app/permissions.js
+node --check src/app/compaction.js
+node --check src/app/steering.js
+node --check src/app/tool-execution.js</pre>
             </div>
           </div>
         </div>

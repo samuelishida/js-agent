@@ -145,7 +145,7 @@
 
         <div class="settings-group">
           <label class="settings-label">Provider &amp; Model</label>
-          <select id="model-select" class="settings-select">
+          <select id="model-select" class="settings-select" onchange="saveCloudModelSelection()">
             <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
             <option value="gemini/gemini-2.5-pro">Gemini 2.5 Pro</option>
             <option value="gemini/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
@@ -396,28 +396,64 @@
   </div>
 </div>
 
-<!-- SCRIPTS -->
+<!-- SCRIPTS
+  Load order is the dependency graph. All files use defer; the browser runs
+  them in declaration order after HTML parsing. Do NOT reorder.
+
+  1. Core parser + prompt loader  → window.AgentRegex, window.AgentPrompts
+  2. Skill metadata + snapshot    → window.AgentSnapshotData, window.AgentClawdSnapshot
+  3. Runtime module factories     → window.AgentSkillModules.*
+  4. Skill assembly               → window.AgentSkills, window.AgentSkillGroups
+  5. Orchestrator                 → window.AgentOrchestrator
+  6. App state + cache            → window.CONSTANTS, window.AgentRuntimeCache, window.AgentMemory
+  7. Modular subsystems           → window.AgentPermissions, window.AgentCompaction, window.AgentSteering
+  8. Tool infrastructure          → window.AgentToolExecution
+  9. LLM + agent loop + UI        → window.AgentLLMControl, inline-handler globals
+-->
+
+<!-- ── 1. Core parser and prompt loader ────────────────────────────────── -->
 <script src="src/core/regex.js" defer></script>
 <script src="src/core/prompt-loader.js" defer></script>
+
+<!-- ── 2. Skill metadata and generated snapshot ────────────────────────── -->
 <script src="src/skills/core/intents.js" defer></script>
 <script src="src/skills/core/tool-meta.js" defer></script>
 <script src="src/skills/generated/snapshot-data.js" defer></script>
 <script src="src/skills/snapshot-adapter.js" defer></script>
+
+<!-- ── 3. Runtime module factories ────────────────────────────────────── -->
 <script src="src/skills/modules/filesystem-runtime.js" defer></script>
 <script src="src/skills/modules/data-runtime.js" defer></script>
 <script src="src/skills/modules/registry-runtime.js" defer></script>
 <script src="src/skills/modules/web-runtime.js" defer></script>
+
+<!-- ── 4. Skill assembly ───────────────────────────────────────────────── -->
 <script src="src/skills/shared.js" defer></script>
 <script src="src/skills/groups/web.js" defer></script>
 <script src="src/skills/groups/device.js" defer></script>
 <script src="src/skills/groups/data.js" defer></script>
 <script src="src/skills/groups/filesystem.js" defer></script>
 <script src="src/skills/index.js" defer></script>
+
+<!-- ── 5. Orchestrator ─────────────────────────────────────────────────── -->
 <script src="src/core/orchestrator.js" defer></script>
+
+<!-- ── 6. App state and cache ─────────────────────────────────────────── -->
 <script src="src/app/state.js" defer></script>
+<script src="src/app/constants.js" defer></script>
 <script src="src/app/runtime-memory.js" defer></script>
+
+<!-- ── 7. Modular subsystems (each IIFE → window.Agent*) ──────────────── -->
+<script src="src/app/permissions.js" defer></script>
+<script src="src/app/compaction.js" defer></script>
+<script src="src/app/steering.js" defer></script>
+
+<!-- ── 8. Tool infrastructure ─────────────────────────────────────────── -->
 <script src="src/app/local-backend.js" defer></script>
 <script src="src/app/tools.js" defer></script>
+<script src="src/app/tool-execution.js" defer></script>
+
+<!-- ── 9. LLM + agent loop + UI ───────────────────────────────────────── -->
 <script src="src/app/llm.js" defer></script>
 <script src="src/app/agent.js" defer></script>
 <script src="src/app/ui-modern.js" defer></script>

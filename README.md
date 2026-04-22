@@ -147,4 +147,4 @@ npm run build:snapshot      # regenerate src/skills/generated/snapshot-data.js
 
 ## Documentation
 
-Architecture deep-dive: [`docs/agentic-search-arch.html`](docs/agentic-search-arch.html)
+Architecture deep-dive: [`docs/agentic-search-arch.html`](https://samuelishida.github.io/js-agent/agentic-search-arch.html)

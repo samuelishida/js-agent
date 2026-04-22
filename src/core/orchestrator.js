@@ -85,6 +85,40 @@
       .join('\n');
   }
 
+  function buildOpenAiToolSchemas(enabledTools = []) {
+    return enabledTools
+      .map(name => {
+        const skill = window.AgentSkills?.registry?.[name];
+        const description = skill?.description || BUILTIN_SKILL_DESCRIPTIONS[name] || 'available skill';
+        const sig = skill?.signature || '';
+        const argMatch = String(sig).match(/\(([^)]*)\)/);
+        const args = argMatch?.[1] || '';
+        const params = {};
+        const required = [];
+        for (const arg of args.split(',').filter(a => a.trim())) {
+          const clean = arg.trim().split('=').shift()?.split(':').shift() || '';
+          const p = clean.trim();
+          if (p.startsWith('...')) continue;
+          params[p] = { type: 'string' };
+          required.push(p);
+        }
+        return {
+          type: 'function',
+          function: {
+            name: name,
+            description: description,
+            parameters: {
+              type: 'object',
+              properties: params,
+              ...(required.length > 0 ? { required } : {}),
+              additionalProperties: false
+            }
+          }
+        };
+      })
+      .filter(s => s.function.name);
+  }
+
   function buildPromptHeader(snippets, safetyGuidelines = {}) {
     const prefixes = Array.isArray(snippets?.prefixes) ? snippets.prefixes.filter(Boolean) : [];
     const rawPrefix = prefixes[0] || safetyGuidelines.prefix || 'You are the agent runtime assistant inside a CLI-style software engineering environment.';
@@ -258,6 +292,7 @@
       ? promptInjectionNotes.map(item => `- ${item}`)
       : [];
 
+    const sanitizeToolResult = v => window.AgentCompaction?.sanitizeToolResult ? window.AgentCompaction.sanitizeToolResult(v) : String(v || '');
     const blocks = [];
     if (toolSummary) {
       // Sanitize tool summary before including in continuation prompt to prevent prompt injection
@@ -512,6 +547,7 @@
     buildSystemPrompt,
     buildRepairPrompt,
     buildSummaryPrompt,
+    buildOpenAiToolSchemas,
     executeSkill,
     parseToolCall,
     hasReasoningLeak

@@ -171,6 +171,66 @@ console.debug(`[State Init] ollamaBackend: enabled=${ollamaBackend.enabled}, url
 let chatSessions = [];
 let activeSessionId = safeGet(ACTIVE_SESSION_KEY) || null;
 
+function normalizeSessionStats(value) {
+  return {
+    rounds: Number(value?.rounds || 0),
+    tools: Number(value?.tools || 0),
+    resets: Number(value?.resets || 0),
+    msgs: Number(value?.msgs || 0)
+  };
+}
+
+function bindWindowStateProperty(name, getter, setter) {
+  Object.defineProperty(window, name, {
+    configurable: true,
+    enumerable: true,
+    get: getter,
+    set: setter
+  });
+}
+
+bindWindowStateProperty('apiKey', () => apiKey, value => {
+  apiKey = String(value || '');
+});
+
+bindWindowStateProperty('messages', () => messages, value => {
+  messages = Array.isArray(value) ? value : [];
+});
+
+bindWindowStateProperty('sessionStats', () => sessionStats, value => {
+  sessionStats = normalizeSessionStats(value);
+});
+
+bindWindowStateProperty('isBusy', () => isBusy, value => {
+  isBusy = !!value;
+});
+
+bindWindowStateProperty('enabledTools', () => enabledTools, value => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    enabledTools = value;
+  }
+});
+
+bindWindowStateProperty('localBackend', () => localBackend, value => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    localBackend = value;
+  }
+});
+
+bindWindowStateProperty('ollamaBackend', () => ollamaBackend, value => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    ollamaBackend = value;
+  }
+});
+
+bindWindowStateProperty('chatSessions', () => chatSessions, value => {
+  chatSessions = Array.isArray(value) ? value : [];
+});
+
+bindWindowStateProperty('activeSessionId', () => activeSessionId, value => {
+  activeSessionId = value == null ? null : String(value);
+});
+
 function getRuntimeModules() {
   return {
     skills: window.AgentSkills,
@@ -313,13 +373,107 @@ function maybeRequestNotifPermission() {
     });
 }
 
+function getStoredCloudModelSelection() {
+  return localStorage.getItem('agent_cloud_model') || 'gemini/gemini-2.5-flash';
+}
+
+function getSelectedCloudModelLabel() {
+  const raw = String(document.getElementById('model-select')?.value || getStoredCloudModelSelection()).trim();
+  return raw || 'gemini/gemini-2.5-flash';
+}
+
+function updateActiveProviderBadge() {
+  const badge = document.getElementById('topbar-model');
+  if (!badge) return;
+
+  if (localBackend.enabled) {
+    const model = String(document.getElementById('local-model-select')?.value || localBackend.model || '').trim();
+    badge.textContent = `local/${model || 'unknown'}`;
+    return;
+  }
+
+  if (typeof ollamaBackend !== 'undefined' && ollamaBackend.enabled) {
+    const model = String(getOllamaCloudModel() || '').trim();
+    if (!model) {
+      badge.textContent = 'ollama';
+      return;
+    }
+
+    const route = (typeof isSelectedOllamaModelCloud === 'function' && isSelectedOllamaModelCloud())
+      ? 'cloud'
+      : 'local';
+    badge.textContent = `ollama-${route}/${model}`;
+    return;
+  }
+
+  badge.textContent = getSelectedCloudModelLabel();
+}
+
+function activateCloudProvider({ silent = false, reason = '' } = {}) {
+  const switchedFromLocal = !!localBackend.enabled;
+  const switchedFromOllama = !!(typeof ollamaBackend !== 'undefined' && ollamaBackend.enabled);
+
+  localBackend.enabled = false;
+  localStorage.setItem('agent_prefer_local_backend', 'false');
+  const localToggle = document.getElementById('toggle-local');
+  if (localToggle) {
+    localToggle.checked = false;
+    localToggle.classList.remove('active');
+  }
+
+  if (typeof ollamaBackend !== 'undefined') {
+    ollamaBackend.enabled = false;
+    localStorage.setItem('agent_ollama_enabled', 'false');
+    const ollamaToggle = document.getElementById('toggle-ollama');
+    if (ollamaToggle) ollamaToggle.checked = false;
+  }
+
+  updateBadge();
+  updateActiveProviderBadge();
+
+  if (!silent && typeof addNotice === 'function' && (switchedFromLocal || switchedFromOllama)) {
+    const detail = reason ? ` ${reason}` : '';
+    addNotice(`Cloud provider activated.${detail}`.trim());
+  }
+}
+
 // -- API KEY -------------------------------------------------------------------
 function saveKey() {
   apiKey = document.getElementById('api-key').value.trim();
   localStorage.setItem('cloud_api_key', apiKey);
   localStorage.setItem('gemini_api_key', apiKey);
+  if (apiKey) {
+    activateCloudProvider({ silent: true, reason: 'Using cloud API key for requests.' });
+  }
   setStatus('ok', 'key saved');
   maybeRequestNotifPermission();
+}
+
+function saveCloudModelSelection() {
+  const select = document.getElementById('model-select');
+  const model = String(select?.value || '').trim();
+  if (model) {
+    localStorage.setItem('agent_cloud_model', model);
+  } else {
+    localStorage.removeItem('agent_cloud_model');
+  }
+  activateCloudProvider({ silent: true, reason: `Switched to ${model || 'cloud model'}.` });
+  updateActiveProviderBadge();
+}
+
+function loadCloudModelSelection() {
+  const select = document.getElementById('model-select');
+  if (!select) return;
+
+  const saved = getStoredCloudModelSelection();
+  const existing = Array.from(select.options).find(option => option.value === saved);
+  if (existing) {
+    select.value = saved;
+  } else if (!select.value && select.options.length) {
+    select.selectedIndex = 0;
+  }
+
+  updateActiveProviderBadge();
 }
 
 function saveOllamaCloudApiKey() {
@@ -345,6 +499,7 @@ function saveOllamaCloudModelSelection() {
   const select = document.getElementById('ollama-model-select');
   const model = (select && select.value) || '';
   if (model) localStorage.setItem('agent_ollama_cloud_model', model);
+  updateActiveProviderBadge();
 }
 
 function getOllamaCloudApiKey() {
@@ -395,9 +550,13 @@ function toggleOllamaBackend() {
     localBackend.enabled = false;
     localStorage.setItem('agent_prefer_local_backend', 'false');
     const lmToggle = document.getElementById('toggle-local');
-    if (lmToggle) lmToggle.checked = false;
+    if (lmToggle) {
+      lmToggle.checked = false;
+      lmToggle.classList.remove('active');
+    }
   }
   updateBadge();
+  updateActiveProviderBadge();
 }
 
 async function probeOllama() {
@@ -452,6 +611,7 @@ async function probeOllama() {
 
     if (statusLabel) statusLabel.textContent = `${models.length} model${models.length !== 1 ? 's' : ''} installed`;
     if (dot) dot.className = 'status-dot ok';
+    updateActiveProviderBadge();
   } catch (e) {
     if (statusLabel) statusLabel.textContent = `unreachable: ${e.message}`;
     if (dot) dot.className = 'status-dot error';
@@ -476,6 +636,7 @@ function loadOllamaBackendState() {
   }
   // If Ollama is enabled, auto-probe on startup to load installed models
   if (ollamaBackend.enabled) probeOllama().catch(() => {});
+  updateActiveProviderBadge();
 }
 
 function saveGithubToken() {

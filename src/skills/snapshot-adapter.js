@@ -189,5 +189,6 @@
     formatSkillCatalogForTool
   };
 
+  window.AgentClawdSnapshot = snapshotApi;
   window.AgentSnapshot = snapshotApi;
 })();

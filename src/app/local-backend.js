@@ -287,14 +287,25 @@ function toggleLocalBackend() {
 }
 
 function _activateLocal(isSilent=false) {
+  if (typeof ollamaBackend !== 'undefined' && ollamaBackend.enabled) {
+    ollamaBackend.enabled = false;
+    localStorage.setItem('agent_ollama_enabled', 'false');
+    const ollamaToggle = document.getElementById('toggle-ollama');
+    if (ollamaToggle) ollamaToggle.checked = false;
+  }
+
   localBackend.enabled = true;
   localStorage.setItem('agent_prefer_local_backend', 'true');
 
   const tog = document.getElementById('toggle-local');
   if (tog) { tog.checked = true; tog.classList.add('active'); }
 
-  const topbarModel = document.getElementById('topbar-model');
-  if (topbarModel) topbarModel.textContent = 'local/' + (localBackend.model || 'unknown');
+  if (typeof updateActiveProviderBadge === 'function') {
+    updateActiveProviderBadge();
+  } else {
+    const topbarModel = document.getElementById('topbar-model');
+    if (topbarModel) topbarModel.textContent = 'local/' + (localBackend.model || 'unknown');
+  }
   
   if (!isSilent) addNotice('Local backend activated. Routing LLM calls to ' + localBackend.url);
 }
@@ -305,9 +316,13 @@ function _deactivateLocal() {
   const tog = document.getElementById('toggle-local');
   if (tog) { tog.checked = false; tog.classList.remove('active'); }
 
-  const topbarModel = document.getElementById('topbar-model');
-  const m = document.getElementById('model-select');
-  if (topbarModel && m) topbarModel.textContent = m.value.split('/').pop() || m.value;
+  if (typeof updateActiveProviderBadge === 'function') {
+    updateActiveProviderBadge();
+  } else {
+    const topbarModel = document.getElementById('topbar-model');
+    const m = document.getElementById('model-select');
+    if (topbarModel && m) topbarModel.textContent = m.value.split('/').pop() || m.value;
+  }
   addNotice('Local backend deactivated. Back to cloud model.');
 }
 

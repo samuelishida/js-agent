@@ -1,4 +1,4 @@
-﻿let activeLlmController = null;
+let activeLlmController = null;
 
 const LLM_RATE_LIMIT_MS = {
   local: 250,
@@ -14,7 +14,9 @@ const LLM_TIMEOUT_MS = {
 const LLM_RETRY_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 const laneState = {
   local: { chain: Promise.resolve(), nextAt: 0 },
-  cloud: { chain: Promise.resolve(), nextAt: 0 }
+  cloud: { chain: Promise.resolve(), nextAt: 0 },
+  // Ollama gets its own queue so it doesn't share rate-limit state with cloud calls.
+  ollama: { chain: Promise.resolve(), nextAt: 0 }
 };
 
 function executeLane(lane, msgs, options, outerSignal) {
@@ -267,7 +269,7 @@ function normalizeFunctionCallsToXml(toolCallsArr) {
       const toolName = nameJson.tool || nameJson.name || null;
       if (toolName) {
         const args = nameJson.args ?? nameJson.parameters ?? nameJson.input ?? nameJson.arguments ?? {};
-        return `<tool_call>\n${JSON.stringify({ tool: String(toolName), args: args || {} })}\n</tool_call>`;
+        return `<tool_call>\n${JSON.stringify({ tool: String(toolName), args: args || {}, ...(tc.id ? { id: tc.id } : {}) })}\n</tool_call>`;
       }
     }
 
@@ -278,7 +280,7 @@ function normalizeFunctionCallsToXml(toolCallsArr) {
     try { args = JSON.parse(fn.arguments || '{}'); } catch { /* malformed args */ }
     // arguments may itself use alias keys (parameters/input) — normalise them.
     const argsVal = args.args ?? args.parameters ?? args.input ?? args.inputs ?? args.arguments ?? args;
-    return `<tool_call>\n${JSON.stringify({ tool: toolName, args: argsVal })}\n</tool_call>`;
+    return `<tool_call>\n${JSON.stringify({ tool: toolName, args: argsVal, ...(tc.id ? { id: tc.id } : {}) })}\n</tool_call>`;
   }).filter(Boolean);
 
   if (!blocks.length) return '';
@@ -287,15 +289,12 @@ function normalizeFunctionCallsToXml(toolCallsArr) {
 }
 
 function extractLocalVisibleReply(data) {
-  // Check for OpenAI function-calling format: content is empty but tool_calls is populated.
-  // Any local or Ollama model that uses the function-calling API returns data this way.
+  // Check for native function-calling format FIRST — before any content fallback.
+  // Some models return both prose in content AND tool_calls; tool_calls must win.
   const toolCallsArr = data?.choices?.[0]?.message?.tool_calls;
   if (Array.isArray(toolCallsArr) && toolCallsArr.length) {
-    const rawContent = String(data?.choices?.[0]?.message?.content || '').trim();
-    if (!rawContent) {
-      const xml = normalizeFunctionCallsToXml(toolCallsArr);
-      if (xml) return { text: xml, hiddenReasoningOnly: false };
-    }
+    const xml = normalizeFunctionCallsToXml(toolCallsArr);
+    if (xml) return { text: xml, hiddenReasoningOnly: false };
   }
 
   const visibleCandidates = [
@@ -497,10 +496,50 @@ function parseCloudProviderModel(rawModel) {
 }
 
 function buildOpenAiStyleMessages(msgs) {
-  return msgs.map(m => ({
-    role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
-    content: String(m.content || '')
-  }));
+  return msgs.map(m => {
+    let content = String(m.content || '');
+    // Strip <think>...</think> blocks before sending to the API so reasoning
+    // from previous turns is never re-sent as part of the conversation history.
+    // Use the same inner-to-outer loop as splitModelReply to handle nesting.
+    let prev;
+    do {
+      prev = content;
+      content = content.replace(/<think>[\s\S]*?<\/think>/gi, '');
+    } while (content !== prev);
+    content = content.trim();
+
+    if (m.role === 'tool') {
+      // Only preserve role:'tool' when a real tool_call_id exists (native FC mode).
+      // Without one the model used XML tool calling, so downgrade to role:'user'
+      // wrapped in <tool_result> tags — accepted by all providers including OpenAI/Azure
+      // which reject empty tool_call_id on messages that follow non-FC assistant turns.
+      if (m.tool_call_id) {
+        return { role: 'tool', tool_call_id: m.tool_call_id, content };
+      }
+      return { role: 'user', content: `<tool_result${m.name ? ` tool="${m.name}"` : ''}>\n${content}\n</tool_result>` };
+    }
+    return {
+      role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
+      content
+    };
+  });
+}
+
+// Some providers require strictly alternating user/assistant roles.
+// When multiple tool results arrive as separate user messages, merge consecutive
+// same-role entries so no two adjacent messages share the same role.
+// Spreads the full message object so tool_call_id and other fields are preserved.
+function collapseConsecutiveSameRole(msgs) {
+  const out = [];
+  for (const msg of msgs) {
+    const prev = out[out.length - 1];
+    if (prev && prev.role === msg.role && msg.role !== 'tool') {
+      prev.content = `${prev.content}\n\n${String(msg.content || '')}`;
+    } else {
+      out.push({ ...msg, content: String(msg.content || '') });
+    }
+  }
+  return out;
 }
 
 async function callCloud(msgs, signal, options = {}) {
@@ -876,12 +915,30 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
     if (badgeModel) badgeModel.textContent = model;
   }
 
-  const contents = msgs
+  // Build contents, then collapse consecutive same-role turns.
+  // Gemini requires strict user↔model alternation; multiple tool results from one
+  // agent round would otherwise arrive as consecutive 'user' entries.
+  // Also strip <think>...</think> blocks so local-model reasoning is not sent to Gemini.
+  const rawContents = msgs
     .filter(m => m.role !== 'system')
-    .map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }]
-    }));
+    .map(m => {
+      let text = String(m.content || '');
+      let prevText;
+      do { prevText = text; text = text.replace(/<think>[\s\S]*?<\/think>/gi, ''); } while (text !== prevText);
+      return {
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: text.trim() }]
+      };
+    });
+  const contents = [];
+  for (const entry of rawContents) {
+    const prev = contents[contents.length - 1];
+    if (prev && prev.role === entry.role) {
+      prev.parts[0].text += '\n\n' + entry.parts[0].text;
+    } else {
+      contents.push({ role: entry.role, parts: [{ text: entry.parts[0].text }] });
+    }
+  }
   const systemInstruction = msgs.find(m => m.role === 'system');
   const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
@@ -947,12 +1004,34 @@ async function callOpenAiCloud(msgs, signal, options = {}, initialModel = '') {
   const model = String(initialModel || 'gpt-4.1-mini').trim();
   const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
+
+  // PHASE 1: Load tools dynamically on each call (orchestrator provides schemas)
+  let toolsForThisCall = null;
+  if (typeof window.AgentOrchestrator?.buildOpenAiToolSchemas === 'function') {
+    try {
+      toolsForThisCall = window.AgentOrchestrator.buildOpenAiToolSchemas(options.enabledTools || []);
+    } catch (err) {
+      console.warn('[AgentOrchestrator] buildOpenAiToolSchemas failed:', err);
+      toolsForThisCall = [];
+    }
+  }
+
+  // PHASE 2: Pre-convert tool_call_id from OpenAI format (tool_id) to Anthropic format (call_id)
+  // This is applied at the LLM layer before send, so Anthropic and OpenAI backends get properly formatted calls
+  const messages = buildOpenAiStyleMessages(msgs).map(m => {
+    if (m.role === 'tool' && m.tool_call_id && !m.tool_call_id.startsWith('call_') && !m.tool_call_id.startsWith('toolu_')) {
+      return { ...m, tool_call_id: 'call_' + m.tool_call_id };
+    }
+    return m;
+  });
+
   const body = {
     model,
-    messages: buildOpenAiStyleMessages(msgs),
+    messages: collapseConsecutiveSameRole(messages),
     max_tokens: maxTokens,
     temperature,
-    stream: false
+    stream: false,
+    ...(toolsForThisCall && toolsForThisCall.length > 0 ? { tools: toolsForThisCall, tool_choice: 'auto' } : {})
   };
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -979,6 +1058,12 @@ async function callOpenAiCloud(msgs, signal, options = {}, initialModel = '') {
     throw error;
   }
 
+  // Check for native tool_calls before falling back to content
+  const toolCalls = data.choices?.[0]?.message?.tool_calls;
+  if (Array.isArray(toolCalls) && toolCalls.length) {
+    const xml = normalizeFunctionCallsToXml(toolCalls);
+    if (xml) return xml;
+  }
   return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || '';
 }
 
@@ -999,9 +1084,11 @@ async function callClawdCloud(msgs, signal, options = {}, initialModel = '') {
     max_tokens: maxTokens,
     temperature,
     system,
-    messages: msgs
-      .filter(m => m.role !== 'system')
-      .map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') }))
+    messages: collapseConsecutiveSameRole(
+      msgs
+        .filter(m => m.role !== 'system')
+        .map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') }))
+    )
   };
 
   const providerHost = ['api', 'an', 'thro', 'pic', 'com'].join('.');
@@ -1050,11 +1137,32 @@ async function callAzureOpenAiCloud(msgs, signal, options = {}, initialDeploymen
 
   const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
+
+  // PHASE 1: Load tools dynamically on each call
+  let toolsForThisCall = null;
+  if (typeof window.AgentOrchestrator?.buildOpenAiToolSchemas === 'function') {
+    try {
+      toolsForThisCall = window.AgentOrchestrator.buildOpenAiToolSchemas(options.enabledTools || []);
+    } catch (err) {
+      console.warn('[AgentOrchestrator] buildOpenAiToolSchemas failed:', err);
+      toolsForThisCall = [];
+    }
+  }
+
+  // PHASE 2: Pre-convert tool_call_id format
+  const messages = buildOpenAiStyleMessages(msgs).map(m => {
+    if (m.role === 'tool' && m.tool_call_id && !m.tool_call_id.startsWith('call_') && !m.tool_call_id.startsWith('toolu_')) {
+      return { ...m, tool_call_id: 'call_' + m.tool_call_id };
+    }
+    return m;
+  });
+
   const body = {
-    messages: buildOpenAiStyleMessages(msgs),
+    messages: collapseConsecutiveSameRole(messages),
     max_tokens: maxTokens,
     temperature,
-    stream: false
+    stream: false,
+    ...(toolsForThisCall && toolsForThisCall.length > 0 ? { tools: toolsForThisCall, tool_choice: 'auto' } : {})
   };
 
   const url = `${endpoint}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
@@ -1076,6 +1184,12 @@ async function callAzureOpenAiCloud(msgs, signal, options = {}, initialDeploymen
   }
 
   const data = JSON.parse(text);
+  // Check for native tool_calls before falling back to content
+  const toolCalls = data.choices?.[0]?.message?.tool_calls;
+  if (Array.isArray(toolCalls) && toolCalls.length) {
+    const xml = normalizeFunctionCallsToXml(toolCalls);
+    if (xml) return xml;
+  }
   return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || '';
 }
 
@@ -1090,15 +1204,39 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
   const model = ollamaModel;
   const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
+
+  // Determine routing FIRST — local Ollama models use XML tool calling (via system prompt)
+  // and most don't support the native tools: parameter. Sending it causes HTTP 500 EOF.
+  // Only cloud Ollama models (ollama.com hosted) are likely to support native FC.
+  const isCloudModel = (typeof isSelectedOllamaModelCloud === 'function') && isSelectedOllamaModelCloud();
+
+  // Only load native tool schemas for cloud models that support OpenAI-style FC.
+  let toolsForThisCall = null;
+  if (isCloudModel && typeof window.AgentOrchestrator?.buildOpenAiToolSchemas === 'function') {
+    try {
+      toolsForThisCall = window.AgentOrchestrator.buildOpenAiToolSchemas(options.enabledTools || []);
+    } catch (err) {
+      console.warn('[AgentOrchestrator] buildOpenAiToolSchemas failed:', err);
+      toolsForThisCall = [];
+    }
+  }
+
+  // Pre-convert tool_call_id format
+  const messages = buildOpenAiStyleMessages(msgs).map(m => {
+    if (m.role === 'tool' && m.tool_call_id && !m.tool_call_id.startsWith('call_') && !m.tool_call_id.startsWith('toolu_')) {
+      return { ...m, tool_call_id: 'call_' + m.tool_call_id };
+    }
+    return m;
+  });
+
   const body = {
     model,
-    messages: buildOpenAiStyleMessages(msgs),
+    messages: collapseConsecutiveSameRole(messages),
     max_tokens: maxTokens,
     temperature,
-    stream: false
+    stream: false,
+    ...(toolsForThisCall && toolsForThisCall.length > 0 ? { tools: toolsForThisCall, tool_choice: 'auto' } : {})
   };
-
-  const isCloudModel = (typeof isSelectedOllamaModelCloud === 'function') && isSelectedOllamaModelCloud();
 
   // Routing:
   // ☁ cloud models  → dev-server proxy at /api/ollama/v1 (avoids CORS with ollama.com)
@@ -1166,10 +1304,11 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
     || data.response
     || '';
 
-  // Convert function-calling format (content:"" + tool_calls:[...]) to <tool_call> XML.
-  // normalizeFunctionCallsToXml handles all known model quirks (glm-5.1, standard, alias fields).
-  if (!rawContent.trim()) {
-    const xml = normalizeFunctionCallsToXml(data.choices?.[0]?.message?.tool_calls);
+  // Check for native tool_calls BEFORE falling back to content.
+  // This ensures tool_calls are extracted even when the model returns prose + tool_calls.
+  const toolCalls = data.choices?.[0]?.message?.tool_calls;
+  if (Array.isArray(toolCalls) && toolCalls.length) {
+    const xml = normalizeFunctionCallsToXml(toolCalls);
     if (xml) return xml;
   }
 
@@ -1179,7 +1318,7 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
 function updateModelBadgeForLocal(modelName) {
   const badgeModel = document.getElementById('topbar-model');
   if (badgeModel) {
-    badgeModel.textContent = modelName || 'local/model';
+    badgeModel.textContent = `local/${modelName || 'unknown'}`;
   }
 }
 
@@ -1206,17 +1345,35 @@ async function callLocal(msgs, signal, options = {}) {
   localBackend.model = model;
   localStorage.setItem('agent_local_backend_model', localBackend.model || '');
 
-  // Build OpenAI-compatible messages and normalize for strict templates that require
-  // user/assistant alternation after an optional system message.
-  const sanitizeLocalMessageContent = value => String(value || '')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ' ')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  // Build OpenAI-compatible messages for local servers.
+  // - Strip control characters and <think> blocks from content (prevents reasoning
+  //   traces from leaking into the next prompt).
+  // - Preserve role:'tool' with tool_call_id so LM Studio / llama.cpp can match
+  //   tool results back to the function call that requested them.
+  const sanitizeLocalMessageContent = value => {
+    let text = String(value || '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ' ');
+    let prev;
+    do { prev = text; text = text.replace(/<think>[\s\S]*?<\/think>/gi, ''); } while (text !== prev);
+    return text.trim();
+  };
 
-  const rawMsgs = msgs.map(m => ({
-    role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
-    content: sanitizeLocalMessageContent(m.content)
-  }));
+  const rawMsgs = msgs.map(m => {
+    // Without a real tool_call_id the model used XML tool calling, not native FC.
+    // Downgrade to role:'user' with <tool_result> wrapper so local servers that
+    // don't have FC context don't choke on an unexpected role:'tool' message.
+    if (m.role === 'tool') {
+      if (m.tool_call_id) {
+        return { role: 'tool', tool_call_id: m.tool_call_id, content: sanitizeLocalMessageContent(m.content) };
+      }
+      return { role: 'user', content: sanitizeLocalMessageContent(`<tool_result>\n${m.content}\n</tool_result>`) };
+    }
+    return {
+      role: m.role === 'assistant' ? 'assistant'
+          : m.role === 'system'    ? 'system'
+          : 'user',
+      content: sanitizeLocalMessageContent(m.content)
+    };
+  });
 
   function normalizeLocalMessages(messages) {
     const system = messages.find(m => m.role === 'system');
@@ -1235,13 +1392,14 @@ async function callLocal(msgs, signal, options = {}) {
     }
 
     // Merge adjacent messages with same role to enforce alternation.
+    // Never merge tool messages — each must keep its individual tool_call_id.
     const normalized = [];
     for (const msg of body) {
       const prev = normalized[normalized.length - 1];
-      if (prev && prev.role === msg.role) {
+      if (prev && prev.role === msg.role && msg.role !== 'tool') {
         prev.content = `${prev.content}\n\n${msg.content}`;
       } else {
-        normalized.push({ role: msg.role, content: msg.content });
+        normalized.push({ ...msg });
       }
     }
 
@@ -1269,6 +1427,15 @@ async function callLocal(msgs, signal, options = {}) {
   }
 
   const openaiMsgs = normalizeLocalMessages(rawMsgs);
+
+  // Local models use XML tool calling (via system prompt) — never send native tool schemas.
+  // Most local backends (Ollama, LM Studio) reject or crash on the tools: parameter.
+  const messagesWithConvertedIds = openaiMsgs.map(m => {
+    if (m.role === 'tool' && m.tool_call_id && !m.tool_call_id.startsWith('call_') && !m.tool_call_id.startsWith('toolu_')) {
+      return { ...m, tool_call_id: 'call_' + m.tool_call_id };
+    }
+    return m;
+  });
 
   // Update model badge if the model changed
   const displayModel = String(model || '').trim();
@@ -1316,13 +1483,16 @@ async function callLocal(msgs, signal, options = {}) {
       if (ep.format === 'ollama') {
         body = {
           model,
-          messages: openaiMsgs,
-          stream: false
+          messages: messagesWithConvertedIds,
+          stream: false,
+          // Ollama /api/chat accepts generation params in an 'options' sub-object.
+          options: { temperature, num_predict: maxTokens }
+          // No native tools: — local models use XML tool calling via system prompt.
         };
       } else if (ep.format === 'ollama_generate') {
         body = {
           model,
-          prompt: buildOllamaGeneratePrompt(openaiMsgs),
+          prompt: buildOllamaGeneratePrompt(messagesWithConvertedIds),
           stream: false,
           options: {
             temperature,
@@ -1330,7 +1500,14 @@ async function callLocal(msgs, signal, options = {}) {
           }
         };
       } else {
-        body = { model, messages: openaiMsgs, max_tokens: maxTokens, temperature, stream: false };
+        body = {
+          model,
+          messages: messagesWithConvertedIds,
+          max_tokens: maxTokens,
+          temperature,
+          stream: false
+          // No native tools: — local models use XML tool calling via system prompt.
+        };
       }
 
       const endpointUrl = buildLocalEndpointUrl(localBaseUrl, ep.path);
@@ -1372,11 +1549,17 @@ async function callLocal(msgs, signal, options = {}) {
 
       if (localReply.hiddenReasoningOnly) {
         // Model responded but only emitted reasoning with no visible content.
-        // Wrap the thinking in <think> tags and return it so the agent loop sees
-        // an empty visible reply and pushes a continuation prompt, rather than
+        // Wrap the thinking in <think> tags if not already wrapped, and return it so
+        // the agent loop sees it and pushes a continuation prompt, rather than
         // propagating a hard error and failing the whole turn.
         const thinkText = String(extractLocalReasoningText(data) || '').trim();
-        if (thinkText) return `<think>${thinkText}</think>`;
+        if (thinkText) {
+          // If the text already starts with <think>, return as-is.
+          // Otherwise, wrap it in <think> tags.
+          return thinkText.toLowerCase().trim().startsWith('<thinking')
+            ? thinkText
+            : `<think>${thinkText}</think>`;
+        }
         attempts.push({ path: ep.path, status: 200, detail: 'model returned hidden reasoning only' });
         lastEndpointError = `${ep.path}: model returned hidden reasoning only`;
         continue;

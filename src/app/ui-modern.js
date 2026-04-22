@@ -20,6 +20,9 @@ function closeSettings() {
   }
 }
 
+window.openSettings = openSettings;
+window.closeSettings = closeSettings;
+
 // Close modal on escape key
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {

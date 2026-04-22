@@ -109,7 +109,7 @@
               ...(parsed.offset !== undefined && { offset: parsed.offset }),
               ...(parsed.length !== undefined && { length: parsed.length })
             };
-        return { tool: String(toolName), args: parsedArgs };
+        return { tool: String(toolName), args: parsedArgs, ...(parsed.id ? { id: String(parsed.id) } : {}) };
       }
     }
 

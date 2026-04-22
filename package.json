@@ -5,9 +5,13 @@
   "type": "module",
   "scripts": {
     "build:snapshot": "node scripts/build-snapshot.mjs",
-    "test:skills-smoke": "node scripts/test-skills-smoke.mjs"
+    "test:skills-smoke": "node scripts/test-skills-smoke.mjs",
+    "test:smoke": "node scripts/test-smoke.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.25.12"
+  },
+  "dependencies": {
+    "openclaude": "^0.0.1"
   }
 }

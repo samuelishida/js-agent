@@ -52,7 +52,8 @@ flowchart TD
    - `src/skills/modules/web-runtime.js` isolates web/search/weather/network provider logic
    - Flattened `src/skills/groups/*.js` files provide UI-facing group descriptors
 - Context manager:
-   - Stable tool-result budgeting for large outputs
+   - Stable tool-result budgeting for large outputs (20KB inline max, smart search tool boost)
+   - Smart search tool preservation: search/query/lookup tools get 50% more budget allocation
    - Lightweight microcompact of older `<tool_result>` blocks
    - LLM summarization with deterministic fallback compression and cooldown guard
    - Time-based stale-result clearing after inactivity windows
@@ -75,24 +76,30 @@ Agent/
 |- prompts/
 |- docs/
 |  `- agentic-search-arch.html
-|- scripts/
-|  |- build-snapshot.mjs
-|  `- test-skills-smoke.mjs
 |- proxy/
 |  `- dev-server.js
+|- scripts/
+|  |- build-snapshot.mjs
+|  |- test-skills-smoke.mjs
+|  `- test-smoke.mjs
 `- src/
    |- app/
-   |  |- agent.js
-   |  |- llm.js
-   |  |- local-backend.js
-   |  |- runtime-memory.js
-   |  |- state.js
-   |  |- tools.js
-   |  `- ui-modern.js
+   |  |- agent.js          # bounded agent loop, UI bindings, message renderers
+   |  |- compaction.js      # context compaction, injection detection (window.AgentCompaction)
+   |  |- constants.js       # centralized constants (window.CONSTANTS)
+   |  |- llm.js             # multi-lane LLM routing, markdown renderers, abort control
+   |  |- local-backend.js   # local endpoint probing (LM Studio, Ollama)
+   |  |- permissions.js     # per-run denial tracking, escalation modes (window.AgentPermissions)
+   |  |- runtime-memory.js  # runtime cache + long-term memory (window.AgentRuntimeCache/AgentMemory)
+   |  |- state.js           # session state, localStorage, BroadcastChannel sync
+   |  |- steering.js        # mid-flight guidance buffer (window.AgentSteering)
+   |  |- tool-execution.js  # tool dispatch, batching, filesystem guards (window.AgentToolExecution)
+   |  |- tools.js           # tool group rendering, enabledTools toggle
+   |  `- ui-modern.js       # settings modal (window.openSettings/closeSettings)
    |- core/
-   |  |- orchestrator.js
-   |  |- prompt-loader.js
-   |  `- regex.js
+   |  |- orchestrator.js    # system prompt builder, skill execution (window.AgentOrchestrator)
+   |  |- prompt-loader.js   # prompt markdown loading (window.AgentPrompts)
+   |  `- regex.js           # tool-call parsing helpers (window.AgentRegex)
    `- skills/
       |- snapshot-adapter.js
       |- core/
@@ -120,34 +127,53 @@ The main runtime is assembled directly in the browser from `index.html`. There i
 
 ### Bootstrap Order From `index.html`
 
-1. Core parser and prompt loading:
-   - `src/core/regex.js` defines the tool-call parsing and normalization helpers.
-   - `src/core/prompt-loader.js` loads prompt markdown and fallback templates.
-2. Skill metadata and generated snapshot:
-   - `src/skills/core/intents.js` and `src/skills/core/tool-meta.js` define intent and tool metadata.
-   - `src/skills/generated/snapshot-data.js` and `src/skills/snapshot-adapter.js` load the snapshot data used during prompt composition and compatibility shaping.
-3. Runtime module factories:
+All 29 scripts are loaded with `defer`. The browser executes them in declaration order after HTML parsing, preserving the dependency graph without a bundler.
+
+1. **Core parser and prompt loading**
+   - `src/core/regex.js` — tool-call parsing and normalization helpers → `window.AgentRegex`
+   - `src/core/prompt-loader.js` — prompt markdown loading → `window.AgentPrompts`
+
+2. **Skill metadata and generated snapshot**
+   - `src/skills/core/intents.js` — rule-based intent metadata
+   - `src/skills/core/tool-meta.js` — tool display metadata
+   - `src/skills/generated/snapshot-data.js` — prebuilt skill catalog → `window.AgentSnapshotData`
+   - `src/skills/snapshot-adapter.js` — snapshot query API → `window.AgentClawdSnapshot` / `window.AgentSnapshot`
+
+3. **Runtime module factories** (each registers onto `window.AgentSkillModules`)
    - `src/skills/modules/filesystem-runtime.js`
    - `src/skills/modules/data-runtime.js`
    - `src/skills/modules/registry-runtime.js`
    - `src/skills/modules/web-runtime.js`
-   - These files register factories on `window.AgentSkillModules`.
-4. Skill assembly:
-   - `src/skills/shared.js` composes those factories into `window.AgentSkills`.
-   - This is where preflight planning, `query_plan` generation, registry wiring, aliases, and memory-aware helpers are assembled.
-   - `src/skills/groups/*.js` expose grouped UI metadata, and `src/skills/index.js` finalizes the skill surface.
-5. Orchestrator:
-   - `src/core/orchestrator.js` consumes the prompt loader plus `window.AgentSkills` and publishes `window.AgentOrchestrator`.
-6. App runtime:
-   - `src/app/state.js` wires state and settings.
-   - `src/app/runtime-memory.js` publishes `window.AgentRuntimeCache` and `window.AgentMemory`.
-   - `src/app/local-backend.js` handles local endpoint probing and compatibility checks.
-   - `src/app/tools.js` exposes prompt/tool helpers used by the loop.
-   - `src/app/llm.js` handles provider selection, request shaping, retries, and response normalization.
-   - `src/app/agent.js` runs the bounded agent loop.
-   - `src/app/ui-modern.js` binds the UI to the runtime.
 
-The ordering matters. `src/skills/shared.js` must complete before `src/core/orchestrator.js` can describe the available tools, and the orchestrator must exist before `src/app/agent.js` starts composing prompts and running rounds. Because every file is loaded with `defer`, the browser preserves this sequence without needing a build-time module graph.
+4. **Skill assembly**
+   - `src/skills/shared.js` — composes factories into `window.AgentSkills` (preflight, registry wiring, aliases)
+   - `src/skills/groups/web.js`, `device.js`, `data.js`, `filesystem.js` — UI group descriptors
+   - `src/skills/index.js` — finalizes the skill surface
+
+5. **Orchestrator**
+   - `src/core/orchestrator.js` — system prompt builder, tool list composer, skill executor → `window.AgentOrchestrator`
+
+6. **App state and cache**
+   - `src/app/state.js` — session history, settings, localStorage, BroadcastChannel sync
+   - `src/app/constants.js` — centralized constants replacing inline magic numbers → `window.CONSTANTS`
+   - `src/app/runtime-memory.js` — scoped runtime cache + long-term memory → `window.AgentRuntimeCache`, `window.AgentMemory`
+
+7. **Modular app-layer subsystems** (each IIFE publishes to `window.Agent*`)
+   - `src/app/permissions.js` — per-run denial tracking, escalation modes → `window.AgentPermissions`
+   - `src/app/compaction.js` — context compaction logic, injection detection → `window.AgentCompaction`
+   - `src/app/steering.js` — mid-flight guidance buffer → `window.AgentSteering`, `window.clearSteering`, `window.sendSteering`
+
+8. **Tool infrastructure**
+   - `src/app/local-backend.js` — local endpoint probing (LM Studio, Ollama)
+   - `src/app/tools.js` — tool group rendering, `enabledTools` toggle
+   - `src/app/tool-execution.js` — tool dispatch, batching, filesystem guards → `window.AgentToolExecution`
+
+9. **LLM and agent loop**
+   - `src/app/llm.js` — multi-lane LLM routing, markdown renderers, abort control → `window.AgentLLMControl`
+   - `src/app/agent.js` — bounded agent loop, message rendering, UI wiring → all inline-handler globals
+   - `src/app/ui-modern.js` — settings modal → `window.openSettings`, `window.closeSettings`
+
+The ordering matters: skills must assemble before the orchestrator can describe available tools, and the orchestrator must exist before `agent.js` composes prompts. `constants.js` must load before any module that reads `window.CONSTANTS`.
 
 ### How The Scripts Become The Agent Loop
 
@@ -162,10 +188,30 @@ The ordering matters. `src/skills/shared.js` must complete before `src/core/orch
 
 The split is deliberate: the skills layer decides what capabilities exist, the orchestrator decides how those capabilities are presented to the model, and the agent loop decides when to call the model again, repair malformed intent, execute tools, compact context, or stop.
 
+### Modular App Layer
+
+After the refactor, `src/app/agent.js` delegates the bulk of its stateful subsystems to sibling modules loaded before it. Each module is an IIFE that publishes a named API onto `window`:
+
+| Window property | File | Responsibility |
+|---|---|---|
+| `window.CONSTANTS` | `constants.js` | Centralized constants (budgets, thresholds, timeouts) |
+| `window.AgentPermissions` | `permissions.js` | Per-run denial list, escalation mode (`default` → `deny_write`), permission hooks |
+| `window.AgentCompaction` | `compaction.js` | Repeated-call counters, failure tracking, prompt-injection signal list, context compaction helpers |
+| `window.AgentSteering` | `steering.js` | Mid-flight guidance buffer; `push()` / `drain()` / `clear()` / `send()` |
+| `window.AgentToolExecution` | `tool-execution.js` | Tool dispatch, concurrency batching, filesystem path guards, stable hash, run-chain ID |
+| `window.AgentLLMControl` | `llm.js` | Abort controller reference, `abortActiveLlmRequest()` |
+
+Inline-handler globals exposed by `agent.js` for HTML `onclick`/`onkeydown` attributes:
+`useExample`, `handleKey`, `autoResize`, `sendMessage`, `requestStop`, `setStatus`, `clearSession`
+
+Inline-handler globals from sibling modules:
+`clearSteering`, `sendSteering` (from `steering.js`), `openSettings`, `closeSettings` (from `ui-modern.js`)
+
 ### Supporting Build And Verification Scripts
 
-- `npm run build:snapshot` runs `scripts/build-snapshot.mjs`, which regenerates `src/skills/generated/snapshot-data.js` from the snapshot source so the browser runtime can consume a prebuilt data file instead of transforming that source on load.
-- `npm run test:skills-smoke` runs `scripts/test-skills-smoke.mjs`, which boots the same runtime scripts in a Node VM with browser stubs and checks that `window.AgentSkills`, the generated snapshot, memory/cache wiring, and orchestrator prompt composition still assemble correctly.
+- `npm run build:snapshot` runs `scripts/build-snapshot.mjs`, which regenerates `src/skills/generated/snapshot-data.js` from the snapshot source.
+- `npm run test:skills-smoke` runs `scripts/test-skills-smoke.mjs`, a focused smoke test for the skills registry, snapshot, and memory subsystems.
+- `npm run test:smoke` runs `scripts/test-smoke.mjs`, the comprehensive smoke test covering all runtime layers: constants, skills, memory, orchestrator, modular app APIs, markdown renderers, window global exports, and dev-server routes.
 
 ## Model Routing
 
@@ -199,6 +245,8 @@ Primary families:
 - Memory tools in runtime: `memory_write`, `memory_search`, `memory_list`
 - Context compaction improvements:
   - cached summary reuse (`context_summary` scoped cache)
+  - aggressive tool-result budgeting: 20KB inline max, 5KB preview chunks (up from 6KB/1.8KB), keeps 15 recent results
+  - intelligent compaction for search tools: web_search/web_fetch/read_page get 7.5KB preservation (50% boost)
   - stronger tool-result digests used by microcompact for older `<tool_result>` blocks
   - runtime continuation notes to keep loop state coherent after compaction
 - Multi-scope retention cache (`AgentRuntimeCache`) with TTL + max entries + max bytes policy per scope
@@ -281,9 +329,21 @@ The UI rendering system automatically detects and transforms message content for
 Useful commands after changes:
 
 ```bash
+# Comprehensive smoke test (all runtime layers)
+npm run test:smoke
+
+# Focused skills/snapshot/memory smoke test
 npm run test:skills-smoke
+
+# Syntax-check individual files
 node --check src/core/orchestrator.js
 node --check src/app/agent.js
+node --check src/app/llm.js
+node --check src/app/permissions.js
+node --check src/app/compaction.js
+node --check src/app/steering.js
+node --check src/app/tool-execution.js
+node --check src/app/constants.js
 ```
 
 ## Running

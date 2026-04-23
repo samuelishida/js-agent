@@ -1,8 +1,8 @@
-// ── Tool execution, batching, and filesystem guards ───────────────────────────
+// ── Tool execution, batching, and filesystem guards ──
 ;(function() {
   const C = () => window.CONSTANTS || {};
 
-  // ── Stable hashing / ID generation ───────────────────────────────────────
+  // ── Stable hashing / ID generation ──
 
   function stableHashText(value) {
     const text = String(value || '');
@@ -26,7 +26,7 @@
     } catch { return 'session_unknown'; }
   }
 
-  // ── Tool result replacement persistence ──────────────────────────────────
+  // ── Tool result replacement persistence ──
 
   function getReplacementStorageKey() {
     const C = window.CONSTANTS || {};
@@ -71,7 +71,7 @@
     } catch {}
   }
 
-  // ── Tool call normalization ─────────────────────────────────────────────────
+  // ── Tool call normalization ──
 
   function normalizeToolArgs(args) {
     return args && typeof args === 'object' && !Array.isArray(args) ? { ...args } : {};
@@ -134,7 +134,7 @@
     return deduped;
   }
 
-  // ── Path normalization and validation ────────────────────────────────────
+  // ── Path normalization and validation ──
 
   function normalizePathInput(value) {
     return String(value || '').trim().replace(/^['"`]+|['"`]+$/g, '').trim();
@@ -180,7 +180,7 @@
     return false;
   }
 
-  // ── Filesystem guards ──────────────────────────────────────────────────────
+  // ── Filesystem guards ──
 
   function getFilesystemOperationType(toolName) {
     const tool = String(toolName || '').trim();
@@ -235,74 +235,7 @@
     return { allowed: true };
   }
 
-  // ── Tool execution metadata ──────────────────────────────────────────────
-
-  function getToolExecutionMeta(toolName) {
-    const metaFromSkills = window.AgentSkills?.getToolExecutionMeta?.(toolName);
-    if (metaFromSkills) return metaFromSkills;
-    const name = String(toolName || '').trim();
-    if (name === 'calc' || name === 'datetime') return { readOnly: true, concurrencySafe: true, destructive: false, riskLevel: 'normal' };
-    return { readOnly: false, concurrencySafe: false, destructive: false, riskLevel: 'normal' };
-  }
-
-  function canRunToolConcurrently(call) {
-    return !!getToolExecutionMeta(call?.tool).concurrencySafe;
-  }
-
-  // ── Path conflict detection ───────────────────────────────────────────────
-
-  function getToolPaths(call) {
-    const { tool, args } = call;
-    const dep = window.AgentSkillCore?.toolMeta?.TOOL_DEPENDENCY_META?.[tool];
-    if (!dep) return { reads: new Set(), writes: new Set() };
-    const reads = new Set();
-    const writes = new Set();
-    for (const pathKey of (dep.reads || [])) {
-      if (pathKey === '$path' && args.path) reads.add(String(args.path));
-      else if (pathKey === '$cwd' && args.cwd) reads.add(String(args.cwd));
-    }
-    for (const pathKey of (dep.writes || [])) {
-      if (pathKey === '$path' && args.path) writes.add(String(args.path));
-      else if (pathKey === '$paths' && Array.isArray(args.edits)) {
-        for (const edit of args.edits) { if (edit.path) writes.add(String(edit.path)); }
-      }
-      else if (pathKey === '$cwd' && args.cwd) writes.add(String(args.cwd));
-    }
-    return { reads, writes };
-  }
-
-  function hasPathConflict(call1, call2) {
-    const p1 = getToolPaths(call1);
-    const p2 = getToolPaths(call2);
-    for (const w of p1.writes) { if (p2.reads.has(w) || p2.writes.has(w)) return true; }
-    for (const w of p2.writes) { if (p1.reads.has(w) || p1.writes.has(w)) return true; }
-    return false;
-  }
-
-  // ── P3.2: Read-before-write enforcement ─────────────────────────────────
-
-  let runReadPaths = new Set();
-
-  function trackReadPaths(call) {
-    const { tool, args } = call;
-    if (tool === 'runtime_readFile' && args.path) runReadPaths.add(String(args.path));
-    else if (tool === 'runtime_listDir' && args.path) runReadPaths.add(String(args.path));
-    else if (tool === 'runtime_glob' && args.pattern) runReadPaths.add(`(glob)${String(args.pattern)}`);
-  }
-
-  function checkReadBeforeWriteWarning(call) {
-    const { tool, args } = call;
-    const pathKey = args.path ? String(args.path) : null;
-    if ((tool === 'runtime_writeFile' || tool === 'runtime_editFile') && pathKey && !runReadPaths.has(pathKey)) {
-      return `⚠️  [READ-BEFORE-WRITE] You are about to write to '${pathKey}' but you have not read it in this session. Read the file first to verify the current content.`;
-    }
-    return '';
-  }
-
-  function resetReadBeforeWriteState() { runReadPaths = new Set(); }
-
-  // ── P3.1: Blast-radius confirmation gate ─────────────────────────────────
-
+  // P3.1: Blast-radius confirmation gate
   function getToolRisk(tool) {
     const riskMap = { runtime_writeFile:'irreversible', runtime_editFile:'irreversible', runtime_multiEdit:'irreversible', runtime_deleteFile:'irreversible', runtime_renamePath:'irreversible', runtime_makeDirectory:'reversible', runtime_runTerminal:'shared', runtime_spawnAgent:'shared' };
     return riskMap[tool] || 'safe';
@@ -346,15 +279,106 @@
     return false;
   }
 
+  function resetConfirmationState() { runPendingConfirmations = new Map(); runRiskApprovals = new Map(); }
+
+  // ── Tool execution metadata ──
+
+  function getToolExecutionMeta(toolName) {
+    const metaFromSkills = window.AgentSkills?.getToolExecutionMeta?.(toolName);
+    if (metaFromSkills) return metaFromSkills;
+    const name = String(toolName || '').trim();
+    if (name === 'calc' || name === 'datetime') return { readOnly: true, concurrencySafe: true, destructive: false, riskLevel: 'normal' };
+    return { readOnly: false, concurrencySafe: false, destructive: false, riskLevel: 'normal' };
+  }
+
+  function canRunToolConcurrently(call) {
+    return !!getToolExecutionMeta(call?.tool).concurrencySafe;
+  }
+
+  // ── Path conflict detection ──
+
+  function getToolPaths(call) {
+    const { tool, args } = call;
+    const dep = window.AgentSkillCore?.toolMeta?.TOOL_DEPENDENCY_META?.[tool];
+    if (!dep) {
+      const reads = new Set();
+      const writes = new Set();
+      if (args.path) reads.add(String(args.path));
+      if (args.cwd) reads.add(String(args.cwd));
+      if (args.root) reads.add(String(args.root));
+      if (args.pattern) reads.add(`(glob)${String(args.pattern)}`);
+      if (args.query) reads.add(`(query)${String(args.query).slice(0, 50)}`);
+      const rootPath = args.root || args.projectRoot || null;
+      const globPattern = args.pattern || args.globPattern || null;
+      const searchQuery = args.query || args.search || null;
+      return { reads, writes, root: rootPath, glob: globPattern, query: searchQuery };
+    }
+    const reads = new Set();
+    const writes = new Set();
+    for (const pathKey of (dep.reads || [])) {
+      if (pathKey === '$path' && args.path) reads.add(String(args.path));
+      else if (pathKey === '$cwd' && args.cwd) reads.add(String(args.cwd));
+      else if (pathKey === '$root' && args.root) reads.add(String(args.root));
+      else if (pathKey === '$glob' && args.pattern) reads.add(`(glob)${String(args.pattern)}`);
+      else if (pathKey === '$query' && args.query) reads.add(`(query)${String(args.query).slice(0, 50)}`);
+      else if (pathKey === '$paths' && Array.isArray(args.paths)) {
+        for (const p of args.paths) { if (p) reads.add(String(p)); }
+      }
+    }
+    for (const pathKey of (dep.writes || [])) {
+      if (pathKey === '$path' && args.path) writes.add(String(args.path));
+      else if (pathKey === '$paths' && Array.isArray(args.edits)) {
+        for (const edit of args.edits) { if (edit.path) writes.add(String(edit.path)); }
+      }
+      else if (pathKey === '$cwd' && args.cwd) writes.add(String(args.cwd));
+      else if (pathKey === '$root' && args.root) writes.add(String(args.root));
+    }
+    const rootPath = args.root || args.projectRoot || null;
+    const globPattern = args.pattern || args.globPattern || null;
+    const searchQuery = args.query || args.search || null;
+    return { reads, writes, root: rootPath, glob: globPattern, query: searchQuery };
+  }
+
+  function hasPathConflict(call1, call2) {
+    const p1 = getToolPaths(call1);
+    const p2 = getToolPaths(call2);
+    for (const w of p1.writes) { if (p2.reads.has(w) || p2.writes.has(w)) return true; }
+    for (const w of p2.writes) { if (p1.reads.has(w) || p1.writes.has(w)) return true; }
+    if (p1.root && p2.root && p1.root === p2.root) {
+      if ((p1.writes.size > 0 || p2.writes.size > 0) && (p1.glob || p1.query || p2.glob || p2.query)) return true;
+    }
+    return false;
+  }
+
+  // ── P3.2: Read-before-write enforcement ──
+
+  let runReadPaths = new Set();
+
+  function trackReadPaths(call) {
+    const { tool, args } = call;
+    if (tool === 'runtime_readFile' && args.path) runReadPaths.add(String(args.path));
+    else if (tool === 'runtime_listDir' && args.path) runReadPaths.add(String(args.path));
+    else if (tool === 'runtime_glob' && args.pattern) runReadPaths.add(`(glob)${String(args.pattern)}`);
+  }
+
+  function checkReadBeforeWriteWarning(call) {
+    const { tool, args } = call;
+    const pathKey = args.path ? String(args.path) : null;
+    if ((tool === 'runtime_writeFile' || tool === 'runtime_editFile') && pathKey && !runReadPaths.has(pathKey)) {
+      return `⚠️  [READ-BEFORE-WRITE] You are about to write to '${pathKey}' but you have not read it in this session. Read the file first to verify the current content.`;
+    }
+    return '';
+  }
+
+  function resetReadBeforeWriteState() { runReadPaths = new Set(); }
+
   window.AgentConfirmation = {
     approve: approveConfirmation,
     pending: () => Array.from(runPendingConfirmations.values()),
     clearPending: () => runPendingConfirmations.clear()
   };
 
-  function resetConfirmationState() { runPendingConfirmations = new Map(); runRiskApprovals = new Map(); }
-
-  // ── Batching ───────────────────────────────────────────────────────────────
+  // ── Batching ──
 
   function partitionToolCallBatches(calls) {
     const batches = [];
@@ -371,7 +395,7 @@
     return batches;
   }
 
-  // ── Run state ──────────────────────────────────────────────────────────────
+  // ── Run state ──
 
   let runDisabledToolCalls = new Set();
   let runDisabledSemanticToolCalls = new Set();
@@ -401,7 +425,7 @@
     resetConfirmationState();
   }
 
-  // ── Execute single tool call ───────────────────────────────────────────────
+  // ── Execute single tool call ──
 
   function parseToolCallCompat(text) {
     const orchestrator = window.AgentOrchestrator;
@@ -496,34 +520,75 @@
     const cachedResult = typeof getCachedToolResult === 'function' ? getCachedToolResult(call) : null;
     if (cachedResult) return `${cachedResult}\n\n[cache hit]`;
 
-    const runtimeHotCache = typeof getRuntimeScopedCache === 'function' ? getRuntimeScopedCache('tool_hot', callSignature) : null;
-    if (runtimeHotCache) return `${runtimeHotCache}\n\n[cache hit/runtime]`;
+    // Rate limiting check (AFTER cache so cached hits don't burn budget)
+    const rateLimited = window.AgentRateLimiter?.isRateLimited?.(tool);
+    if (rateLimited?.limited) {
+      if (perms.registerPermissionDenial) perms.registerPermissionDenial(call, rateLimited);
+      runDisabledToolCalls.add(callSignature);
+      return `ERROR: RATE_LIMITED: Tool '${tool}' has exceeded its call limit. Please try again in ${rateLimited.resetTime}s.`;
+    }
 
     const confirmationMsg = injectConfirmationGate(call);
     if (confirmationMsg) return confirmationMsg;
 
-    const result = await orchestrator.executeSkill(call, {
-      localBackend: window.localBackend,
-      enabledTools: window.enabledTools,
-      messages: window.messages,
-      queryTracking: runQueryTracking,
-      permissionMode: perms.runPermissionMode || 'default',
-      sessionId: getActiveSessionIdSafe()
-    });
+    const sandboxTools = new Set(['runtime_runTerminal', 'runtime_writeFile', 'runtime_editFile', 'fs_write_file', 'fs_delete_path']);
+    const useSandbox = sandboxTools.has(tool) && window.AgentWorkers?.getSandboxWorker;
+    let result;
+
+    if (useSandbox) {
+      try {
+        const sandboxToolMap = {
+          'runtime_runTerminal': 'run_terminal',
+          'runtime_writeFile': 'fswritefile',
+          'runtime_editFile': 'fswritefile',
+          'fs_write_file': 'fswritefile',
+          'fs_delete_path': 'fsdelete'
+        };
+        const sandboxResult = await window.AgentWorkers.executeSandboxed(sandboxToolMap[tool] || tool, args);
+        result = typeof sandboxResult === 'string' ? sandboxResult : JSON.stringify(sandboxResult);
+        result += '\n[sandboxed execution]';
+      } catch (sandboxErr) {
+        result = await orchestrator.executeSkill(call, {
+          localBackend: window.localBackend,
+          enabledTools: window.enabledTools,
+          messages: window.messages,
+          queryTracking: runQueryTracking,
+          permissionMode: perms.runPermissionMode || 'default',
+          sessionId: getActiveSessionIdSafe()
+        });
+        result = (typeof result === 'string' ? result : JSON.stringify(result)) + '\n[sandbox unavailable, executed in-process]';
+      }
+    } else {
+      result = await orchestrator.executeSkill(call, {
+        localBackend: window.localBackend,
+        enabledTools: window.enabledTools,
+        messages: window.messages,
+        queryTracking: runQueryTracking,
+        permissionMode: perms.runPermissionMode || 'default',
+        sessionId: getActiveSessionIdSafe()
+      });
+    }
 
     trackReadPaths(call);
+
+    // Sanitize file content output (prevent accidental code execution injection)
+    const outputFileTools = new Set([
+      'runtime_readFile', 'fs_read_file', 'file_read', 'read_file', 'fs_preview_file',
+      'runtime_listDir', 'fs_list_dir', 'glob', 'fs_glob', 'fs_tree', 'fs_walk',
+      'runtime_searchCode', 'fs_search_name', 'fs_search_content', 'fs_grep',
+      'runtime_fileDiff', 'fs_stat', 'fs_exists'
+    ]);
+    if (outputFileTools.has(call?.tool) && typeof result === 'string') {
+      let sanitized = result;
+      sanitized = sanitized.replace(/<\/script/gi, '<\\/script');
+      sanitized = sanitized.replace(/\beval\s*\(/g, 'eval/*sanitized*/(');
+      sanitized = sanitized.replace(/\bnew\s+Function\s*\(/g, 'new Function/*sanitized*/(');
+      result = sanitized;
+    }
 
     const cacheableRuntimeResult = !executionMeta.destructive && !/^ERROR\b/i.test(result) && !(perms.isPermissionDeniedResult ? perms.isPermissionDeniedResult(result) : false);
     if (cacheableRuntimeResult) {
       if (typeof setCachedToolResult === 'function') setCachedToolResult(call, result);
-      if (typeof setRuntimeScopedCache === 'function') {
-        const C = window.CONSTANTS || {};
-        setRuntimeScopedCache('tool_hot', callSignature, result, {
-          ttlMs: executionMeta.readOnly ? (C.TOOL_HOT_TTL_READONLY_MS || 600000) : (C.TOOL_HOT_TTL_WRITABLE_MS || 60000),
-          maxEntries: executionMeta.readOnly ? (C.TOOL_HOT_MAX_ENTRIES_READONLY || 500) : (C.TOOL_HOT_MAX_ENTRIES_WRITABLE || 120),
-          maxBytes: C.TOOL_HOT_MAX_BYTES || 2000000
-        });
-      }
     }
     return result;
   }

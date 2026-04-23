@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agent</title>
 <link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="assets/styles/components/confirmation.css">
 </head>
 <body>
 <!-- SIDEBAR (Left Navigation) -->
@@ -100,6 +101,19 @@
       <button id="btn-steering-send" onclick="sendSteering()" title="Inject steering message" style="padding:2px 6px;font-size:11px">Send</button>
     </div>
     <div id="steering-status" style="margin-top:2px;font-size:11px;color:var(--text-secondary)"></div>
+  </div>
+
+  <!-- Confirmation panel for high-risk operations -->
+  <div id="confirmation-panel" class="confirmation-panel hidden">
+    <div class="confirmation-header">
+      <h3>Confirm Actions</h3>
+      <button id="close-confirmation" class="close-btn">&times;</button>
+    </div>
+    <div id="confirmation-list" class="confirmation-list"></div>
+    <div class="confirmation-actions">
+      <button id="approve-all" class="btn btn-approve">Approve All</button>
+      <button id="reject-all" class="btn btn-reject">Reject All</button>
+    </div>
   </div>
 
   <!-- Steering event hooks for external code -->
@@ -301,7 +315,7 @@
             Context Budget
             <span class="settings-value" id="val-ctx">32</span>
           </label>
-          <input class="settings-slider" type="range" id="sl-ctx" min="10" max="200" value="32"
+          <input class="settings-slider" type="range" id="sl-ctx" min="8" max="256" value="32"
                  oninput="document.getElementById('val-ctx').textContent=this.value;localStorage.setItem('agent_sl_ctx',this.value);updateBadge()">
         </div>
 
@@ -447,6 +461,8 @@
 <script src="src/app/permissions.js" defer></script>
 <script src="src/app/compaction.js" defer></script>
 <script src="src/app/steering.js" defer></script>
+ <script src="src/app/rate-limiter.js" defer></script>
+<script src="src/app/worker-manager.js" defer></script>
 
 <!-- ── 8. Tool infrastructure ─────────────────────────────────────────── -->
 <script src="src/app/local-backend.js" defer></script>

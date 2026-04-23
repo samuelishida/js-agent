@@ -413,7 +413,7 @@
         attempts -= 1;
         try {
           if (current.when && !current.when(call.args || {}, context)) {
-            throw new Error('skill condition not satisfied');
+            break;
           }
 
           const result = await current.run(call.args || {}, context);
@@ -521,7 +521,7 @@
 
     const prefixed = candidates.find(name => {
       const normalized = canonicalToolName(name);
-      return normalized.startsWith(requested) || requested.startsWith(normalized);
+      return normalized.startsWith(requested) && requested.length >= Math.min(4, normalized.length);
     });
 
     if (prefixed) {

@@ -112,20 +112,20 @@
   ]);
 
   const TOOL_DEPENDENCY_META = {
-    'runtime_readFile': { reads: [], writes: [] },
+    'runtime_readFile': { reads: ['$path'], writes: [] },
     'runtime_writeFile': { reads: [], writes: ['$path'] },
     'runtime_editFile': { reads: ['$path'], writes: ['$path'] },
     'runtime_multiEdit': { reads: [], writes: ['$paths'] },
     'runtime_fileDiff': { reads: ['$path'], writes: [] },
-    'runtime_listDir': { reads: [], writes: [] },
-    'runtime_glob': { reads: [], writes: [] },
-    'runtime_searchCode': { reads: [], writes: [] },
-    'runtime_runTerminal': { reads: [], writes: ['$cwd'] },
+    'runtime_listDir': { reads: ['$path'], writes: [] },
+    'runtime_glob': { reads: ['$glob'], writes: [] },
+    'runtime_searchCode': { reads: ['$query'], writes: [] },
+    'runtime_runTerminal': { reads: ['$cwd'], writes: ['$cwd'] },
     'runtime_webFetch': { reads: [], writes: [] },
-    'runtime_getDiagnostics': { reads: [], writes: [] },
+    'runtime_getDiagnostics': { reads: ['$root'], writes: [] },
     'runtime_memoryRead': { reads: [], writes: [] },
     'runtime_memoryWrite': { reads: [], writes: [] },
-    'runtime_lsp': { reads: [], writes: [] },
+    'runtime_lsp': { reads: ['$root'], writes: [] },
     'runtime_spawnAgent': { reads: [], writes: [] },
     'runtime_todoWrite': { reads: [], writes: [] }
   };

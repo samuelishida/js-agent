@@ -23,6 +23,7 @@
 
   function sendSteering() {
     const input = document.getElementById('steering-input');
+    if (!input) return;
     const text = input.value.trim();
     if (text) {
       pushSteering(text);

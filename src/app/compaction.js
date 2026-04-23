@@ -10,9 +10,27 @@
   let toolFailureCounts = new Map();
   let promptInjectionSignals = [];
 
+  const CHAR_TOKEN_RATIO = 3.5;
+
+  function estimateTokens(text) {
+    if (Array.isArray(text)) {
+      return text.reduce((sum, part) => sum + estimateTokens(part?.text || part), 0);
+    }
+    if (typeof text !== 'string' || !text) return 0;
+    const wsTokens = text.split(/\s+/).filter(Boolean).length;
+    const punctTokens = (text.match(/[^\w\s]/g) || []).length;
+    const lineBreaks = (text.match(/\n/g) || []).length;
+    return Math.ceil(wsTokens * 1.3 + punctTokens * 0.5 + lineBreaks * 0.3);
+  }
+
   function ctxSize(messages = []) {
     return (Array.isArray(messages) ? messages : [])
       .reduce((total, message) => total + String(message?.content || '').length, 0);
+  }
+
+  function ctxTokenEstimate(messages = []) {
+    return (Array.isArray(messages) ? messages : [])
+      .reduce((total, message) => total + estimateTokens(message?.content), 0);
   }
 
   function resetCompactionState() {
@@ -113,9 +131,13 @@
     // Search tools get more characters preserved; other tools get standard treatment
     const effectivePreview = isSearchTool ? Math.min(previewChars * 1.5, inlineMaxChars * 0.75) : previewChars;
 
-    const head = text.slice(0, effectivePreview);
-    const tail = text.slice(-effectivePreview);
+    const maxHeadTail = Math.floor(text.length / 2);
+    const headLen = Math.min(effectivePreview, maxHeadTail);
+    const tailLen = Math.min(effectivePreview, text.length - headLen);
+    const head = text.slice(0, headLen);
+    const tail = text.slice(-tailLen);
     const omitted = text.length - (head.length + tail.length);
+    if (omitted <= 0) return text;
     return `${head}\n\n[${String(toolCall?.tool || 'tool')} result compacted; omitted ${omitted} chars]\n\n${tail}`;
   }
 
@@ -181,10 +203,14 @@
   async function applyContextManagementPipeline({ ctxLimit } = {}) {
     const messages = Array.isArray(window.messages) ? window.messages : [];
     const limit = Number(ctxLimit || C().DEFAULT_CTX_LIMIT_CHARS || 32000);
+    const tokenLimit = Math.floor(limit / CHAR_TOKEN_RATIO);
     const policy = C().CONTEXT_COMPACTION_POLICY || {};
-    const threshold = Math.floor(limit * Number(policy.thresholdRatio || 0.82));
+    const charThreshold = Math.floor(limit * Number(policy.thresholdRatio || 0.82));
+    const tokenThreshold = Math.floor(tokenLimit * Number(policy.thresholdRatio || 0.82));
 
-    if (ctxSize(messages) <= threshold) return [];
+    const charSize = ctxSize(messages);
+    const tokenEst = ctxTokenEstimate(messages);
+    if (charSize <= charThreshold && tokenEst <= tokenThreshold) return [];
 
     const compacted = microcompactToolResultMessages(messages, {
       keepRecent: Number(C().TOOL_RESULT_CONTEXT_BUDGET?.keepRecentResults || 8),
@@ -199,7 +225,7 @@
     }
 
     return [
-      `Context manager compacted ${compacted.clearedCount} older tool result(s), saved ~${compacted.savedChars} chars.`
+      `Context manager compacted ${compacted.clearedCount} older tool result(s), saved ~${compacted.savedChars} chars (~${Math.ceil(compacted.savedChars / CHAR_TOKEN_RATIO)} tokens).`
     ];
   }
 
@@ -210,6 +236,8 @@
     },
     get runCompactedResultNoticeSignatures() { return runCompactedResultNoticeSignatures; },
     ctxSize,
+    ctxTokenEstimate,
+    estimateTokens,
     resetCompactionState,
     resetPromptInjectionState,
     recordRepeatedToolCall,

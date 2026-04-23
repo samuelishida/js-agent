@@ -1544,14 +1544,50 @@
 
   const registry = registryRuntime.registry || {};
   const skillGroups = registryRuntime.skillGroups || {};
+  const LAZY_TOOLS = new Set([
+    'weather_current', 'geo_current_location', 'clipboard_read', 'clipboard_write',
+    'storage_list_keys', 'storage_get', 'storage_set',
+    'notification_request_permission', 'notification_send',
+    'tab_broadcast', 'tab_listen',
+    'parse_json', 'parse_csv',
+    'memory_write', 'memory_search', 'memory_list', 'tool_search',
+    'snapshot_skill_catalog', 'task_create', 'task_get', 'task_list', 'task_update',
+    'worker_batch', 'worker_list', 'worker_get',
+    'todo_write', 'ask_user_question',
+    'fs_upload_pick', 'fs_save_upload', 'fs_download_file',
+    'fs_copy_file', 'fs_move_file', 'fs_rename_path', 'fs_mkdir', 'fs_touch',
+    'fs_preview_file',
+    'runtime_lsp', 'runtime_spawnAgent', 'runtime_todoWrite',
+    'runtime_memoryRead', 'runtime_memoryWrite', 'runtime_getDiagnostics',
+    'runtime_fileDiff'
+  ]);
+  const lazyLoaded = new Set();
+
+  function makeLazyRunner(name, realRun) {
+    let invoked = false;
+    return async function lazyRun(args, context) {
+      if (!invoked) {
+        invoked = true;
+        lazyLoaded.add(name);
+      }
+      return realRun(args, context);
+    };
+  }
+
+  for (const toolName of Object.keys(registry)) {
+    if (LAZY_TOOLS.has(toolName) && typeof registry[toolName]?.run === 'function') {
+      registry[toolName].run = makeLazyRunner(toolName, registry[toolName].run);
+    }
+  }
 
   function registerCompatTool({ name, signature, description, run, retries = 1 }) {
     if (registry[name]) return;
+    const actualRun = LAZY_TOOLS.has(name) ? makeLazyRunner(name, run) : run;
     registry[name] = {
       name,
       description,
       retries,
-      run
+      run: actualRun
     };
 
     if (!skillGroups.runtime_compat) {

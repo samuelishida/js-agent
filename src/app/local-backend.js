@@ -106,23 +106,34 @@ async function probeLocal() {
     maybeRequestNotifPermission();
   }
 
+  if (typeof ollamaBackend !== 'undefined' && ollamaBackend.enabled) {
+    setLocalStatus('error', 'Ollama is active — disable it first to use a local backend');
+    return;
+  }
+
   const manualUrl = document.getElementById('local-url').value.trim();
   setLocalStatus('busy', 'probing…');
 
-  // If user typed a custom URL, probe that first
   const targets = getProbeTargets(manualUrl);
 
   for (const target of targets) {
-    const baseUrl = target.url.replace(/\/$/, '');
+    const baseUrl = target.url.replace(/\/+$/, '');
     const pathsToTry = target.paths || ['/v1/models'];
     let isReachable = false;
     const discoveredModels = new Set();
 
     for (const p of pathsToTry) {
       try {
-        const timeoutMs = p === '/api/tags' ? 7000 : 2500;
+        const timeoutMs = p === '/api/tags' ? 4000 : 2000;
         const probeUrl = new URL(p.replace(/^\/+/, ''), baseUrl + '/').toString();
-        const res = await fetchWithTimeout(probeUrl, { cache: 'no-store' }, timeoutMs);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        let res;
+        try {
+          res = await fetch(probeUrl, { cache: 'no-store', signal: controller.signal });
+        } finally {
+          clearTimeout(timeoutId);
+        }
         if (res.ok) {
           isReachable = true;
           let models = [];
@@ -134,7 +145,9 @@ async function probeLocal() {
             discoveredModels.add(model);
           }
         }
-      } catch {}
+      } catch {
+        // Connection refused or timeout — expected for inactive servers, suppress noise.
+      }
     }
 
     if (isReachable) {
@@ -178,11 +191,19 @@ async function probeLocal() {
     const modelListPath = pathsToTry[0] || '/v1/models';
     try {
       const probeUrl = new URL(modelListPath.replace(/^\/+/, ''), baseUrl + '/').toString();
-      const opaqueRes = await fetchWithTimeout(probeUrl, {
-        method: 'GET',
-        mode: 'no-cors',
-        cache: 'no-store'
-      }, 1200);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1200);
+      let opaqueRes;
+      try {
+        opaqueRes = await fetch(probeUrl, {
+          method: 'GET',
+          mode: 'no-cors',
+          cache: 'no-store',
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
       if (opaqueRes && opaqueRes.type === 'opaque') {
         localBackend.url = baseUrl;
         localBackend.detected = true;
@@ -209,12 +230,20 @@ async function probeLocal() {
     // Last fallback: some servers answer chat endpoint with 400/405 but are reachable.
     try {
       const probeUrl = new URL((target.chatPath || '/v1/chat/completions').replace(/^\/+/, ''), baseUrl + '/').toString();
-      const res = await fetchWithTimeout(probeUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'probe', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
-        cache: 'no-store'
-      }, 1800);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1800);
+      let res;
+      try {
+        res = await fetch(probeUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'probe', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
+          cache: 'no-store',
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
       if ([200, 400, 401, 404, 405].includes(res.status)) {
         localBackend.url = baseUrl;
         localBackend.detected = true;

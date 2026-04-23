@@ -1,6 +1,6 @@
 # JS Agent
 
-Browser-first multi-step AI agent. No bundler. Local or cloud LLM. Modular skill runtime with 70+ tools. Runs from a single dev server command.
+Browser-first multi-step AI agent. No bundler. Local or cloud LLM. Modular skill runtime with 80+ tools. Runs from a single dev server command.
 
 ## Running
 
@@ -22,7 +22,7 @@ PORT=8080 node proxy/dev-server.js                  # custom port
 
 1. Settings → **Ollama** → paste API key → **Save** ([get a key](https://ollama.com/settings/api-keys))
 2. **Probe** to detect locally installed models
-3. Select a model (local or ☁ cloud) → **Enable Ollama** → start chatting
+3. Select a model (local or cloud) → **Enable Ollama** → start chatting
 
 ## Agent Loop
 
@@ -58,7 +58,7 @@ Agent/
     │   ├── core/intents.js, tool-meta.js               (intent + tool metadata)
     │   ├── generated/snapshot-data.js                  (prebuilt skill catalog)
     │   ├── snapshot-adapter.js → window.AgentSnapshot
-    │   ├── modules/                                     (runtime factories)
+    │   ├── modules/                                   (runtime factories)
     │   │   ├── web-runtime.js
     │   │   ├── filesystem-runtime.js
     │   │   ├── data-runtime.js
@@ -73,10 +73,12 @@ Agent/
         ├── permissions.js    → window.AgentPermissions  (denial tracking, escalation)
         ├── compaction.js     → window.AgentCompaction   (context compaction, injection detection)
         ├── steering.js       → window.AgentSteering     (mid-flight guidance buffer)
+        ├── rate-limiter.js   → window.AgentRateLimiter  (per-tool rate limiting)
+        ├── worker-manager.js → sandbox worker management
         ├── local-backend.js                             (LM Studio / Ollama probe)
         ├── tools.js                                     (tool group rendering, toggle)
         ├── tool-execution.js → window.AgentToolExecution (dispatch, batching, fs guards)
-        ├── llm.js            → window.AgentLLMControl   (multi-lane routing, abort)
+        ├── llm.js            → window.AgentLLMControl   (multi-lane routing, abort, streaming)
         ├── agent.js                                     (agent loop, UI wiring)
         └── ui-modern.js      → window.openSettings/closeSettings
 ```
@@ -112,29 +114,61 @@ Tools carry execution metadata (`readOnly`, `concurrencySafe`, `risk`). Read-onl
 
 ## Model Routing
 
-Three lanes in `llm.js`: `local` (LM Studio / Ollama at a custom host), `ollama` (Ollama Cloud via the proxy), and `cloud` (Gemini, OpenAI, Claude, Azure). Local failures fall back to cloud automatically. The `state.js` probe populates installed local models; unrecognized models route to cloud.
+Three lanes in `llm.js`: `local` (LM Studio / Ollama at a custom host), `ollama` (local Ollama or Ollama Cloud via proxy), and `cloud` (Gemini, OpenAI, Claude, Azure). Local failures fall back to cloud automatically.
+
+### Ollama local model routing
+
+Local Ollama models use a two-endpoint fallback strategy:
+
+1. **`/v1/chat/completions`** (OpenAI-compatible) — primary endpoint, most reliable for local Ollama
+2. **`/api/chat`** (native Ollama) — fallback, used with `stream: true` to avoid 2-minute timeouts
+
+Cloud Ollama models route through the dev server proxy at `/api/ollama/v1`.
+
+All local Ollama calls use streaming (`stream: true`) to prevent timeout errors on long responses.
 
 ## Context Management
 
+- **Context budget:** configurable 8k–256k characters (default 32k). Max tokens scale automatically with model context size (~25% of effective context).
 - **Tool-result budget:** 20 KB inline max, 5 KB preview chunks, keeps 15 recent results. Search tools (`web_search`, `web_fetch`, `read_page`) get a 50% boost.
 - **Microcompact:** older `<tool_result>` blocks are replaced with digests on each round.
 - **LLM summarization:** triggered when context exceeds 82% of limit; cached and reused (`context_summary` scope). Deterministic tail-compression fallback if summarization fails.
 - **Time-based clearing:** stale results cleared after 20 min of inactivity.
 
+### Model context size inference
+
+`state.js` infers context window size from the model name:
+
+- Explicit suffix: `qwen3.5:9b-256k` → 256k context
+- Size bracket: `:70b` → 128k, `:30b` → 32k, `:14b` → 16k, `:<14b` → 8k default
+- Ollama `/api/show` probe: reads `num_ctx` from model parameters
+
+`max_tokens` is set to `min(context_size, context_budget) * 0.25`, with a floor of 512.
+
 ## Safety
 
 Tool outputs are untrusted. The loop detects prompt-injection patterns in tool results and injects `<system-reminder>` blocks into continuation prompts. Permission denials accumulate per run; repeated denials escalate the permission mode (`default` → `ask` → `deny_write`).
 
+### Filesystem path validation
+
+`tool-execution.js` guards against path traversal:
+
+- Shell expansion (`$HOME`, backticks, `|`, `&`) is rejected
+- UNC paths (`\\server\share`, `//server/share`) are blocked
+- Glob patterns on write operations are rejected
+- Dangerous removal paths (`/`, `/etc`, `C:\`) are blocked
+
 ## Verification
 
 ```bash
-npm run test:smoke          # all runtime layers
+npm run test:smoke          # 114 checks — runtime, LLM utils, context, all modules
 npm run test:skills-smoke   # skills, snapshot, memory
 
 node --check src/app/agent.js
 node --check src/app/llm.js
 node --check src/core/orchestrator.js
 node --check src/app/constants.js
+node --check src/app/state.js
 node --check src/app/permissions.js
 node --check src/app/compaction.js
 node --check src/app/steering.js
@@ -144,6 +178,25 @@ node --check src/app/tool-execution.js
 ```bash
 npm run build:snapshot      # regenerate src/skills/generated/snapshot-data.js
 ```
+
+## Bug Fixes (Code Review)
+
+| File | Bug | Fix |
+|------|-----|-----|
+| `tool-execution.js:149` | `containsVulnerableUncPathLight` checked `startsWith('\}')` (closing brace) instead of `startsWith('\\\\')` — UNC path detection broken | Fixed to `startsWith('\\\\')` |
+| `compaction.js:129-134` | Head/tail overlap when text < 2×effectivePreview produced negative `omitted` count and duplicated content | Added overlap guard; returns original text when omitted ≤ 0 |
+| `compaction.js:28-30` | `ctxTokenEstimate` passed array `content` to `estimateTokens`, which returned 0 silently | `estimateTokens` now handles array content (OpenAI multi-part) |
+| `rate-limiter.js:42-58` | `remaining` off-by-one: computed before recording the call, reported value 1 too high | Return `remaining - 1` |
+| `steering.js:25-26` | Null dereference crash when `steering-input` DOM element missing | Added `if (!input) return` guard |
+| `state.js:681` | `C()` reference error — `C` is not in scope in `state.js`, only in `agent.js` as a local const | Changed to `(typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS` |
+| `agent.js:805` | Max-rounds forced answer pushed raw `finalReply` (with think/tool remnants) into messages, inconsistent with line 586 which pushes `finalMarkdown` (clean) | Changed to push `finalMarkdown` |
+| `orchestrator.js:415-416` | `when` condition failure consumed retry attempts instead of breaking the retry loop, burning all retries on condition check | Changed `throw` to `break` — skip to next fallback |
+| `orchestrator.js:522-524` | `normalizeToolCall` prefix matching too aggressive: `requested.startsWith(normalized)` matched wrong tools by short prefix (e.g. `"r"` → `runtime_readFile`) | Added minimum-length guard: match only if `requested.length >= Math.min(4, normalized.length)` |
+| `llm.js:731-748` | `extractThinkingBlocks` duplicated content for nested blocks (pushed outer content + inner nested blocks) | Changed to push only leaf blocks; outer block discarded if nested blocks found |
+| `llm.js:731+` | Regex `/<think[\s\S]*?<\/think>/gi` captured `>` as part of content group — `.extractThinkingBlocks("<tool_call>reasoning")` returned `">reasoning"` | Fixed all 5 instances to `/<think(?:\s[^>]*)?>[\s\S]*?<\/think>/gi` — properly matches the closing `>` of opening tag |
+| `llm.js:1529` | Dead code: `shouldStream && !res.body` check after `res.body` was already confirmed truthy and consumed | Removed dead branch; stream exhaustion now continues to next endpoint |
+| `llm.js:1814-1821` | After streaming falls through with empty content, `res.json()` called on already-consumed body → `TypeError: body already consumed` | Added `continue` after stream exhaustion; separate `!res.body` guard before `res.json()` |
+| `tool-execution.js:559` | Sandbox fallback: `result += '\n[sandbox unavailable]'` on non-string `result` produced `[object Object]...` | Added type check: `typeof result === 'string' ? result : JSON.stringify(result)` |
 
 ## Documentation
 

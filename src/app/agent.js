@@ -41,10 +41,11 @@ function setStopButtonState(running) {
 // ── Reset run guards ─────────────────────────────────────────────────────────
 
 function resetRunGuards() {
-  window.AgentToolExecution?.resetRunToolState();
-  window.AgentCompaction?.resetCompactionState();
-  window.AgentPermissions?.resetRunPermissionState();
-  window.AgentCompaction?.resetPromptInjectionState();
+  window.AgentToolExecution?.resetRunToolState?.();
+  window.AgentRateLimiter?.resetRateLimiter?.();
+  window.AgentCompaction?.resetCompactionState?.();
+  window.AgentPermissions?.resetRunPermissionState?.();
+  window.AgentCompaction?.resetPromptInjectionState?.();
   stopRequested = false;
 }
 
@@ -203,11 +204,10 @@ function getTurnLlmCallOptions() {
   const Comp = window.AgentCompaction || {};
   const recoverySteps = Math.max(0, Number(Comp.runMaxOutputTokensRecoveryCount || 0));
   const cfg = C();
-  const maxTokensLocal = cfg.DEFAULT_MAX_TOKENS_LOCAL || 1900;
-  const maxTokensCloud = cfg.DEFAULT_MAX_TOKENS_CLOUD || 2200;
-  const maxTokens = isLocalModeActive()
-    ? Math.max(512, maxTokensLocal - (recoverySteps * 280))
-    : Math.max(512, maxTokensCloud - (recoverySteps * 320));
+  const modelMaxTokens = typeof getMaxTokensForModel === 'function'
+    ? getMaxTokensForModel()
+    : (cfg.DEFAULT_MAX_TOKENS_LOCAL || 4096);
+  const maxTokens = Math.max(512, modelMaxTokens - (recoverySteps * 280));
   const enabledTools = Object.entries(window.enabledTools || {}).filter(([, v]) => !!v).map(([k]) => k);
 
   if (isLocalModeActive()) {
@@ -477,6 +477,13 @@ async function agentLoop(userMessage) {
           continue;
         }
       }
+
+      // Model crashed or produced garbage — show user-friendly message
+      if (e?.code === 'OLLAMA_INCOMPLETE_OUTPUT' || e?.code === 'LOCAL_INCOMPLETE_OUTPUT' || e?.code === 'OLLAMA_MODEL_CRASH') {
+        addMessage('error', e.message, round);
+        setStatus('error', 'model error');
+        return;
+      }
       addMessage('error', `LLM error: ${e.message}`, round);
       setStatus('error', 'api error');
       return;
@@ -735,6 +742,21 @@ async function agentLoop(userMessage) {
         roundToolSummaryChunks.push(toolSummary);
       }
 
+      // Check for pending confirmations after batch execution
+      const pendingConfirmations = window.AgentConfirmation?.pending?.() || [];
+      if (pendingConfirmations.length > 0) {
+        const confirmationMessages = pendingConfirmations.map(item => 
+          `[CONFIRMATION_PENDING] ${item.message}`
+        );
+        window.messages.push({
+          role: 'user',
+          content: confirmationMessages.join('\n\n')
+        });
+        addNotice(`Waiting for user confirmation on ${pendingConfirmations.length} tool call(s).`);
+        updateCtxBar();
+        continue;
+      }
+
       roundSawPermissionDenied = roundSawPermissionDenied || sawPermissionDenied;
     }
 
@@ -780,7 +802,7 @@ async function agentLoop(userMessage) {
 
     hideThinking();
     addMessage('agent', finalMarkdown, MAX_ROUNDS, false, false, parsedFinalReply.thinkingBlocks);
-    window.messages.push({ role: 'assistant', content: finalReply });
+    window.messages.push({ role: 'assistant', content: finalMarkdown });
     const memoryDelta = maybeExtractLongTermMemory(userMessage, finalMarkdown);
     if (memoryDelta?.saved) {
       addNotice(`Memory manager: stored ${memoryDelta.saved} durable memory item(s).`);
@@ -1123,11 +1145,14 @@ document.addEventListener('DOMContentLoaded', () => {
       _activateLocal(true);
     }
   }
-  probeLocal().catch(error => {
-    const message = String(error?.message || 'probe failed');
-    console.warn('[Local Probe] startup probe failed:', message);
-    addNotice(`Startup local probe failed: ${message}`);
-  });
+  if (window.ollamaBackend?.enabled) {
+    console.debug('[Agent] Skipping local backend probe — Ollama is active');
+  } else {
+    probeLocal().catch(error => {
+      const message = String(error?.message || 'probe failed');
+      console.warn('[Local Probe] startup probe failed:', message);
+    });
+  }
   window.addEventListener('beforeunload', flushSaveSessions);
   setStopButtonState(false);
 });

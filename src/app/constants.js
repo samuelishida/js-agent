@@ -51,8 +51,8 @@
     TOOL_CALL_REPAIR_RETRIES_CLOUD: 1,
 
     // ── LLM call defaults ────────────────────────────────────────────
-    DEFAULT_MAX_TOKENS_LOCAL: 1900,
-    DEFAULT_MAX_TOKENS_CLOUD: 2200,
+    DEFAULT_MAX_TOKENS_LOCAL: 4096,
+    DEFAULT_MAX_TOKENS_CLOUD: 4096,
     DEFAULT_TIMEOUT_MS_LOCAL: 120000,
     DEFAULT_TIMEOUT_MS_CLOUD: 35000,
     DEFAULT_RETRIES_LOCAL: 0,
@@ -154,7 +154,25 @@
     MAX_STORED_REPLACEMENTS: 300,
     DEFAULT_ROUND_LIMIT: 50,
     DEFAULT_CTX_LIMIT_CHARS: 32000,
+    MAX_CTX_LIMIT_CHARS: 256000,
     DEFAULT_DELAY_MS: 500,
+
+    // ── Rate limiting ───────────────────────────────────────────────
+    RATE_LIMIT_CONFIG: {
+      web_search: { maxCallsPerMinute: 30, windowMs: 60000 },
+      web_fetch: { maxCallsPerMinute: 10, windowMs: 60000 },
+      runtime_webFetch: { maxCallsPerMinute: 10, windowMs: 60000 },
+      fs_read_file: { maxCallsPerMinute: 60, windowMs: 60000 },
+      runtime_readFile: { maxCallsPerMinute: 60, windowMs: 60000 },
+      fs_walk: { maxCallsPerMinute: 30, windowMs: 60000 },
+      runtime_runTerminal: { maxCallsPerMinute: 10, windowMs: 60000 },
+      runtime_writeFile: { maxCallsPerMinute: 20, windowMs: 60000 },
+      runtime_editFile: { maxCallsPerMinute: 20, windowMs: 60000 },
+      runtime_multiEdit: { maxCallsPerMinute: 15, windowMs: 60000 },
+      runtime_spawnAgent: { maxCallsPerMinute: 5, windowMs: 60000 },
+      fs_write_file: { maxCallsPerMinute: 20, windowMs: 60000 },
+      fs_delete_path: { maxCallsPerMinute: 10, windowMs: 60000 }
+    },
   };
 
   window.AgentConstants = C;

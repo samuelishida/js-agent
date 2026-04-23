@@ -166,6 +166,8 @@ let ollamaBackend = {
 // Set of model names confirmed installed locally via /api/tags probe.
 // Used by isSelectedOllamaModelCloud() for reliable local-vs-cloud routing.
 const ollamaInstalledModels = new Set();
+// Map of model name → { contextLength: number } from Ollama /api/show or /api/tags.
+const ollamaModelContextSizes = new Map();
 console.debug(`[State Init] localBackend: enabled=${localBackend.enabled}, url='${localBackend.url}', model='${localBackend.model}'`);
 console.debug(`[State Init] ollamaBackend: enabled=${ollamaBackend.enabled}, url='${ollamaBackend.url}'`);
 let chatSessions = [];
@@ -500,6 +502,9 @@ function saveOllamaCloudModelSelection() {
   const model = (select && select.value) || '';
   if (model) localStorage.setItem('agent_ollama_cloud_model', model);
   updateActiveProviderBadge();
+  if (model && !ollamaModelContextSizes.has(model)) {
+    fetchModelContextLength(model).catch(() => {});
+  }
 }
 
 function getOllamaCloudApiKey() {
@@ -583,7 +588,12 @@ async function probeOllama() {
 
     // Update the installed-models Set (used for reliable local-vs-cloud routing).
     ollamaInstalledModels.clear();
-    models.forEach(m => ollamaInstalledModels.add(m.name));
+    ollamaModelContextSizes.clear();
+    models.forEach(m => {
+      ollamaInstalledModels.add(m.name);
+      const ctxLen = inferContextLength(m.name, m);
+      if (ctxLen) ollamaModelContextSizes.set(m.name, { contextLength: ctxLen });
+    });
 
     if (select) {
       const saved = localStorage.getItem('agent_ollama_cloud_model') || '';
@@ -616,6 +626,69 @@ async function probeOllama() {
     if (statusLabel) statusLabel.textContent = `unreachable: ${e.message}`;
     if (dot) dot.className = 'status-dot error';
   }
+}
+
+function inferContextLength(modelName, modelMeta) {
+  if (modelMeta?.parameters) {
+    const m = String(modelMeta.parameters).match(/num_ctx\s+(\d+)/);
+    if (m) return parseInt(m[1], 10);
+  }
+  const name = String(modelName || '');
+  const kMatch = name.match(/(\d+)k/i);
+  if (kMatch) return parseInt(kMatch[1], 10) * 1024;
+  const sizeMatch = name.match(/:(\d+)b/i);
+  if (sizeMatch) {
+    const b = parseInt(sizeMatch[1], 10);
+    if (b >= 70) return 128 * 1024;
+    if (b >= 30) return 32 * 1024;
+    if (b >= 14) return 16 * 1024;
+    return 8 * 1024;
+  }
+  return 8 * 1024;
+}
+
+async function fetchModelContextLength(modelName) {
+  const cached = ollamaModelContextSizes.get(modelName);
+  if (cached?.contextLength) return cached.contextLength;
+  const baseUrl = (ollamaBackend.url || 'http://localhost:11434').replace(/\/+$/, '');
+  try {
+    const res = await fetchWithTimeout(`${baseUrl}/api/show`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: modelName })
+    }, 5000);
+    if (res.ok) {
+      const data = await res.json();
+      const params = String(data.parameters || '');
+      const m = params.match(/num_ctx\s+(\d+)/);
+      if (m) {
+        const ctxLen = parseInt(m[1], 10);
+        ollamaModelContextSizes.set(modelName, { contextLength: ctxLen });
+        return ctxLen;
+      }
+      const template = data.template || '';
+      const meta = { parameters: params, template };
+      const inferred = inferContextLength(modelName, meta);
+      ollamaModelContextSizes.set(modelName, { contextLength: inferred });
+      return inferred;
+    }
+  } catch {}
+  return inferContextLength(modelName, null);
+}
+
+function getModelContextLength() {
+  const model = typeof getOllamaCloudModel === 'function' ? getOllamaCloudModel() : '';
+  if (!model) return (typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS || 32000;
+  const cached = ollamaModelContextSizes.get(model);
+  if (cached?.contextLength) return cached.contextLength;
+  return inferContextLength(model, null);
+}
+
+function getMaxTokensForModel() {
+  const ctxLen = getModelContextLength();
+  const ctxLimit = getCtxLimit();
+  const effectiveCtx = Math.min(ctxLen, ctxLimit);
+  return Math.max(512, Math.floor(effectiveCtx * 0.25));
 }
 
 function loadOllamaBackendState() {
@@ -749,7 +822,11 @@ function pruneCacheBucket(cacheStore, scope = 'tool') {
 }
 
 function getToolCacheKey(call) {
-  return `${call.tool}:${JSON.stringify(call.args || {})}`;
+  const args = call.args || {};
+  const keys = Object.keys(args).sort();
+  const sorted = {};
+  for (const k of keys) sorted[k] = args[k];
+  return `${call.tool}:${JSON.stringify(sorted)}`;
 }
 
 function isCacheableTool(call) {

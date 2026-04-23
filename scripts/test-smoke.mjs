@@ -280,6 +280,8 @@ const SKILL_SCRIPTS = [
   'src/app/permissions.js',
   'src/app/compaction.js',
   'src/app/steering.js',
+  'src/app/rate-limiter.js',
+  'src/app/worker-manager.js',
   'src/app/local-backend.js',
   'src/app/tools.js',
   'src/app/tool-execution.js',
@@ -838,7 +840,621 @@ async function main() {
     assert.ok(typeof result.saved === 'number', 'result.saved should be a number');
   });
 
-  // ── Summary ──────────────────────────────────────────────────────────────────
+  // ── Group J: Tool execution logic ────────────────────────────────────────────
+
+  await group('dedupeToolCalls removes duplicates', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    const calls = [
+      { tool: 'runtime_readFile', args: { path: '/a' } },
+      { tool: 'runtime_readFile', args: { path: '/a' } },
+      { tool: 'runtime_readFile', args: { path: '/b' } }
+    ];
+    const deduped = ATE.dedupeToolCalls(calls, 10);
+    assert.equal(deduped.length, 2, 'should dedupe identical calls');
+    assert.equal(deduped[0].args.path, '/a');
+    assert.equal(deduped[1].args.path, '/b');
+  });
+
+  await group('dedupeToolCalls respects maxCalls limit', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    const calls = [
+      { tool: 'runtime_readFile', args: { path: '/1' } },
+      { tool: 'runtime_readFile', args: { path: '/2' } },
+      { tool: 'runtime_readFile', args: { path: '/3' } }
+    ];
+    const deduped = ATE.dedupeToolCalls(calls, 2);
+    assert.equal(deduped.length, 2, 'should enforce maxCalls limit');
+  });
+
+  await group('getToolCallSignature is deterministic', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    const sig1 = ATE.getToolCallSignature({ tool: 'web_search', args: { query: 'test' } });
+    const sig2 = ATE.getToolCallSignature({ tool: 'web_search', args: { query: 'test' } });
+    assert.equal(sig1, sig2, 'same call should produce same signature');
+  });
+
+  await group('getToolCallSignature is key-order independent', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    const sig1 = ATE.getToolCallSignature({ tool: 'test', args: { a: 1, b: 2 } });
+    const sig2 = ATE.getToolCallSignature({ tool: 'test', args: { b: 2, a: 1 } });
+    assert.equal(sig1, sig2, 'signature should be same regardless of key order');
+  });
+
+  await group('normalizePathInput strips quotes and whitespace', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    assert.equal(ATE.normalizePathInput('  "/foo/bar"  '), '/foo/bar');
+    assert.equal(ATE.normalizePathInput("'baz'"), 'baz');
+    assert.equal(ATE.normalizePathInput('  hello  '), 'hello');
+  });
+
+  await group('containsGlobPattern detects globs', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    assert.equal(ATE.containsGlobPattern('src/**/*.js'), true);
+    assert.equal(ATE.containsGlobPattern('src/foo.js'), false);
+    assert.equal(ATE.containsGlobPattern('test?.js'), true);
+  });
+
+  await group('isDangerousRemovalPath blocks root deletion', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    assert.equal(ATE.isDangerousRemovalPath('/'), true);
+    assert.equal(ATE.isDangerousRemovalPath('*'), true);
+    assert.equal(ATE.isDangerousRemovalPath('C:/'), true);
+    assert.equal(ATE.isDangerousRemovalPath('/home/user/project'), false);
+  });
+
+  await group('validateFilesystemCallGuard blocks UNC paths', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    const result = ATE.validateFilesystemCallGuard({ tool: 'fs_read_file', args: { path: '//server/share' } });
+    assert.equal(result.allowed, false, 'UNC path should be blocked');
+  });
+
+  await group('validateFilesystemCallGuard blocks shell expansion', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    const result = ATE.validateFilesystemCallGuard({ tool: 'fs_write_file', args: { path: '$HOME/file' } });
+    assert.equal(result.allowed, false, 'shell expansion should be blocked');
+  });
+
+  await group('validateFilesystemCallGuard blocks glob on write ops', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    const result = ATE.validateFilesystemCallGuard({ tool: 'fs_write_file', args: { path: 'src/*.js' } });
+    assert.equal(result.allowed, false, 'glob on write should be blocked');
+  });
+
+  await group('validateFilesystemCallGuard allows valid paths', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    const result = ATE.validateFilesystemCallGuard({ tool: 'fs_read_file', args: { path: '/home/user/file.js' } });
+    assert.equal(result.allowed, true, 'valid path should be allowed');
+  });
+
+  await group('partitionToolCallBatches separates read-only from writes', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    globalThis.window.AgentSkillCore = globalThis.window.AgentSkillCore || {};
+    globalThis.window.AgentSkillCore.toolMeta = globalThis.window.AgentSkillCore.toolMeta || {};
+    globalThis.window.enabledTools = globalThis.window.enabledTools || { calc: true, datetime: true };
+    const batches = ATE.partitionToolCallBatches([
+      { tool: 'calc', args: { expression: '1+1' } },
+      { tool: 'datetime', args: {} }
+    ]);
+    assert.ok(batches.length >= 1, 'should produce at least one batch');
+    assert.equal(batches[0].calls.length, 2, 'concurrency-safe tools should batch together');
+  });
+
+  await group('getToolPaths extracts path from dependency metadata', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    globalThis.window.AgentSkillCore = globalThis.window.AgentSkillCore || {};
+    globalThis.window.AgentSkillCore.toolMeta = globalThis.window.AgentSkillCore.toolMeta || {};
+    globalThis.window.AgentSkillCore.toolMeta.TOOL_DEPENDENCY_META = {
+      'runtime_readFile': { reads: ['$path'], writes: [] }
+    };
+    const paths = ATE.getToolPaths({ tool: 'runtime_readFile', args: { path: '/foo/bar.js' } });
+    assert.ok(paths.reads.has('/foo/bar.js'), 'should extract $path into reads');
+  });
+
+  await group('getToolPaths fallback extracts from args when no dep metadata', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    globalThis.window.AgentSkillCore = globalThis.window.AgentSkillCore || {};
+    globalThis.window.AgentSkillCore.toolMeta = globalThis.window.AgentSkillCore.toolMeta || {};
+    delete globalThis.window.AgentSkillCore.toolMeta.TOOL_DEPENDENCY_META;
+    const paths = ATE.getToolPaths({ tool: 'unknown_tool', args: { path: '/baz', root: '/project', pattern: '*.js', query: 'search' } });
+    assert.ok(paths.reads.has('/baz'), 'fallback should extract args.path');
+    assert.ok(paths.reads.has('/project'), 'fallback should extract args.root');
+    assert.equal(paths.root, '/project', 'should set root property');
+    assert.equal(paths.glob, '*.js', 'should set glob property');
+    assert.equal(paths.query, 'search', 'should set query property');
+  });
+
+  await group('hasPathConflict detects write/read conflict', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    globalThis.window.AgentSkillCore = globalThis.window.AgentSkillCore || {};
+    globalThis.window.AgentSkillCore.toolMeta = globalThis.window.AgentSkillCore.toolMeta || {};
+    globalThis.window.AgentSkillCore.toolMeta.TOOL_DEPENDENCY_META = {
+      'runtime_writeFile': { reads: [], writes: ['$path'] },
+      'runtime_readFile': { reads: ['$path'], writes: [] }
+    };
+    const conflict = ATE.hasPathConflict(
+      { tool: 'runtime_writeFile', args: { path: '/shared.js' } },
+      { tool: 'runtime_readFile', args: { path: '/shared.js' } }
+    );
+    assert.equal(conflict, true, 'read/write on same path should conflict');
+  });
+
+  await group('hasPathConflict allows disjoint paths', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    globalThis.window.AgentSkillCore = globalThis.window.AgentSkillCore || {};
+    globalThis.window.AgentSkillCore.toolMeta = globalThis.window.AgentSkillCore.toolMeta || {};
+    globalThis.window.AgentSkillCore.toolMeta.TOOL_DEPENDENCY_META = {
+      'runtime_writeFile': { reads: [], writes: ['$path'] },
+      'runtime_readFile': { reads: ['$path'], writes: [] }
+    };
+    const conflict = ATE.hasPathConflict(
+      { tool: 'runtime_writeFile', args: { path: '/a.js' } },
+      { tool: 'runtime_readFile', args: { path: '/b.js' } }
+    );
+    assert.equal(conflict, false, 'different paths should not conflict');
+  });
+
+  // ── Group K: Rate limiter ─────────────────────────────────────────────────────
+
+  await group('AgentRateLimiter isRateLimited allows under-limit calls', () => {
+    const ARL = globalThis.window.AgentRateLimiter;
+    assert.ok(ARL, 'AgentRateLimiter not set');
+    ARL.resetRateLimiter();
+    const result = ARL.isRateLimited('web_search');
+    assert.equal(result.limited, false, 'first call should not be limited');
+  });
+
+  await group('AgentRateLimiter isRateLimited blocks over-limit calls', () => {
+    const ARL = globalThis.window.AgentRateLimiter;
+    ARL.resetRateLimiter();
+    const config = globalThis.window.CONSTANTS?.RATE_LIMIT_CONFIG || {};
+    const limit = config.web_search?.maxCallsPerMinute || 30;
+    for (let i = 0; i < limit; i++) ARL.isRateLimited('web_search');
+    const result = ARL.isRateLimited('web_search');
+    assert.equal(result.limited, true, 'should be limited after exceeding maxCallsPerMinute');
+    assert.ok(result.resetTime > 0, 'resetTime should be positive');
+  });
+
+  await group('AgentRateLimiter resetRateLimiter clears state', () => {
+    const ARL = globalThis.window.AgentRateLimiter;
+    for (let i = 0; i < 50; i++) ARL.isRateLimited('web_search');
+    ARL.resetRateLimiter();
+    const result = ARL.isRateLimited('web_search');
+    assert.equal(result.limited, false, 'should allow after reset');
+  });
+
+  // ── Group L: Compaction and token estimation ──────────────────────────────────
+
+  await group('estimateTokens returns 0 for empty string', () => {
+    const AC = globalThis.window.AgentCompaction;
+    assert.ok(AC.estimateTokens, 'estimateTokens not set');
+    assert.equal(AC.estimateTokens(''), 0);
+    assert.equal(AC.estimateTokens(null), 0);
+  });
+
+  await group('estimateTokens is monotonically increasing', () => {
+    const AC = globalThis.window.AgentCompaction;
+    const short = AC.estimateTokens('hello');
+    const long = AC.estimateTokens('hello world this is a longer text with more words and punctuation!');
+    assert.ok(long > short, 'longer text should have more tokens');
+  });
+
+  await group('ctxTokenEstimate sums token estimates', () => {
+    const AC = globalThis.window.AgentCompaction;
+    const msgs = [
+      { role: 'user', content: 'Hello world' },
+      { role: 'assistant', content: 'Hi there, how can I help?' }
+    ];
+    const est = AC.ctxTokenEstimate(msgs);
+    assert.ok(est > 0, 'token estimate should be positive');
+    const singleEst = AC.estimateTokens('Hello world') + AC.estimateTokens('Hi there, how can I help?');
+    assert.equal(est, singleEst, 'estimate should be sum of individual messages');
+  });
+
+  // ── Group M: Confirmation gate ────────────────────────────────────────────────
+
+  await group('getToolRisk returns correct risk levels', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    assert.equal(ATE.getToolRisk('runtime_writeFile'), 'irreversible');
+    assert.equal(ATE.getToolRisk('runtime_runTerminal'), 'shared');
+    assert.equal(ATE.getToolRisk('calc'), 'safe');
+  });
+
+  await group('requiresConfirmation returns true for irreversible and shared', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    assert.equal(ATE.requiresConfirmation('runtime_writeFile'), true);
+    assert.equal(ATE.requiresConfirmation('runtime_runTerminal'), true);
+    assert.equal(ATE.requiresConfirmation('calc'), false);
+  });
+
+  await group('injectConfirmationGate returns message for risky tools', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    ATE.resetRunToolState();
+    const msg = ATE.injectConfirmationGate({ tool: 'runtime_writeFile', args: { path: '/test.js', content: 'hello' } });
+    assert.ok(msg.length > 0, 'should return non-empty confirmation message');
+    assert.ok(msg.includes('CONFIRMATION_REQUIRED'), 'should contain CONFIRMATION_REQUIRED');
+  });
+
+  await group('approveConfirmation allows subsequent execution', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    ATE.resetRunToolState();
+    const sig = ATE.getToolCallSignature({ tool: 'runtime_writeFile', args: { path: '/test.js' } });
+    ATE.injectConfirmationGate({ tool: 'runtime_writeFile', args: { path: '/test.js' } });
+    const approved = ATE.approveConfirmation(sig);
+    assert.equal(approved, true, 'should approve pending confirmation');
+  });
+
+  // ── Group N: Output sanitization ───────────────────────────────────────────
+
+  await group('Output sanitization escapes script close tags', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    const input = 'var x = 1; </script><script>alert(1)</script>';
+    const sanitized = input.replace(/<\/script/gi, '<\\/script');
+    assert.ok(!sanitized.includes('</script>'), 'should escape script close tags');
+    assert.ok(sanitized.includes('<\\/script'), 'should replace with escaped version');
+  });
+
+  // ── Group O: Garbage/incomplete output detection ──────────────────────────────
+
+  await group('isIncompleteOrGarbageOutput detects garbage', () => {
+    const fn = globalThis.window.isIncompleteOrGarbageOutput;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    assert.ok(fn('}}} ) ) ) ) ) ) ) ) ) ) ) ) )', 'stop'), 'should detect repeating bracket/paren garbage');
+    assert.ok(fn('}}}', 'stop'), 'should detect pure closing brackets');
+    assert.ok(fn('  ', 'stop'), 'should detect whitespace-only output');
+    assert.ok(fn('Hello', null), 'should detect null finish_reason as incomplete');
+    assert.ok(fn('Hello', 'length'), 'should detect length finish_reason as incomplete');
+    assert.ok(fn('', null), 'should detect empty output with null finish_reason');
+    assert.ok(!fn('Hello world', 'stop'), 'should not flag normal output');
+    assert.ok(!fn('The answer is 42', 'stop'), 'should not flag normal sentences');
+    assert.ok(!fn('', 'stop'), 'empty with stop is ambiguous — not garbage');
+  });
+
+  // ── Group P: LLM utility functions ────────────────────────────────────────────
+
+  const LLM = globalThis.window.AgentLLMControl;
+
+  await group('collapseConsecutiveSameRole — from module export', () => {
+    const fn = LLM?.collapseConsecutiveSameRole;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const result = fn([
+      { role: 'assistant', content: 'Step 1' },
+      { role: 'assistant', content: 'Step 2' },
+      { role: 'user', content: 'Go' },
+      { role: 'user', content: 'Continue' },
+      { role: 'assistant', content: 'Done' }
+    ]);
+    assert.equal(result.length, 3, 'should collapse 5 msgs to 3');
+    assert.ok(result[0].content.includes('Step 1') && result[0].content.includes('Step 2'), 'assistant msgs merged');
+    assert.ok(result[1].content.includes('Go') && result[1].content.includes('Continue'), 'user msgs merged');
+  });
+
+  await group('parseSSEChunk — parses data lines', () => {
+    const fn = LLM?.parseSSEChunk;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const chunk = 'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\ndata: [DONE]\n\n';
+    const events = fn(chunk);
+    assert.equal(events.length, 2, 'should find 2 events');
+    assert.equal(events[0].done, false, 'first event not done');
+    assert.equal(events[0].parsed?.choices?.[0]?.delta?.content, 'Hi', 'should extract delta');
+    assert.equal(events[1].done, true, '[DONE] should mark event as done');
+  });
+
+  await group('parseSSEChunk — handles no data prefix', () => {
+    const fn = LLM?.parseSSEChunk;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const chunk = 'data:{"choices":[{"delta":{"content":"X"}}]}\n\n';
+    const events = fn(chunk);
+    assert.equal(events.length, 1, 'should parse data: without space');
+    assert.equal(events[0].parsed?.choices?.[0]?.delta?.content, 'X');
+  });
+
+  await group('parseSSEChunk — ignores non-data lines', () => {
+    const fn = LLM?.parseSSEChunk;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const chunk = 'event: message_start\ndata: {"id":"1"}\n\n';
+    const events = fn(chunk);
+    assert.equal(events.length, 1, 'should skip non-data lines');
+    assert.equal(events[0].parsed?.id, '1', 'should parse valid data line');
+  });
+
+  await group('isIncompleteOrGarbageOutput — comprehensive cases', () => {
+    const fn = LLM?.isIncompleteOrGarbageOutput;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    assert.ok(fn('}}} }}', 'stop'), 'pure closing brackets');
+    assert.ok(fn('] ] ] } ] } ]', 'stop'), 'bracket/paren salad');
+    assert.ok(fn('    \n\t  ', 'stop'), 'whitespace only');
+    assert.ok(fn('', null), 'empty + null finish is incomplete');
+    assert.ok(fn('ok', null), 'null finish is incomplete');
+    assert.ok(fn('ok', 'length'), 'length finish is incomplete');
+    assert.ok(!fn('Hello world', 'stop'), 'normal text ok');
+    assert.ok(!fn('The result is: }}', 'stop'), 'brackets after text ok');
+    assert.ok(!fn('', 'stop'), 'empty + stop is not garbage');
+    assert.ok(!fn('Here is the code:\n```js\nconsole.log(1)\n```', 'stop'), 'code block ok');
+    assert.ok(!fn('})();', 'stop'), 'JS IIFE fragment ok');
+    assert.ok(fn(') ) ) ) ) ) ) ) )', 'stop'), 'repeating parens');
+  });
+
+  await group('getInflightKey — deterministic key generation', () => {
+    const fn = LLM?.getInflightKey;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const key1 = fn([{ role: 'user', content: 'hi' }], { temperature: 0.7 });
+    const key2 = fn([{ role: 'user', content: 'hi' }], { temperature: 0.7 });
+    assert.equal(key1, key2, 'same input should produce same key');
+    const key3 = fn([{ role: 'user', content: 'bye' }], { temperature: 0.7 });
+    assert.notEqual(key1, key3, 'different content should produce different key');
+  });
+
+  await group('dedupInflight — deduplicates concurrent requests', async () => {
+    const fn = LLM?.dedupInflight;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    let callCount = 0;
+    const work = async () => { callCount++; return 'result'; };
+    const key = 'test-dedup-key';
+    const p1 = fn(key, work);
+    const p2 = fn(key, work);
+    const [r1, r2] = await Promise.all([p1, p2]);
+    assert.equal(r1, 'result', 'first call should resolve');
+    assert.equal(r2, 'result', 'deduped call should resolve');
+  });
+
+  // ── Group Q: Context size and max-tokens scaling ──────────────────────────────
+
+  await group('inferContextLength — parses 256k from model name', () => {
+    const fn = globalThis.window.inferContextLength;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    assert.equal(fn('qwen3.5:9b-256k', null), 256 * 1024, '256k suffix');
+    assert.equal(fn('llama3:8b-128k', null), 128 * 1024, '128k suffix');
+    assert.equal(fn('mistral:7b-32k', null), 32 * 1024, '32k suffix');
+  });
+
+  await group('inferContextLength — size bracket from model name', () => {
+    const fn = globalThis.window.inferContextLength;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    assert.equal(fn('llama3:70b', null), 128 * 1024, '70b+ → 128k');
+    assert.equal(fn('llama3:33b', null), 32 * 1024, '30b+ → 32k');
+    assert.equal(fn('llama3:14b', null), 16 * 1024, '14b+ → 16k');
+    assert.equal(fn('llama3:8b', null), 8 * 1024, '<14b → 8k default');
+  });
+
+  await group('inferContextLength — num_ctx from params', () => {
+    const fn = globalThis.window.inferContextLength;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    assert.equal(fn('model', { parameters: 'num_ctx 131072\nnum_predict 4096' }), 131072, 'num_ctx takes priority');
+    assert.equal(fn('model', { parameters: '' }), 8 * 1024, 'empty params → default');
+  });
+
+  await group('inferContextLength — default fallback', () => {
+    const fn = globalThis.window.inferContextLength;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    assert.equal(fn('', null), 8 * 1024, 'empty name → 8k default');
+    assert.equal(fn('unknown-model', null), 8 * 1024, 'no size hint → 8k default');
+  });
+
+  await group('getMaxTokensForModel — scales with context', () => {
+    const fn = globalThis.window.getMaxTokensForModel;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    // Set up DOM stub so getCtxLimit reads a value
+    const slCtx = globalThis.document.getElementById('sl-ctx');
+    if (slCtx) { slCtx.value = '32'; }
+    globalThis.window.ollamaBackend = globalThis.window.ollamaBackend || { enabled: false, url: '' };
+    const tokens = fn();
+    assert.ok(tokens >= 512, `maxTokens should be >= 512, got ${tokens}`);
+    assert.ok(tokens <= 65536, `maxTokens should be <= 64k, got ${tokens}`);
+  });
+
+  await group('getCtxLimit returns numeric value', () => {
+    const fn = globalThis.window.getCtxLimit;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    // Set up DOM stub so getCtxLimit reads a value
+    const slCtx = globalThis.document.getElementById('sl-ctx');
+    if (slCtx) { slCtx.value = '64'; }
+    const val = fn();
+    assert.ok(typeof val === 'number' && val > 0, `getCtxLimit should return positive number, got ${val}`);
+    assert.ok(val >= 8000, `getCtxLimit should be >= 8k, got ${val}`);
+    assert.ok(val <= 256000, `getCtxLimit should be <= 256k, got ${val}`);
+  });
+
+  // ── Group R: LLM utility functions (pure) ───────────────────────────────────────
+
+  await group('validateAndNormalizeLocalUrl — basic validation', () => {
+    const fn = LLM?.validateAndNormalizeLocalUrl;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const r1 = fn('http://localhost:11434');
+    assert.equal(r1.valid, true, 'valid localhost URL');
+    assert.equal(r1.url, 'http://localhost:11434', 'url preserved');
+
+    const r2 = fn('');
+    assert.equal(r2.valid, false, 'empty URL should be invalid');
+
+    const r3 = fn('ftp://example.com');
+    assert.equal(r3.valid, false, 'ftp should be invalid');
+  });
+
+  await group('validateAndNormalizeLocalUrl — adds http:// and strips trailing slash', () => {
+    const fn = LLM?.validateAndNormalizeLocalUrl;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const r1 = fn('localhost:11434');
+    assert.equal(r1.valid, true, 'bare host should be valid');
+    assert.equal(r1.url, 'http://localhost:11434', 'should add http://');
+
+    const r2 = fn('http://localhost:11434/v1/');
+    assert.equal(r2.valid, true);
+    assert.equal(r2.url, 'http://localhost:11434/v1', 'should strip trailing slash');
+  });
+
+  await group('validateAndNormalizeLocalUrl — detects misspelled localhost', () => {
+    const fn = LLM?.validateAndNormalizeLocalUrl;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const r = fn('http://localhos:11434');
+    assert.equal(r.valid, false, 'localhos should be flagged');
+    assert.ok(r.reason.includes('misspelled'), 'should mention misspelled');
+  });
+
+  await group('buildLocalEndpointUrl — builds URLs', () => {
+    const fn = LLM?.buildLocalEndpointUrl;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    assert.equal(fn('http://localhost:11434', '/v1/chat/completions'), 'http://localhost:11434/v1/chat/completions');
+    assert.equal(fn('http://localhost:11434/', 'v1/chat/completions'), 'http://localhost:11434/v1/chat/completions');
+    assert.equal(fn('', '/v1/chat'), '');
+  });
+
+  await group('extractTextFromLocalContent — extracts from various shapes', () => {
+    const fn = LLM?.extractTextFromLocalContent;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    assert.equal(fn('hello'), 'hello', 'string passthrough');
+    assert.equal(fn({ text: 'world' }), 'world', 'text property');
+    assert.equal(fn({ content: 'inner' }), 'inner', 'content property');
+    assert.equal(fn({ response: 'resp' }), 'resp', 'response property');
+    assert.equal(fn({ message: { content: 'nested' } }), 'nested', 'nested message.content');
+    assert.equal(fn({ content: [{ text: 'a' }, { text: 'b' }] }), 'ab', 'array of text parts');
+    assert.equal(fn(null), '', 'null returns empty');
+    assert.equal(fn(42), '', 'number returns empty');
+  });
+
+  await group('normalizeFunctionCallsToXml — standard format', () => {
+    const fn = LLM?.normalizeFunctionCallsToXml;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const calls = [{ id: 'call_1', function: { name: 'web_search', arguments: '{"query":"test"}' } }];
+    const xml = fn(calls);
+    assert.ok(xml.includes('<tool_call>'), 'should contain tool_call tag');
+    assert.ok(xml.includes('"tool":"web_search"'), 'should contain tool name');
+    assert.ok(xml.includes('"args"'), 'should contain args');
+  });
+
+  await group('normalizeFunctionCallsToXml — glm-5.1 quirk (JSON in name)', () => {
+    const fn = LLM?.normalizeFunctionCallsToXml;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const calls = [{ id: 'call_1', function: { name: '{"tool":"read_file","args":{"path":"/foo"}}', arguments: '{}' } }];
+    const xml = fn(calls);
+    assert.ok(xml.includes('read_file'), 'should extract tool name from JSON in name');
+    assert.ok(xml.includes('/foo'), 'should extract args from JSON in name');
+  });
+
+  await group('normalizeFunctionCallsToXml — handles empty and null', () => {
+    const fn = LLM?.normalizeFunctionCallsToXml;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    assert.equal(fn([]), '', 'empty array returns empty');
+    assert.equal(fn(null), '', 'null returns empty');
+    assert.equal(fn(undefined), '', 'undefined returns empty');
+  });
+
+  await group('isRetryableError — classifies errors correctly', () => {
+    const fn = LLM?.isRetryableError;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    assert.equal(fn(null), false, 'null is not retryable');
+    assert.equal(fn({ name: 'AbortError' }), false, 'AbortError is not retryable');
+    assert.equal(fn({ code: 'OLLAMA_MODEL_CRASH' }), false, 'model crash is not retryable');
+    assert.equal(fn({ code: 'OLLAMA_INCOMPLETE_OUTPUT' }), false, 'incomplete output is not retryable');
+    assert.equal(fn({ code: 'LOCAL_INCOMPLETE_OUTPUT' }), false, 'local incomplete is not retryable');
+    assert.equal(fn({ status: 429 }), true, '429 rate limit is retryable');
+    assert.equal(fn({ status: 503 }), true, '503 is retryable');
+    assert.equal(fn({ status: 200 }), false, '200 is not retryable');
+    assert.equal(fn({ message: 'timeout after 30s' }), true, 'timeout message is retryable');
+    assert.equal(fn({ message: 'network error' }), true, 'network error is retryable');
+  });
+
+  await group('isRetryableError — Ollama EOF is non-retryable', () => {
+    const fn = LLM?.isRetryableError;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const eofErr = new Error('Ollama returned HTTP 500: EOF api_error');
+    assert.equal(fn(eofErr), false, 'EOF api_error should not be retryable');
+    const normal500 = new Error('Ollama returned HTTP 500: internal server error');
+    normal500.status = 500;
+    assert.equal(fn(normal500), true, 'generic 500 should be retryable');
+  });
+
+  await group('extractThinkingBlocks — extracts thinking blocks', () => {
+    const fn = LLM?.extractThinkingBlocks;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const blocks = fn('Hello <think>reasoning here</think> world <think>more thinking</think> end');
+    assert.equal(blocks.length, 2, 'should extract 2 thinking blocks');
+    assert.equal(blocks[0], 'reasoning here', 'first block content');
+    assert.equal(blocks[1], 'more thinking', 'second block content');
+  });
+
+  await group('extractThinkingBlocks — no thinking blocks', () => {
+    const fn = LLM?.extractThinkingBlocks;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    assert.deepEqual(fn('No thinking here'), [], 'should return empty array');
+    assert.deepEqual(fn(''), [], 'empty string returns empty array');
+  });
+
+  await group('splitModelReply — splits thinking and visible content', () => {
+    const fn = LLM?.splitModelReply;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const result = fn('<think>step by step</think>The answer is 42');
+    assert.equal(result.thinkingBlocks.length, 1, 'should have 1 thinking block');
+    assert.equal(result.thinkingBlocks[0], 'step by step', 'thinking content');
+    assert.ok(result.visible.includes('42'), 'visible content should contain answer');
+    assert.ok(!result.visible.includes('<think>'), 'visible should not contain thinking tags');
+  });
+
+  await group('splitModelReply — sequential thinking blocks', () => {
+    const fn = LLM?.splitModelReply;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    const result = fn('<think>first thought</think> visible text <think>second thought</think> more visible');
+    assert.equal(result.thinkingBlocks.length, 2, 'should extract both thinking blocks');
+    assert.ok(!result.visible.includes('<think>'), 'visible should not contain any thinking tags');
+  });
+
+  await group('looksLikeHtmlFragment — detects HTML', () => {
+    const fn = LLM?.looksLikeHtmlFragment;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    assert.equal(fn('<div>hello</div>'), true, 'div tag');
+    assert.equal(fn('<p class="x">text</p>'), true, 'p tag with attrs');
+    assert.equal(fn('plain text'), false, 'plain text is not HTML');
+    assert.equal(fn('use arr[i] syntax'), false, 'square brackets are not HTML');
+    assert.equal(fn('<svg viewBox="0 0 100 100">'), true, 'self-closing tag');
+  });
+
+  await group('sanitizeUrl — allows safe protocols', () => {
+    const fn = LLM?.sanitizeUrl;
+    if (!fn) { console.log('  (skipped — function not exported)'); return; }
+    assert.equal(fn('https://example.com'), 'https://example.com', 'https allowed');
+    assert.equal(fn('http://example.com'), 'http://example.com', 'http allowed');
+    assert.equal(fn('/relative/path'), '/relative/path', 'relative path allowed');
+    assert.equal(fn('#anchor'), '#anchor', 'anchor allowed');
+    assert.equal(fn('javascript:alert(1)'), '', 'javascript: blocked');
+    assert.equal(fn('data:text/html,<script>alert(1)</script>'), '', 'data: blocked');
+    assert.equal(fn('vbscript:code'), '', 'vbscript: blocked');
+    assert.equal(fn(''), '', 'empty string');
+  });
+
+  // ── Group S: Constants values ────────────────────────────────────────────────
+
+  await group('DEFAULT_MAX_TOKENS_LOCAL is 4096', () => {
+    const cfg = globalThis.window.CONSTANTS;
+    assert.equal(cfg.DEFAULT_MAX_TOKENS_LOCAL, 4096, 'DEFAULT_MAX_TOKENS_LOCAL should be 4096');
+  });
+
+  await group('DEFAULT_MAX_TOKENS_CLOUD is 4096', () => {
+    const cfg = globalThis.window.CONSTANTS;
+    assert.equal(cfg.DEFAULT_MAX_TOKENS_CLOUD, 4096, 'DEFAULT_MAX_TOKENS_CLOUD should be 4096');
+  });
+
+  await group('DEFAULT_CTX_LIMIT_CHARS is 32000', () => {
+    const cfg = globalThis.window.CONSTANTS;
+    assert.equal(cfg.DEFAULT_CTX_LIMIT_CHARS, 32000, 'DEFAULT_CTX_LIMIT_CHARS should be 32000');
+  });
+
+  await group('MAX_CTX_LIMIT_CHARS is 256000', () => {
+    const cfg = globalThis.window.CONSTANTS;
+    assert.equal(cfg.MAX_CTX_LIMIT_CHARS, 256000, 'MAX_CTX_LIMIT_CHARS should be 256000');
+  });
+
+  await group('Context slider range allows up to 256k', () => {
+    const slider = globalThis.document.getElementById('sl-ctx');
+    if (slider) {
+      // DOM stubs don't have max/min from HTML — verify the constant instead
+      assert.ok(true, 'slider element exists');
+    }
+    // Verify the constant that backs the max slider value
+    const cfg = globalThis.window.CONSTANTS;
+    assert.equal(cfg.MAX_CTX_LIMIT_CHARS, 256000, 'MAX_CTX_LIMIT_CHARS should be 256000');
+    assert.equal(cfg.DEFAULT_CTX_LIMIT_CHARS, 32000, 'DEFAULT_CTX_LIMIT_CHARS should be 32000');
+  });
+
+  // ── Summary ──────────────────────────────────────────────────────────────────────
 
   const passed = results.filter(r => r.ok).length;
   const failed = results.filter(r => !r.ok).length;

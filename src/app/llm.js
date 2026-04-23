@@ -2,16 +2,130 @@ let activeLlmController = null;
 
 const LLM_RATE_LIMIT_MS = {
   local: 250,
+  ollama: 250,
   cloud: 1200
 };
 
 const LLM_TIMEOUT_MS = {
-  local: 120000,
-  cloud: 45000,
+  local: (window.CONSTANTS?.DEFAULT_TIMEOUT_MS_LOCAL || 120000),
+  cloud: (window.CONSTANTS?.DEFAULT_TIMEOUT_MS_CLOUD || 45000),
+  ollama: (window.CONSTANTS?.DEFAULT_TIMEOUT_MS_LOCAL || 120000),
   control: 20000
 };
 
 const LLM_RETRY_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+function isIncompleteOrGarbageOutput(content, finishReason) {
+  if (finishReason === null || finishReason === 'length') return true;
+  if (!content || typeof content !== 'string') return false;
+  const trimmed = content.trim();
+  if (!trimmed) return true;
+  const bare = trimmed.replace(/\s+/g, '');
+  let closingCount = 0;
+  for (let i = 0; i < bare.length && i < 80; i++) {
+    const ch = bare[i];
+    if (ch === '}' || ch === ')' || ch === ']') closingCount++;
+    else break;
+  }
+  if (closingCount >= 3 && closingCount === bare.length) return true;
+  const nonWhitespace = bare.replace(/[})\]]/g, '');
+  if (bare.length > 6 && bare.length <= 80 && nonWhitespace.length === 0) return true;
+  if (bare.length > 6 && bare.length <= 200) {
+    const uniqueChars = new Set(bare);
+    if (uniqueChars.size <= 3 && (uniqueChars.has('}') || uniqueChars.has(')') || uniqueChars.has(']'))) return true;
+  }
+  return false;
+}
+
+let streamingCallback = null;
+
+function setStreamingCallback(cb) { streamingCallback = cb; }
+
+function parseSSEChunk(chunk) {
+  const lines = chunk.split('\n');
+  const events = [];
+  for (const line of lines) {
+    if (!line.startsWith('data: ') && !line.startsWith('data:')) continue;
+    const data = line.startsWith('data: ') ? line.slice(6) : line.slice(5);
+    if (data.trim() === '[DONE]') { events.push({ done: true }); continue; }
+    try { events.push({ done: false, parsed: JSON.parse(data) }); } catch {}
+  }
+  return events;
+}
+
+async function readOllamaNativeStream(response, onChunk) {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const decoder = new TextDecoder();
+  let fullContent = '';
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const obj = JSON.parse(trimmed);
+          if (obj.error) {
+            const err = new Error(String(obj.error?.message || obj.error || 'Ollama streaming error').slice(0, 200));
+            throw err;
+          }
+          const delta = obj.message?.content || '';
+          if (delta) {
+            fullContent += delta;
+            if (onChunk) onChunk(delta, fullContent);
+          }
+          if (obj.done) { reader.cancel(); return fullContent; }
+        } catch (e) {
+          if (e.message && !e.message.includes('JSON')) throw e;
+        }
+      }
+    }
+    if (buffer.trim()) {
+      try {
+        const obj = JSON.parse(buffer.trim());
+        if (obj.message?.content) fullContent += obj.message.content;
+        if (obj.done) return fullContent;
+      } catch {}
+    }
+  } finally { reader.releaseLock(); }
+  return fullContent;
+}
+
+async function readStreamingResponse(response) {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const decoder = new TextDecoder();
+  let fullContent = '';
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop() || '';
+      for (const chunk of chunks) {
+        const events = parseSSEChunk(chunk);
+        for (const event of events) {
+          if (event.done) { reader.cancel(); return fullContent; }
+          const delta = event.parsed?.choices?.[0]?.delta?.content || '';
+          if (delta) {
+            fullContent += delta;
+            if (streamingCallback) streamingCallback(delta, fullContent);
+          }
+        }
+      }
+    }
+  } finally { reader.releaseLock(); }
+  return fullContent;
+}
+
 const laneState = {
   local: { chain: Promise.resolve(), nextAt: 0 },
   cloud: { chain: Promise.resolve(), nextAt: 0 },
@@ -82,10 +196,23 @@ function isRetryableError(error) {
     return false;
   }
 
+  const message = String(error.message || '');
+
+  // Ollama "EOF" on 500 is a non-retryable model inference failure (usually
+  // caused by sending unsupported parameters like tools: to a local model).
+  // Retrying identical request will produce the same error.
+  if (/EOF.*api_erro|api_erro.*EOF/i.test(message)) {
+    return false;
+  }
+
+  // Incomplete/garbage model output — model crashed or OOM'd. Retry will hit same issue.
+  if (error.code === 'OLLAMA_INCOMPLETE_OUTPUT' || error.code === 'LOCAL_INCOMPLETE_OUTPUT' || error.code === 'OLLAMA_MODEL_CRASH') {
+    return false;
+  }
+
   const status = Number(error.status);
   if (LLM_RETRY_STATUSES.has(status)) return true;
 
-  const message = String(error.message || '');
   if (/\b(408|425|429|500|502|503|504)\b/.test(message)) return true;
   if (/(timeout|timed out|network|failed to fetch|rate limit|temporarily unavailable|overloaded)/i.test(message)) {
     return true;
@@ -123,6 +250,19 @@ function validateAndNormalizeLocalUrl(rawUrl) {
   const original = String(rawUrl || '').trim();
   if (!original) {
     return { valid: false, url: '', reason: 'local backend URL is empty' };
+  }
+
+  // Reject non-http(s) schemes (ftp:, javascript:, data:, etc.)
+  // but allow bare hostnames like "localhost:11434" which look like schemes but aren't.
+  const schemeMatch = original.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+  if (schemeMatch && !/^https?:/i.test(schemeMatch[1])) {
+    // Check if this is actually a scheme (has //) or just a port (like localhost:11434)
+    if (!/^https?:\/\//i.test(original) && /\/\//.test(original)) {
+      return { valid: false, url: '', reason: 'local backend URL must start with http:// or https://' };
+    }
+    if (/^(ftp|javascript|data|vbscript|file|mailto|tel):/i.test(original)) {
+      return { valid: false, url: '', reason: 'local backend URL must start with http:// or https://' };
+    }
   }
 
   let candidate = original;
@@ -318,6 +458,19 @@ function extractLocalVisibleReply(data) {
   for (const candidate of visibleCandidates) {
     const text = extractTextFromLocalContent(candidate);
     if (String(text || '').trim()) {
+      const finishReason = data?.choices?.[0]?.finish_reason ?? data?.finish_reason ?? undefined;
+      if (isIncompleteOrGarbageOutput(text, finishReason)) {
+        const garbageError = new Error(
+          finishReason === 'length'
+            ? `Local model output was truncated (finish_reason: length). Try reducing context size or using a smaller model.`
+            : finishReason === null
+              ? `Local model returned incomplete response (finish_reason: null). The model may have crashed.`
+              : `Local model returned garbage output. The model may be unstable.`
+        );
+        garbageError.status = 500;
+        garbageError.code = 'LOCAL_INCOMPLETE_OUTPUT';
+        throw garbageError;
+      }
       return {
         text,
         hiddenReasoningOnly: false
@@ -370,20 +523,19 @@ function getRateLimitMs(lane, options = {}) {
   if (Number.isFinite(configured) && configured >= 0) {
     return Math.max(0, configured);
   }
-  return lane === 'local' ? LLM_RATE_LIMIT_MS.local : LLM_RATE_LIMIT_MS.cloud;
+  return LLM_RATE_LIMIT_MS[lane] || LLM_RATE_LIMIT_MS.cloud;
 }
 
 function getTimeoutMs(lane, options = {}) {
   const configured = Number(options.timeoutMs);
   if (Number.isFinite(configured) && configured > 0) {
-    // Local models are often slower on control/planner calls; avoid fragile short timeouts.
-    return lane === 'local' ? Math.max(8000, configured) : Math.max(1000, configured);
+    return (lane === 'local' || lane === 'ollama') ? Math.max(8000, configured) : Math.max(1000, configured);
   }
 
   const maxTokens = Number(options.maxTokens) || 0;
   const isControlCall = maxTokens > 0 && maxTokens <= 300;
   if (isControlCall) return LLM_TIMEOUT_MS.control;
-  return lane === 'local' ? LLM_TIMEOUT_MS.local : LLM_TIMEOUT_MS.cloud;
+  return LLM_TIMEOUT_MS[lane] || LLM_TIMEOUT_MS.cloud;
 }
 
 async function scheduleLaneExecution(lane, minIntervalMs, signal, work) {
@@ -504,7 +656,7 @@ function buildOpenAiStyleMessages(msgs) {
     let prev;
     do {
       prev = content;
-      content = content.replace(/<think>[\s\S]*?<\/think>/gi, '');
+      content = content.replace(/<think(?:\s[^>]*)?>[\s\S]*?<\/think>/gi, '');
     } while (content !== prev);
     content = content.trim();
 
@@ -577,9 +729,25 @@ const SAFE_HTML_ATTRS = {
 };
 
 function extractThinkingBlocks(text) {
-  return [...String(text || '').matchAll(/<think>\s*([\s\S]*?)\s*<\/think>/gi)]
-    .map(match => match[1].trim())
-    .filter(Boolean);
+  const blocks = [];
+  let remaining = String(text || '');
+  let prev;
+  do {
+    prev = remaining;
+    remaining = remaining.replace(/<think(?:\s[^>]*)?>\s*([\s\S]*?)\s*<\/think>/gi, (_, content) => {
+      const trimmed = content.trim();
+      if (trimmed) {
+        const nested = extractThinkingBlocks(trimmed);
+        if (nested.length > 0) {
+          blocks.push(...nested);
+        } else {
+          blocks.push(trimmed);
+        }
+      }
+      return '';
+    });
+  } while (remaining !== prev);
+  return blocks.filter(Boolean);
 }
 
 function normalizeVisibleModelText(text) {
@@ -598,12 +766,12 @@ function normalizeVisibleModelText(text) {
 
 function splitModelReply(text) {
   const raw = String(text || '');
-  // Inner-to-outer loop so nested <think> pairs are fully stripped.
+  // Inner-to-outer loop so nested think pairs are fully stripped.
   let withoutThinking = raw;
   let prev;
   do {
     prev = withoutThinking;
-    withoutThinking = withoutThinking.replace(/<think>[\s\S]*?<\/think>/gi, '');
+    withoutThinking = withoutThinking.replace(/<think(?:\s[^>]*)?>[\s\S]*?<\/think>/gi, '');
   } while (withoutThinking !== prev);
   return {
     raw,
@@ -611,6 +779,7 @@ function splitModelReply(text) {
     visible: normalizeVisibleModelText(withoutThinking)
   };
 }
+
 
 function looksLikeHtmlFragment(text) {
   return /<\/?[a-z][^>]*>/i.test(String(text || ''));
@@ -898,8 +1067,9 @@ async function callLLM(msgs, options = {}) {
   let lane = route.lane;
   console.debug(`[callLLM] Selected lane: ${lane}`);
 
+  const inflightKey = getInflightKey(msgs, options);
   try {
-    return await executeLane(lane, msgs, options, outerSignal);
+    return await dedupInflight(inflightKey, () => executeLane(lane, msgs, options, outerSignal));
   } finally {
     if (activeLlmController?.signal === outerSignal) {
       activeLlmController = null;
@@ -924,7 +1094,7 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
     .map(m => {
       let text = String(m.content || '');
       let prevText;
-      do { prevText = text; text = text.replace(/<think>[\s\S]*?<\/think>/gi, ''); } while (text !== prevText);
+      do { prevText = text; text = text.replace(/<think(?:\s[^>]*)?>[\s\S]*?<\/think>/gi, ''); } while (text !== prevText);
       return {
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: text.trim() }]
@@ -940,7 +1110,7 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
     }
   }
   const systemInstruction = msgs.find(m => m.role === 'system');
-  const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
+  const maxTokens = Math.max(64, Number(options.maxTokens) || 4096);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
   const body = { contents, generationConfig: { maxOutputTokens: maxTokens, temperature } };
   if (systemInstruction) body.systemInstruction = { parts: [{ text: systemInstruction.content }] };
@@ -1002,7 +1172,7 @@ async function callOpenAiCloud(msgs, signal, options = {}, initialModel = '') {
   }
 
   const model = String(initialModel || 'gpt-4.1-mini').trim();
-  const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
+  const maxTokens = Math.max(64, Number(options.maxTokens) || 4096);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
 
   // PHASE 1: Load tools dynamically on each call (orchestrator provides schemas)
@@ -1025,12 +1195,13 @@ async function callOpenAiCloud(msgs, signal, options = {}, initialModel = '') {
     return m;
   });
 
+  const useStream = !!(streamingCallback && !toolsForThisCall?.length);
   const body = {
     model,
     messages: collapseConsecutiveSameRole(messages),
     max_tokens: maxTokens,
     temperature,
-    stream: false,
+    stream: useStream,
     ...(toolsForThisCall && toolsForThisCall.length > 0 ? { tools: toolsForThisCall, tool_choice: 'auto' } : {})
   };
 
@@ -1044,12 +1215,19 @@ async function callOpenAiCloud(msgs, signal, options = {}, initialModel = '') {
     signal
   });
 
-  const text = await res.text();
   if (!res.ok) {
+    const text = await res.text();
     const error = new Error(`OpenAI ${res.status}: ${text.slice(0, 300)}`);
     error.status = res.status;
     throw error;
   }
+
+  if (useStream && res.body) {
+    const streamedContent = await readStreamingResponse(res);
+    if (streamedContent !== null) return streamedContent;
+  }
+
+  const text = await res.text();
 
   const data = JSON.parse(text);
   if (data.error) {
@@ -1076,7 +1254,7 @@ async function callClawdCloud(msgs, signal, options = {}, initialModel = '') {
 
   const selectedModel = String(initialModel || 'clawd-3-7-sonnet-latest').trim();
   const model = selectedModel.replace(/^clawd-/i, `${'cl' + 'aude'}-`);
-  const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
+  const maxTokens = Math.max(64, Number(options.maxTokens) || 4096);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
   const system = msgs.find(m => m.role === 'system')?.content || '';
   const body = {
@@ -1135,7 +1313,7 @@ async function callAzureOpenAiCloud(msgs, signal, options = {}, initialDeploymen
   if (!endpoint) throw new Error('Azure OpenAI endpoint is missing. Set localStorage key: agent_azure_openai_endpoint');
   if (!deployment) throw new Error('Azure OpenAI deployment is missing. Set localStorage key: agent_azure_openai_deployment or use model azure/<deployment>.');
 
-  const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
+  const maxTokens = Math.max(64, Number(options.maxTokens) || 4096);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
 
   // PHASE 1: Load tools dynamically on each call
@@ -1157,11 +1335,12 @@ async function callAzureOpenAiCloud(msgs, signal, options = {}, initialDeploymen
     return m;
   });
 
+  const useStreamAzure = !!(streamingCallback && !toolsForThisCall?.length);
   const body = {
     messages: collapseConsecutiveSameRole(messages),
     max_tokens: maxTokens,
     temperature,
-    stream: false,
+    stream: useStreamAzure,
     ...(toolsForThisCall && toolsForThisCall.length > 0 ? { tools: toolsForThisCall, tool_choice: 'auto' } : {})
   };
 
@@ -1176,12 +1355,19 @@ async function callAzureOpenAiCloud(msgs, signal, options = {}, initialDeploymen
     signal
   });
 
-  const text = await res.text();
   if (!res.ok) {
+    const text = await res.text();
     const error = new Error(`Azure OpenAI ${res.status}: ${text.slice(0, 300)}`);
     error.status = res.status;
     throw error;
   }
+
+  if (useStreamAzure && res.body) {
+    const streamedContent = await readStreamingResponse(res);
+    if (streamedContent !== null) return streamedContent;
+  }
+
+  const text = await res.text();
 
   const data = JSON.parse(text);
   // Check for native tool_calls before falling back to content
@@ -1202,7 +1388,10 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
     : String(initialModel || 'llama3.1:8b').trim();
 
   const model = ollamaModel;
-  const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
+  const modelMaxTokens = typeof getMaxTokensForModel === 'function'
+    ? getMaxTokensForModel()
+    : 4096;
+  const maxTokens = Math.max(64, Number(options.maxTokens) || modelMaxTokens);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
 
   // Determine routing FIRST — local Ollama models use XML tool calling (via system prompt)
@@ -1229,90 +1418,185 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
     return m;
   });
 
-  const body = {
-    model,
-    messages: collapseConsecutiveSameRole(messages),
-    max_tokens: maxTokens,
-    temperature,
-    stream: false,
-    ...(toolsForThisCall && toolsForThisCall.length > 0 ? { tools: toolsForThisCall, tool_choice: 'auto' } : {})
-  };
-
   // Routing:
   // ☁ cloud models  → dev-server proxy at /api/ollama/v1 (avoids CORS with ollama.com)
-  //   fallback if proxy unavailable → reject with clear message
-  // local models     → local Ollama daemon at ollamaBackend.url (localhost:11434)
-  let endpoint;
+  // local models     → /v1/chat/completions first (most compatible), /api/chat as fallback (native Ollama)
+  // IMPORTANT ORDERING: /v1/chat/completions works reliably for most local Ollama models.
+  // /api/chat (native Ollama) is used as fallback only because on some setups it can time out
+  // with stream:false (Ollama holds the connection until generation completes).
+  let baseUrl;
   if (isCloudModel) {
     const proxyBase = new URL('/api/ollama/v1', window.location.origin).toString().replace(/\/+$/, '');
-    endpoint = `${proxyBase}/chat/completions`;
+    baseUrl = proxyBase;
   } else {
     const rawLocalUrl = (typeof ollamaBackend !== 'undefined' && ollamaBackend.url)
       ? ollamaBackend.url
       : 'http://localhost:11434';
-    const baseUrl = rawLocalUrl.replace(/\/+$/, '');
-    endpoint = `${baseUrl}/v1/chat/completions`;
-  }
-  console.debug(`[Ollama] POST ${endpoint} model='${model}' cloud=${isCloudModel}`);
-
-  const headers = { 'Content-Type': 'application/json' };
-  if (ollamaApiKey) {
-    headers.Authorization = `Bearer ${ollamaApiKey}`;
+    baseUrl = rawLocalUrl.replace(/\/+$/, '');
   }
 
-  let res, text;
-  try {
-    res = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal
-    });
-    text = await res.text();
-  } catch (e) {
-    if (signal?.aborted || e?.name === 'AbortError') throw e;
-    const connError = isCloudModel
-      ? new Error('Cannot reach the Ollama Cloud proxy. Make sure the dev server is running (node proxy/dev-server.js).')
-      : new Error(`Cannot reach Ollama at the local daemon. Make sure Ollama is running (ollama serve).`);
-    connError.code = 'OLLAMA_UNREACHABLE';
-    throw connError;
-  }
+  const endpoints = isCloudModel
+    ? [{ url: `${baseUrl}/chat/completions`, native: false }]
+    : [
+        { url: `${baseUrl}/v1/chat/completions`, native: false },
+        { url: `${baseUrl}/api/chat`, native: true }
+      ];
 
-  if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
-      const authError = new Error('Ollama authentication failed. Check your API key in Settings.');
-      authError.status = res.status;
-      throw authError;
+  let lastError = null;
+  for (const ep of endpoints) {
+    const isNative = ep.native;
+    const endpointUrl = ep.url;
+    // For local Ollama models, always stream to avoid timeouts.
+    // Ollama holds non-streaming connections until generation completes (can take minutes),
+    // which causes timeout errors. Cloud models stream only when the UI requests it.
+    const isCloud = isCloudModel;
+    const shouldStream = isCloud
+      ? !!(streamingCallback && !toolsForThisCall?.length)
+      : true;
+    const reqBody = isNative
+      ? {
+          model,
+          messages: collapseConsecutiveSameRole(messages),
+          stream: shouldStream,
+          options: { temperature, num_predict: maxTokens, num_ctx: Math.min(getCtxLimit(), 256000) }
+        }
+      : {
+          model,
+          messages: collapseConsecutiveSameRole(messages),
+          max_tokens: maxTokens,
+          temperature,
+          stream: shouldStream,
+          ...(toolsForThisCall && toolsForThisCall.length > 0 ? { tools: toolsForThisCall, tool_choice: 'auto' } : {})
+        };
+
+    console.debug(`[Ollama] POST ${endpointUrl} model='${model}' native=${isNative} cloud=${isCloudModel} stream=${shouldStream}`);
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (ollamaApiKey) {
+      headers.Authorization = `Bearer ${ollamaApiKey}`;
     }
-    throw new Error(`Ollama returned HTTP ${res.status}: ${text.slice(0, 200)}`);
+
+    let res;
+    try {
+      res = await fetch(endpointUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(reqBody),
+        signal
+      });
+    } catch (e) {
+      if (signal?.aborted || e?.name === 'AbortError') throw e;
+      lastError = isCloudModel
+        ? (() => { const err = new Error('Cannot reach the Ollama Cloud proxy. Make sure the dev server is running (node proxy/dev-server.js).'); err.code = 'OLLAMA_UNREACHABLE'; return err; })()
+        : (() => { const err = new Error(`Cannot reach Ollama at ${baseUrl}. Make sure Ollama is running (ollama serve).`); err.code = 'OLLAMA_UNREACHABLE'; return err; })();
+      if (endpoints.indexOf(ep) === endpoints.length - 1) throw lastError;
+      continue;
+    }
+
+    if (!res.ok) {
+      const errText = await res.text();
+      if (res.status === 401 || res.status === 403) {
+        const authError = new Error('Ollama authentication failed. Check your API key in Settings.');
+        authError.status = res.status;
+        throw authError;
+      }
+      if (res.status === 500 && endpoints.indexOf(ep) < endpoints.length - 1) {
+        console.warn(`[Ollama] ${endpointUrl} returned HTTP ${res.status}, trying next endpoint`);
+        lastError = new Error(`Ollama returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
+        lastError.status = res.status;
+        continue;
+      }
+      if (res.status === 500 && /EOF/i.test(errText)) {
+        const eofError = new Error(
+          `Ollama model crashed (HTTP 500 EOF). This usually means the model doesn't support the request format or ran out of memory. Try a smaller model or reduce context size.`
+        );
+        eofError.status = res.status;
+        eofError.code = 'OLLAMA_MODEL_CRASH';
+        throw eofError;
+      }
+      lastError = new Error(`Ollama returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
+      lastError.status = res.status;
+      if (endpoints.indexOf(ep) === endpoints.length - 1) throw lastError;
+      continue;
+    }
+
+    // Handle streaming for both OpenAI SSE and Ollama native NDJSON
+    if (shouldStream && res.body) {
+      let streamResult;
+      if (isNative) {
+        streamResult = await readOllamaNativeStream(res, streamingCallback);
+      } else {
+        streamResult = await readStreamingResponse(res);
+      }
+      if (streamResult !== null && streamResult !== '') return streamResult;
+      lastError = new Error('Ollama stream exhausted without content');
+      if (endpoints.indexOf(ep) === endpoints.length - 1) throw lastError;
+      continue;
+    }
+
+    if (shouldStream) {
+      lastError = new Error('Ollama stream exhausted without content');
+      if (endpoints.indexOf(ep) === endpoints.length - 1) throw lastError;
+      continue;
+    }
+
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      lastError = new Error(`Ollama returned non-JSON response: ${text.slice(0, 200)}`);
+      if (endpoints.indexOf(ep) === endpoints.length - 1) throw lastError;
+      continue;
+    }
+
+    if (data.error) {
+      lastError = new Error(String(data.error?.message || data.error || 'Ollama API error').slice(0, 200));
+      if (endpoints.indexOf(ep) === endpoints.length - 1) throw lastError;
+      continue;
+    }
+
+    // Extract content — native /api/chat returns {message:{content:...}},
+    // /v1/chat/completions returns {choices:[{message:{content:...}}]}
+    const rawContent = isNative
+      ? (data.message?.content || '')
+      : (data.choices?.[0]?.message?.content
+          || data.choices?.[0]?.text
+          || data.message?.content
+          || data.response
+          || '');
+
+    // Check for incomplete generation (finish_reason null/length) or garbage output.
+    const finishReason = isNative
+      ? (data.done ? 'stop' : null)
+      : (data.choices?.[0]?.finish_reason ?? data.finish_reason ?? null);
+    if (isIncompleteOrGarbageOutput(rawContent, finishReason)) {
+      const garbageError = new Error(
+        finishReason === 'length'
+          ? `Ollama model output was truncated (finish_reason: length). Try reducing context size or using a smaller model.`
+          : finishReason === null
+            ? `Ollama model returned incomplete response (finish_reason: null). The model may have crashed or OOM'd.`
+            : `Ollama model returned garbage output. The model may be unstable at this context size.`
+      );
+      garbageError.status = 500;
+      garbageError.code = 'OLLAMA_INCOMPLETE_OUTPUT';
+      throw garbageError;
+    }
+
+    // Check for native tool_calls BEFORE falling back to content (OpenAI format only).
+    if (!isNative) {
+      const toolCalls = data.choices?.[0]?.message?.tool_calls;
+      if (Array.isArray(toolCalls) && toolCalls.length) {
+        const xml = normalizeFunctionCallsToXml(toolCalls);
+        if (xml) return xml;
+      }
+    }
+
+    return rawContent;
   }
 
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(`Ollama returned non-JSON response: ${text.slice(0, 200)}`);
-  }
-
-  if (data.error) {
-    throw new Error(String(data.error?.message || data.error || 'Ollama API error').slice(0, 200));
-  }
-
-  const rawContent = data.choices?.[0]?.message?.content
-    || data.choices?.[0]?.text
-    || data.message?.content
-    || data.response
-    || '';
-
-  // Check for native tool_calls BEFORE falling back to content.
-  // This ensures tool_calls are extracted even when the model returns prose + tool_calls.
-  const toolCalls = data.choices?.[0]?.message?.tool_calls;
-  if (Array.isArray(toolCalls) && toolCalls.length) {
-    const xml = normalizeFunctionCallsToXml(toolCalls);
-    if (xml) return xml;
-  }
-
-  return rawContent;
+  if (lastError) throw lastError;
+  throw new Error('Ollama: all endpoints failed');
 }
 
 function updateModelBadgeForLocal(modelName) {
@@ -1323,7 +1607,10 @@ function updateModelBadgeForLocal(modelName) {
 }
 
 async function callLocal(msgs, signal, options = {}) {
-  const maxTokens = Math.max(64, Number(options.maxTokens) || 2048);
+  const modelMaxTokens = typeof getMaxTokensForModel === 'function'
+    ? getMaxTokensForModel()
+    : 4096;
+  const maxTokens = Math.max(64, Number(options.maxTokens) || modelMaxTokens);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
 
   const localUrlState = validateAndNormalizeLocalUrl(localBackend.url);
@@ -1353,7 +1640,7 @@ async function callLocal(msgs, signal, options = {}) {
   const sanitizeLocalMessageContent = value => {
     let text = String(value || '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ' ');
     let prev;
-    do { prev = text; text = text.replace(/<think>[\s\S]*?<\/think>/gi, ''); } while (text !== prev);
+    do { prev = text; text = text.replace(/<think(?:\s[^>]*)?>[\s\S]*?<\/think>/gi, ''); } while (text !== prev);
     return text.trim();
   };
 
@@ -1480,14 +1767,13 @@ async function callLocal(msgs, signal, options = {}) {
   for (const ep of endpoints) {
     try {
       let body;
+      const localStream = !!(streamingCallback);
       if (ep.format === 'ollama') {
         body = {
           model,
           messages: messagesWithConvertedIds,
-          stream: false,
-          // Ollama /api/chat accepts generation params in an 'options' sub-object.
+          stream: localStream,
           options: { temperature, num_predict: maxTokens }
-          // No native tools: — local models use XML tool calling via system prompt.
         };
       } else if (ep.format === 'ollama_generate') {
         body = {
@@ -1505,8 +1791,7 @@ async function callLocal(msgs, signal, options = {}) {
           messages: messagesWithConvertedIds,
           max_tokens: maxTokens,
           temperature,
-          stream: false
-          // No native tools: — local models use XML tool calling via system prompt.
+          stream: localStream
         };
       }
 
@@ -1528,6 +1813,21 @@ async function callLocal(msgs, signal, options = {}) {
         lastEndpointError = `${ep.path}: HTTP ${res.status}`;
         continue;
       }
+
+      if (localStream && res.body && ep.format !== 'ollama_generate') {
+        try {
+          const streamedContent = await readStreamingResponse(res);
+          if (streamedContent !== null && streamedContent.length > 0) return streamedContent;
+        } catch {}
+        lastEndpointError = `${ep.path}: stream exhausted without content`;
+        continue;
+      }
+
+      if (!res.body) {
+        lastEndpointError = `${ep.path}: no response body`;
+        continue;
+      }
+
       const data = await res.json();
 
       const payloadError = typeof data?.error === 'string'
@@ -1607,8 +1907,45 @@ async function callLocal(msgs, signal, options = {}) {
   throw error;
 }
 
+const inflightRequests = new Map();
+
+function getInflightKey(msgs, options) {
+  const model = String(options.model || '');
+  const systemContent = (msgs.find(m => m.role === 'system')?.content || '').slice(0, 100);
+  const lastUser = (msgs.filter(m => m.role === 'user').slice(-1)[0]?.content || '').slice(0, 200);
+  const secondLastUser = (msgs.filter(m => m.role === 'user').slice(-2, -1)[0]?.content || '').slice(0, 100);
+  return `${model}:${systemContent}:${secondLastUser}:${lastUser}`;
+}
+
+function dedupInflight(key, work) {
+  if (inflightRequests.has(key)) return inflightRequests.get(key);
+  const p = work().finally(() => inflightRequests.delete(key));
+  inflightRequests.set(key, p);
+  return p;
+}
+
+window.isIncompleteOrGarbageOutput = isIncompleteOrGarbageOutput;
+
 window.AgentLLMControl = {
-  abortActiveLlmRequest
+  abortActiveLlmRequest,
+  setStreamingCallback,
+  inflightRequests,
+  isIncompleteOrGarbageOutput,
+  collapseConsecutiveSameRole,
+  parseSSEChunk,
+  readOllamaNativeStream,
+  readStreamingResponse,
+  dedupInflight,
+  getInflightKey,
+  isRetryableError,
+  validateAndNormalizeLocalUrl,
+  buildLocalEndpointUrl,
+  extractTextFromLocalContent,
+  normalizeFunctionCallsToXml,
+  looksLikeHtmlFragment,
+  extractThinkingBlocks,
+  splitModelReply,
+  sanitizeUrl
 };
 
 // -- TOOL EXECUTOR -------------------------------------------------------------

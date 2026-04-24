@@ -158,6 +158,83 @@
         .trim();
     }
 
+    // ── Relevance ranking ──────────────────────────────────────────────────────
+
+    function rankSearchResultsByRelevance(results, query) {
+      if (!Array.isArray(results) || results.length === 0 || !query) return results;
+
+      const queryTokens = extractRelevanceTokens(query);
+      if (queryTokens.length === 0) return results;
+
+      const scored = results.map(result => {
+        const text = extractTextFromToolResult(result);
+        const score = calculateRelevanceScore(text, queryTokens);
+        return { result, score };
+      });
+
+      // Keep only results with at least 10 % relevance, then sort descending
+      return scored
+        .filter(({ score }) => score >= 0.1)
+        .sort((a, b) => b.score - a.score)
+        .map(({ result }) => result);
+    }
+
+    function extractRelevanceTokens(query) {
+      const text = String(query || '').toLowerCase();
+      const stopwords = new Set([
+        'the','and','or','but','is','are','was','were','be','been','being',
+        'to','of','in','for','on','with','by','at','from','into','during',
+        'a','an','this','that','these','those','my','your','his','her','our','their',
+        'i','you','he','she','it','we','they','me','him','her','us','them',
+        'what','when','where','why','how','which','who','whom','whose',
+        'have','has','had','do','does','did','will','would','should','could',
+        'can','may','might','must','shall','about','against','between','through',
+        'under','while','after','before','above','below','up','down','out','off',
+        'over','again','further','then','once','here','there',
+        'all','any','both','each','few','more','most','other','some','such',
+        'no','nor','not','only','own','same','so','than','too','very','just','now'
+      ]);
+
+      const tokens = text
+        .split(/\s+/)
+        .filter(token => token.length > 2 && !/[.,;:!?()\[\]{}|\\/+=\-%$#@]/.test(token))
+        .filter(token => !stopwords.has(token));
+
+      return [...new Set(tokens)];
+    }
+
+    function extractTextFromToolResult(toolResult) {
+      const text = String(toolResult || '');
+      return text
+        .replace(/<[^>]+>/g, ' ')          // strip XML / HTML tags
+        .replace(/\[.*?\]/g, ' ')          // strip bracket metadata
+        .replace(/\b(ERROR|WARNING|INFO):/gi, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+    }
+
+    function calculateRelevanceScore(text, queryTokens) {
+      if (!text || queryTokens.length === 0) return 0;
+
+      const lowerText = text.toLowerCase();
+      let score = 0;
+      let matches = 0;
+
+      for (const token of queryTokens) {
+        if (lowerText.includes(token)) {
+          matches++;
+          // Position bonus: earlier matches score higher
+          const position = lowerText.indexOf(token);
+          const positionScore = Math.max(0, 1 - (position / Math.max(1, lowerText.length)));
+          score += 0.5 + (positionScore * 0.5); // 0.5 base + up to 0.5 position bonus
+        }
+      }
+
+      const matchRatio = matches / queryTokens.length;
+      const finalScore = (score * matchRatio) / Math.max(1, queryTokens.length);
+      return Math.min(1, finalScore);
+    }
+
     function formatSearchEntry(index, title, snippet, url, source) {
       const parts = [`[${index}] ${title}`];
       if (snippet) parts.push(snippet);
@@ -894,6 +971,9 @@
         combinedResults = [...encyclopedicResults, ...otherResults, ...newsResults];
       }
 
+      // Word matching and relevance ranking
+      const rankedResults = rankSearchResultsByRelevance(combinedResults, originalQuery);
+
       const verificationBlock = isBioFactQuery && !nonEncyclopedic.length
         ? formatToolResult(
             'Verification warning',
@@ -902,7 +982,7 @@
         : '';
 
       return [
-        combinedResults.join('\n\n'),
+        rankedResults.join('\n\n'),
         verificationBlock,
         formatToolResult('Search diagnostics', diagnostics.join('\n'))
       ].filter(Boolean).join('\n\n');

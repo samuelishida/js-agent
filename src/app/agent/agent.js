@@ -59,7 +59,7 @@ async function agentLoop(userMessage) {
     window.sessionStats.rounds++;
     updateStats();
 
-    const roundResult = await AgentRoundController.executeRound({
+    const roundResult = await window.AgentRoundController.executeRound({
       userMessage,
       messages: window.messages,
       round,

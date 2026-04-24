@@ -72,7 +72,14 @@ console.debug(`[State Init] localBackend: enabled=${localBackend.enabled}, url='
 console.debug(`[State Init] ollamaBackend: enabled=${ollamaBackend.enabled}, url='${ollamaBackend.url}'`);
 
 let chatSessions = [];
-let activeSessionId = safeGet(ACTIVE_SESSION_KEY) || null;
+let activeSessionId = safeGet('agent_active_session_v1') || null;
+
+// BroadcastChannel state (used by initCacheSync, initBusySync, broadcastBusyState)
+// cacheSyncChannel is declared in tool-cache.js (loaded before state.js)
+let busyChannel = null;
+
+// agentInstanceId is defined in tool-cache.js; state.js uses it in BroadcastChannel handlers
+// CACHE_SCHEMA_VERSION is defined in tool-cache.js; used in fallback loadToolCache delegation
 
 function normalizeSessionStats(value) {
   return {

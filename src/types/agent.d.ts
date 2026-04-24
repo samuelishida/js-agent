@@ -91,6 +91,29 @@ declare interface Window {
   AgentUIRender: any;
   AgentRegistry: any;
 
+  // Extracted agent modules (Phase 3)
+  AgentRoundController: any;
+  AgentErrorRecovery: any;
+  AgentToolCallRepair: any;
+
+  // Extracted state modules (Phase 5)
+  AgentSessionManager: any;
+  AgentToolCache: any;
+  AgentProviderState: any;
+
+  // LLM utilities + providers (Phase 4)
+  AgentLLMUtils: any;
+  AgentLLMProviderOllama: any;
+  AgentLLMProviderOpenRouter: any;
+  AgentLLMProviderLocal: any;
+  AgentLLMProviderOpenAI: any;
+  AgentLLMProviderClawd: any;
+  AgentLLMProviderAzure: any;
+  AgentLLMProviderGemini: any;
+
+  // Security hardening (Phase 7)
+  AgentSecurityHardening: any;
+
   // Functions
   requestStop: () => void;
   sendMessage: () => Promise<void>;

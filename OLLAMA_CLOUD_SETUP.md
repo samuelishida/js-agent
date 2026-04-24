@@ -1,5 +1,7 @@
 # Ollama Cloud Setup Guide
 
+> **Looking for the easiest setup?** Try [OpenRouter](https://openrouter.ai/keys) first — free tier available, no local install needed. See the main README for OpenRouter setup.
+
 ## Starting the Dev Server
 
 **⚠️ CRITICAL: Run the server from the Agent directory**

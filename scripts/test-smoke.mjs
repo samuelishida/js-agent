@@ -274,24 +274,24 @@ const SKILL_SCRIPTS = [
   'src/skills/groups/filesystem.js',
   'src/skills/index.js',
   'src/core/orchestrator.js',
-  'src/app/state.js',
-  'src/app/constants.js',
-  'src/app/runtime-memory.js',
-  'src/app/permissions.js',
-  'src/app/compaction.js',
-  'src/app/filesystem-guards.js',
-  'src/app/steering.js',
-  'src/app/rate-limiter.js',
+  'src/app/core/state.js',
+  'src/app/core/constants.js',
+  'src/app/context/runtime-memory.js',
+  'src/app/core/permissions.js',
+  'src/app/context/compaction.js',
+  'src/app/tools/filesystem-guards.js',
+  'src/app/context/steering.js',
+  'src/app/tools/rate-limiter.js',
   'src/app/worker-manager.js',
-  'src/app/local-backend.js',
-  'src/app/tools.js',
-  'src/app/tool-execution.js',
-  'src/app/ui-render.js',
+  'src/app/llm/local-backend.js',
+  'src/app/ui/tools.js',
+  'src/app/tools/tool-execution.js',
+  'src/app/ui/ui-render.js',
   'src/app/reply-analysis.js',
-  'src/app/llm.js',
-  'src/app/child-agent.js',
-  'src/app/agent.js',
-  'src/app/ui-modern.js'
+  'src/app/llm/llm.js',
+  'src/app/llm/child-agent.js',
+  'src/app/agent/agent.js',
+  'src/app/ui/ui-modern.js'
 ];
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────
@@ -747,8 +747,8 @@ async function main() {
     assert.ok(res.body.includes('<html') || res.body.includes('<!DOCTYPE'), 'body is not HTML');
   });
 
-  await group('GET /src/app/agent.js returns 200 JS', async () => {
-    const res = await httpGet(`${BASE}/src/app/agent.js`);
+  await group('GET /src/app/agent/agent.js returns 200 JS', async () => {
+    const res = await httpGet(`${BASE}/src/app/agent/agent.js`);
     assert.equal(res.status, 200, `expected 200, got ${res.status}`);
     assert.ok(res.body.length > 100, 'agent.js body too short');
   });
@@ -774,7 +774,7 @@ async function main() {
   });
 
   await group('POST /api/diagnostics returns 200 JSON', async () => {
-    const res = await httpPost(`${BASE}/api/diagnostics`, { path: 'src/app/agent.js', severity: 'all' });
+    const res = await httpPost(`${BASE}/api/diagnostics`, { path: 'src/app/agent/agent.js', severity: 'all' });
     assert.equal(res.status, 200, `expected 200, got ${res.status}`);
     const json = JSON.parse(res.body);
     assert.ok(json.ok === true, 'diagnostics ok should be true');

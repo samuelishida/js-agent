@@ -8,7 +8,7 @@
     "build:snapshot": "node scripts/build-snapshot.mjs",
     "test:skills-smoke": "node scripts/test-skills-smoke.mjs",
     "test:smoke": "node scripts/test-smoke.mjs",
-    "check:js": "node --check src/app/agent.js && node --check src/app/llm.js && node --check src/app/orchestrator.js && node --check src/app/constants.js && node --check src/app/permissions.js && node --check src/app/compaction.js && node --check src/app/steering.js && node --check src/app/tool-execution.js",
+    "check:js": "node --check src/app/agent/agent.js && node --check src/app/llm/llm.js && node --check src/core/orchestrator.js && node --check src/app/core/constants.js && node --check src/app/core/permissions.js && node --check src/app/context/compaction.js && node --check src/app/context/steering.js && node --check src/app/tools/tool-execution.js",
     "lint": "eslint src/"
   },
   "engines": {

@@ -4,11 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node proxy/dev-server.js",
     "build:snapshot": "node scripts/build-snapshot.mjs",
     "test:skills-smoke": "node scripts/test-skills-smoke.mjs",
     "test:smoke": "node scripts/test-smoke.mjs",
     "check:js": "node --check src/app/agent.js && node --check src/app/llm.js && node --check src/app/orchestrator.js && node --check src/app/constants.js && node --check src/app/permissions.js && node --check src/app/compaction.js && node --check src/app/steering.js && node --check src/app/tool-execution.js",
     "lint": "eslint src/"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "devDependencies": {
     "esbuild": "^0.25.12"

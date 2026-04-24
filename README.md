@@ -124,6 +124,53 @@ Scripts load with `defer`; execution order is declaration order — no bundler n
 
 Tools carry execution metadata (`readOnly`, `concurrencySafe`, `risk`). Read-only concurrent tools run in parallel; risky or write tools run sequentially.
 
+## 🚀 Deploy to Production (Render.com — Free Tier)
+
+### One-click deploy
+
+1. Fork this repo on GitHub
+2. Go to [render.com](https://render.com) → **New Web Service**
+3. Connect your GitHub repo
+4. Render auto-detects `render.yaml`:
+   - **Build Command**: `npm run check:js`
+   - **Start Command**: `npm start`
+   - **Plan**: Free
+5. Add environment variables in Render Dashboard → Settings → Environment:
+   - `OPENROUTER_API_KEY` = your free key from [openrouter.ai/keys](https://openrouter.ai/keys)
+   - `OLLAMA_API_KEY` = (optional) your Ollama Cloud key
+6. Click **Deploy**
+
+Your agent will be live at `https://js-agent-xxx.onrender.com` within 2 minutes.
+
+### Manual deploy (any Node.js host)
+
+```bash
+# 1. Clone
+git clone https://github.com/YOUR_USER/js-agent.git
+cd js-agent
+
+# 2. Install (no build step needed)
+npm install
+
+# 3. Set env vars
+cp .env.example .env
+# Edit .env with your OPENROUTER_API_KEY
+
+# 4. Start
+npm start
+```
+
+The server listens on `PORT` (default 5500) and serves the SPA + API proxy.
+
+### Health check
+
+```bash
+curl https://your-app.onrender.com/api/health
+# → {"ok":true,"uptime":123,"version":"0.1.0",...}
+```
+
+---
+
 ## Model Routing
 
 Four lanes in `llm.js`:

@@ -12,6 +12,7 @@ const OLLAMA_BASE = 'https://ollama.com';
 const API_PREFIX = '/api/ollama/v1';const GNEWS_PREFIX = '/api/gnews';
 const GNEWS_BASE = 'https://news.google.com';const TERMINAL_PREFIX = '/api/terminal';
 const DIAGNOSTICS_PREFIX = '/api/diagnostics';
+const HEALTH_PREFIX = '/api/health';
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -28,8 +29,29 @@ const MIME_TYPES = {
   '.txt': 'text/plain; charset=utf-8'
 };
 
+const RATE_LIMIT_WINDOW_MS = 60000;
+const RATE_LIMIT_MAX = 100;
+const ipHits = new Map();
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+  const hits = ipHits.get(ip) || [];
+  const recent = hits.filter(t => t > windowStart);
+  ipHits.set(ip, recent);
+  if (recent.length >= RATE_LIMIT_MAX) return false;
+  recent.push(now);
+  return true;
+}
+
 function send(res, status, body, headers = {}) {
-  res.writeHead(status, headers);
+  const securityHeaders = {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'geolocation=(), microphone=(), camera=()'
+  };
+  res.writeHead(status, { ...securityHeaders, ...headers });
   res.end(body);
 }
 
@@ -321,7 +343,11 @@ function serveStatic(req, res, parsedUrl) {
 
       const ext = path.extname(filePath).toLowerCase();
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-      send(res, 200, content, { 'Content-Type': contentType, 'Cache-Control': 'no-store' });
+      send(res, 200, content, {
+        'Content-Type': contentType,
+        'Cache-Control': ext === '.html' ? 'no-store' : 'public, max-age=3600',
+        'Access-Control-Allow-Origin': '*'
+      });
     });
   });
 }
@@ -370,8 +396,32 @@ async function proxyGoogleNews(req, res, parsedUrl) {
   upstreamReq.end();
 }
 
+async function handleHealth(req, res) {
+  const health = {
+    ok: true,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version || '0.1.0',
+    node: process.version,
+    env: process.env.NODE_ENV || 'development'
+  };
+  send(res, 200, JSON.stringify(health), {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store'
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   try {
+    const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    if (!checkRateLimit(clientIp)) {
+      send(res, 429, JSON.stringify({ error: 'Too many requests' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Retry-After': '60'
+      });
+      return;
+    }
+
     const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || `127.0.0.1:${PORT}`}`);
     if (parsedUrl.pathname.startsWith(API_PREFIX)) {
       await proxyOllama(req, res, parsedUrl);
@@ -387,6 +437,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (parsedUrl.pathname === DIAGNOSTICS_PREFIX) {
       await handleDiagnostics(req, res);
+      return;
+    }
+    if (parsedUrl.pathname === HEALTH_PREFIX) {
+      await handleHealth(req, res);
       return;
     }
     serveStatic(req, res, parsedUrl);

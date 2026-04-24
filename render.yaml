@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: js-agent
+    runtime: node
+    plan: free
+    buildCommand: npm run check:js
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: OLLAMA_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+    healthCheckPath: /api/health
+    autoDeploy: true

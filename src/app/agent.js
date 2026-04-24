@@ -1,21 +1,12 @@
 // ── Agent Loop ─────────────────────────────────────────────────────────────────
-// The main agent loop and UI wiring. All extracted logic lives in sibling
-// modules (steering.js, permissions.js, tool-execution.js, compaction.js)
-// and is accessed via window.* properties. This file should remain focused
-// on orchestration and event binding.
+// The main agent loop and UI wiring. Extracted logic lives in sibling modules:
+//   reply-analysis.js — stripModelMetaCommentary, isMaxOutputTokenLikeError,
+//     looksLikeDeferredActionReply, looksLikeToolExecutionClaimWithoutCall,
+//     getToolCallCleanupRegex, extractPlannerOptimizedQueryFromMessages,
+//     splitModelReply, extractThinkingBlocks, normalizeVisibleModelText
+//   ui-render.js — addMessage, addNotice, setStatus, updateStats, scrollBottom,
+//     escHtml, showThinking, hideThinking, renderAgentHtml, updateCtxBar, etc.
 // ─────────────────────────────────────────────────────────────────────────────
-
-function stripModelMetaCommentary(text) {
-  let value = String(text || '').trim();
-  if (!value) return '';
-  value = value.replace(/^[Ww]e (?:need|have|must) to output (?:tool|function) calls? only\.?\s*/i, '');
-  value = value.replace(/^[Ww]e (?:will|should|must|need to|are going to) (?:call|use|invoke|execute|run) \S+(?:\s+with\s+[^.]+)?\.?\s*/i, '');
-  value = value.replace(/^[Ii] (?:will|should|need to|must|am going to|am) (?:call|use|invoke|execute|run|outputting) \S+(?:\s+with\s+[^.]+)?\.?\s*/i, '');
-  value = value.replace(/^[Ll]et's (?:call|use|try|invoke) \S+\.?\s*/i, '');
-  value = value.replace(/^[Ww]e need to (?:output|generate|produce|call|make) (?:a )?(?:tool|function) call\.?\s*/i, '');
-  value = value.replace(/^I need to (?:output|generate|produce|call|make) (?:a )?(?:tool|function) call\.?\s*/i, '');
-  return value.trim();
-}
 
 // ── Constants accessor ───────────────────────────────────────────────────────
 const C = () => window.CONSTANTS || {};
@@ -61,67 +52,13 @@ function resetRunGuards() {
   stopRequested = false;
 }
 
-// ── Error classification helpers ─────────────────────────────────────────────
-
-function isMaxOutputTokenLikeError(error) {
-  const message = String(error?.message || '');
-  if (!message) return false;
-  return /(max(?:imum)?\s*(?:output\s*)?tokens?|max_output_tokens|output token limit|too many output tokens|exceeded.*output|finish_reason\s*[:=]\s*"?length"?)/i.test(message);
-}
-
-function looksLikeDeferredActionReply(text) {
-  const value = String(text || '').trim();
-  if (!value) return false;
-  const futureActionPattern = /\b(?:i\s+will|i'll|let me|i am going to|i'm going to|next[, ]+i(?:\s+will|'ll)?|i'll\s+(?:start|begin|now)|now\s+i(?:'ll|\s+will))\b/i;
-  const actionVerbPattern = /\b(?:search|look up|check|verify|probe|inspect|browse|review|find|perform|run|try|investigate|list|listing|read|reading|fetch|fetching|scan|scanning|call|calling|execute|executing|start|starting|begin|beginning|map|mapping|gather|gathering|analyze|analyzing|collect|collecting|query|querying|load|loading|open|opening|access|accessing|retrieve|retrieving|walk|walking|traverse|traversing|explore|exploring|examine|examining|identify|identifying|inspect)\b/i;
-  const finalityPattern = /\b(?:final answer|in summary|overall|therefore|the answer is|based on (?:the|current) (?:evidence|information))\b/i;
-  return futureActionPattern.test(value) && actionVerbPattern.test(value) && !finalityPattern.test(value);
-}
-
-function looksLikeToolExecutionClaimWithoutCall(text) {
-  const value = String(text || '').trim();
-  if (!value) return false;
-  const executionClaimPattern = /\b(?:i\s+(?:have|already)\s+(?:executed|called|run|performed)|(?:the\s+)?tool\s+call\s+(?:has\s+been\s+)?(?:executed|made|performed)|executed\s+the\s+necessary\s+tool\s+call|necessary\s+tool\s+call)\b/i;
-  const waitingPattern = /\b(?:please\s+wait|wait\s+for\s+(?:the\s+)?tool\s+output|await(?:ing)?\s+tool\s+output|once\s+the\s+tool\s+output|after\s+tool\s+output|provide\s+the\s+final\s+answer\s+after\s+tool\s+output)\b/i;
-  const finalityPattern = /\b(?:final answer|in summary|overall|therefore|the answer is|based on (?:the|current) (?:evidence|information))\b/i;
-  return executionClaimPattern.test(value) && waitingPattern.test(value) && !finalityPattern.test(value);
-}
-
-function getToolCallCleanupRegex() {
-  const regex = window.AgentRegex;
-  const sharedToolBlock = regex?.TOOL_BLOCK;
-  if (sharedToolBlock instanceof RegExp) {
-    return new RegExp(sharedToolBlock.source, 'gi');
-  }
-  return /<tool_call(?:\s[^>]*>|>?)\s*[\s\S]*?<\/tool_call>/gi;
-}
+// ── Error classification + reply analysis ──────────────────────────────────────
+// isMaxOutputTokenLikeError, looksLikeDeferredActionReply,
+// looksLikeToolExecutionClaimWithoutCall, getToolCallCleanupRegex,
+// extractPlannerOptimizedQueryFromMessages — now in reply-analysis.js (window globals)
 
 // ── Query planning helpers ───────────────────────────────────────────────────
-
-function extractPlannerOptimizedQueryFromMessages(messages = []) {
-  const recentUserMessages = Array.isArray(messages)
-    ? messages.filter(message => message?.role === 'user').slice(-8).reverse()
-    : [];
-
-  for (const message of recentUserMessages) {
-    const content = String(message?.content || '');
-    const queryPlanBlocks = [...content.matchAll(/<tool_result\s+tool="query_plan">\s*([\s\S]*?)\s*<\/tool_result>/gi)];
-    for (let i = queryPlanBlocks.length - 1; i >= 0; i -= 1) {
-      const block = String(queryPlanBlocks[i]?.[1] || '');
-      const directMatch = block.match(/(?:^|\n)query=([^\n]+)/i);
-      if (directMatch?.[1]) {
-        const query = String(directMatch[1]).trim();
-        if (query) return query;
-      }
-    }
-    const plannerMatch = content.match(/Planner optimized query:\s*"([^"]+)"/i);
-    if (plannerMatch?.[1]) {
-      const query = String(plannerMatch[1]).trim();
-      if (query) return query;
-    }
-  }
-  return '';
-}
+// extractPlannerOptimizedQueryFromMessages — now in reply-analysis.js (window global)
 
 function maybeExtractLongTermMemory(userMessage, assistantMessage) {
   return window.AgentMemory?.extractFromTurn?.({ userMessage, assistantMessage }) ?? null;
@@ -238,134 +175,9 @@ function getTurnLlmCallOptions() {
   };
 }
 
-// ── Child agent spawning ──────────────────────────────────────────────────────
+// spawnAgentChild — now in child-agent.js (window.spawnAgentChild)
 
-async function spawnAgentChild({ task = '', tools = [], maxIterations = 10 } = {}) {
-  if (!task) return { success: false, error: 'task is required' };
-  if (!Array.isArray(tools)) tools = [];
-  const cfg = C();
-  const maxIters = Math.min(cfg.CHILD_AGENT_MAX_ITERATIONS || 50, Math.max(1, maxIterations));
-
-  const childState = {
-    messages: [],
-    round: 0,
-    maxRounds: maxIters,
-    tools: new Set(tools),
-    results: [],
-    succeeded: false,
-    error: null,
-    startedAt: new Date().toISOString()
-  };
-
-  try {
-    assertRuntimeReady();
-    const { orchestrator } = getRuntimeModules();
-
-    const sysPrompt = await orchestrator.buildSystemPrompt({ userMessage: task, enabledTools: Array.isArray(tools) ? tools : [] });
-    childState.messages.push({ role: 'system', content: sysPrompt });
-    childState.messages.push({ role: 'user', content: task });
-
-    while (childState.round < childState.maxRounds) {
-      childState.round++;
-
-      let rawReply;
-      try {
-        rawReply = await callLLM(childState.messages, {
-          maxTokens: cfg.CHILD_AGENT_MAX_TOKENS || 800,
-          temperature: cfg.CHILD_AGENT_TEMPERATURE || 0.3,
-          timeoutMs: cfg.CHILD_AGENT_TIMEOUT_MS || 22000,
-          retries: cfg.CHILD_AGENT_RETRIES || 1,
-          enabledTools: Array.isArray(tools) ? tools : []
-        });
-      } catch (e) {
-        childState.error = `LLM call failed: ${e?.message || 'unknown'}`;
-        break;
-      }
-
-      const parsedReply = splitModelReply(rawReply);
-      const reply = parsedReply.visible;
-      childState.messages.push({ role: 'assistant', content: reply });
-
-      const TE = window.AgentToolExecution;
-      let toolCalls = TE?.resolveToolCallsFromModelReply ? TE.resolveToolCallsFromModelReply(reply, rawReply) : [];
-      if (!toolCalls.length) {
-        childState.results.push({ type: 'final_answer', content: reply });
-        childState.succeeded = true;
-        break;
-      }
-
-      const filteredCalls = toolCalls.filter(call => !childState.tools.size || childState.tools.has(call.tool));
-      if (!filteredCalls.length) {
-        childState.results.push({ type: 'tool_calls_blocked', content: `Attempted tools not in allowed set: ${toolCalls.map(c => c.tool).join(', ')}` });
-        break;
-      }
-
-      for (const call of filteredCalls) {
-        let toolResult;
-        try {
-          toolResult = await (TE?.executeTool ? TE.executeTool(call) : `ERROR: executeTool not available`);
-        } catch (e) {
-          toolResult = `ERROR: ${e?.message || 'tool execution failed'}`;
-        }
-        childState.results.push({ type: 'tool_result', tool: call.tool, result: toolResult });
-        childState.messages.push({ role: 'tool', tool_call_id: call.call_id || call.id || `call_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`, content: String(toolResult) });
-      }
-    }
-
-    if (!childState.succeeded && childState.round >= childState.maxRounds) {
-      childState.error = `Max iterations (${childState.maxRounds}) reached without completion`;
-    }
-  } catch (e) {
-    childState.error = `Child agent spawn failed: ${e?.message || 'unknown'}`;
-  }
-
-  return {
-    success: childState.succeeded && !childState.error,
-    task,
-    iterations: childState.round,
-    status: childState.succeeded ? 'completed' : (childState.error ? 'error' : 'timeout'),
-    result: childState.results.length ? childState.results : childState.error,
-    toolsSummary: `Executed ${childState.results.filter(r => r.type === 'tool_result').length} tool(s) across ${childState.round} iteration(s)`,
-    childState: { messages: childState.messages.length, round: childState.round, maxRounds: childState.maxRounds }
-  };
-}
-
-window.spawnAgentChild = spawnAgentChild;
-
-// ── Notifications ────────────────────────────────────────────────────────────
-
-function notifyIfHidden(summary) {
-  if (document.visibilityState === 'visible') return;
-  if (!('Notification' in window)) return;
-  if (window.Notification.permission !== 'granted') return;
-
-  try {
-    new window.Notification('JS Agent', {
-      body: String(summary || 'Task complete.').slice(0, (C().NOTIFICATION_BODY_MAX_CHARS || 200)),
-      tag: 'agent-run-finished',
-      silent: false
-    });
-  } catch (error) {
-    console.warn('Notification failed:', error?.message || error);
-  }
-}
-
-// ── Context bar ─────────────────────────────────────────────────────────────
-
-function updateCtxBar() {
-  const Comp = window.AgentCompaction;
-  const size = Comp?.ctxSize ? Comp.ctxSize(window.messages) : window.messages.reduce((n, m) => n + (m.content || '').length, 0);
-  const limit = getCtxLimit();
-  const pct = Math.min(100, (size / limit) * 100);
-  const bar = document.getElementById('ctx-bar');
-  const label = document.getElementById('ctx-pct');
-  if (bar) {
-    bar.style.width = pct + '%';
-    bar.classList.toggle('warn', pct > 60 && pct <= 85);
-    bar.classList.toggle('danger', pct > 85);
-  }
-  if (label) label.textContent = pct.toFixed(1) + '%';
-}
+// notifyIfHidden and updateCtxBar are now in ui-render.js (window globals).
 
 // ── MAIN AGENT LOOP ───────────────────────────────────────────────────────────
 
@@ -848,141 +660,9 @@ async function agentLoop(userMessage) {
 }
 
 // ── UI HELPERS ───────────────────────────────────────────────────────────────
-
-let thinkingEl = null;
-
-function showThinking(label) {
-  hideThinking();
-  const el = document.createElement('div');
-  el.className = 'thinking';
-  el.id = 'thinking';
-  el.innerHTML = `
-    <div class="thinking-dots">
-      <div class="dot"></div><div class="dot"></div><div class="dot"></div>
-    </div>
-    <span class="thinking-label">${escHtml(String(label || ''))}</span>`;
-  const container = document.getElementById('messages') || document.getElementById('chat');
-  container.appendChild(el);
-  scrollBottom();
-}
-
-function hideThinking() {
-  const el = document.getElementById('thinking');
-  if (el) el.remove();
-}
-
-function addMessage(role, content, round, isCall=false, isResult=false, hiddenThinking=[]) {
-  document.getElementById('empty')?.remove();
-
-  const wrap = document.createElement('div');
-
-  if (role === 'user') {
-    wrap.className = 'msg user';
-    const bubble = document.createElement('div');
-    if (containsMarkdown(content)) {
-      bubble.className = 'msg-content html-body';
-      bubble.innerHTML = renderAgentHtml(content);
-    } else {
-      bubble.className = 'msg-content';
-      bubble.textContent = String(content || '');
-    }
-    wrap.appendChild(bubble);
-  } else if (role === 'agent') {
-    wrap.className = 'msg assistant';
-    const bubble = document.createElement('div');
-    bubble.className = 'msg-content html-body';
-    bubble.innerHTML = renderAgentHtml(content);
-    wrap.appendChild(bubble);
-    if (hiddenThinking.length) {
-      const details = document.createElement('details');
-      details.className = 'thinking-details';
-      const summary = document.createElement('summary');
-      summary.textContent = `Thinking (${hiddenThinking.length})`;
-      details.appendChild(summary);
-      const pre = document.createElement('pre');
-      pre.className = 'thinking-pre';
-      pre.textContent = hiddenThinking.join('\n\n---\n\n');
-      details.appendChild(pre);
-      wrap.appendChild(details);
-    }
-  } else {
-    const cssRole = role === 'error' ? 'msg-error' : role === 'tool' ? 'msg-tool' : 'msg-system';
-    wrap.className = `msg assistant ${cssRole}`;
-    const bubble = document.createElement('div');
-    bubble.className = 'msg-content msg-content-mono';
-
-    const meta = [];
-    if (round) meta.push(`R${round}`);
-    if (isCall) meta.push('call');
-    if (isResult) meta.push('result');
-    meta.push(role);
-
-    const badge = document.createElement('span');
-    badge.className = 'msg-meta-badge';
-    badge.textContent = meta.join(' · ');
-    bubble.appendChild(badge);
-
-    let prettyContent = String(content || '');
-    try { const parsed = JSON.parse(prettyContent); prettyContent = JSON.stringify(parsed, null, 2); } catch {}
-
-    const details = document.createElement('details');
-    details.className = 'debug-details';
-    const summary = document.createElement('summary');
-    summary.className = 'debug-summary';
-    const preview = prettyContent.length > 120 ? prettyContent.slice(0, 120).replace(/\n/g, ' ') + '…' : prettyContent.replace(/\n/g, ' ');
-    summary.textContent = preview;
-    details.appendChild(summary);
-    const pre = document.createElement('pre');
-    pre.className = 'debug-pre';
-    pre.textContent = prettyContent;
-    details.appendChild(pre);
-    bubble.appendChild(details);
-
-    wrap.appendChild(bubble);
-  }
-
-  const container = document.getElementById('messages') || document.getElementById('chat');
-  container.appendChild(wrap);
-  scrollBottom();
-}
-
-function addNotice(text) {
-  const el = document.createElement('div');
-  el.className = 'ctx-notice';
-  el.textContent = text;
-  const container = document.getElementById('messages') || document.getElementById('chat');
-  container.appendChild(el);
-  scrollBottom();
-}
-
-function setStatus(state, label) {
-  const topbarStatus = document.getElementById('topbar-status');
-  if (topbarStatus) topbarStatus.textContent = label;
-  const badge = document.getElementById('badge-status');
-  if (badge) badge.textContent = label;
-  const dot = document.getElementById('badge-status-dot');
-  if (dot) dot.innerHTML = `<span class="status-dot ${state}"></span>&nbsp;${label}`;
-}
-
-function updateStats() {
-  const rounds = document.getElementById('stat-rounds');
-  if (rounds) rounds.textContent = window.sessionStats.rounds;
-  const tools = document.getElementById('stat-tools');
-  if (tools) tools.textContent = window.sessionStats.tools;
-  const resets = document.getElementById('stat-resets');
-  if (resets) resets.textContent = window.sessionStats.resets;
-  const msgs = document.getElementById('stat-msgs');
-  if (msgs) msgs.textContent = window.sessionStats.msgs;
-}
-
-function scrollBottom() {
-  const chat = document.getElementById('chat');
-  if (chat) chat.scrollTop = chat.scrollHeight;
-}
-
-function escHtml(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
+// UI render functions (showThinking, hideThinking, addMessage, addNotice, setStatus,
+// updateStats, scrollBottom, escHtml, updateCtxBar, notifyIfHidden, etc.)
+// are now in ui-render.js, published as window.* globals and window.AgentUIRender.
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -1075,123 +755,9 @@ function useExample(btn) {
   input.focus();
 }
 
-function clearSession() {
-  createSession();
-  resetLiveSessionState();
-  updateStats();
-  updateCtxBar();
-  renderChatFromMessages();
-  renderSessionList();
-  setStatus('ok', 'idle');
-}
-
 window.requestStop = requestStop;
 window.sendMessage = sendMessage;
 window.handleKey = handleKey;
 window.autoResize = autoResize;
 window.useExample = useExample;
-window.clearSession = clearSession;
 window.setStatus = setStatus;
-
-// ── INIT ──────────────────────────────────────────────────────────────────────
-
-document.addEventListener('DOMContentLoaded', () => {
-  installUnhandledRejectionGuard();
-  applySidebarState();
-  window.addEventListener('resize', handleResponsiveSidebar);
-
-  const sliderDefs = [
-    { id: 'sl-rounds', valId: 'val-rounds', key: 'agent_sl_rounds' },
-    { id: 'sl-ctx',    valId: 'val-ctx',    key: 'agent_sl_ctx'    },
-    { id: 'sl-delay',  valId: 'val-delay',  key: 'agent_sl_delay'  }
-  ];
-  for (const def of sliderDefs) {
-    try {
-      const stored = localStorage.getItem(def.key);
-      if (stored !== null) {
-        const sl = document.getElementById(def.id);
-        const vl = document.getElementById(def.valId);
-        if (sl) sl.value = stored;
-        if (vl) vl.textContent = stored;
-      }
-    } catch {}
-  }
-
-  updateBadge();
-  updateStats();
-  updateCtxBar();
-
-  if (!runtimeReady()) {
-    setStatus('error', 'bootstrap failed');
-    addNotice('ERROR: required modules did not load. Check the browser console and reload the page.');
-    return;
-  }
-
-  window.chatSessions = loadSessions();
-  initCacheSync();
-  initBusySync();
-  updateFileAccessStatus();
-  loadGithubTokenStatus();
-  if (typeof loadCloudModelSelection === 'function') loadCloudModelSelection();
-  if (typeof loadOllamaBackendState === 'function') loadOllamaBackendState();
-  if (!window.chatSessions.length) createSession();
-  if (!getActiveSession()) window.activeSessionId = window.chatSessions[0]?.id || createSession().id;
-  renderSessionList();
-  if (typeof loadPersistedEnabledTools === 'function') loadPersistedEnabledTools();
-  renderToolGroups();
-  activateSession(window.activeSessionId);
-  if (window.apiKey) {
-    document.getElementById('api-key').value = window.apiKey;
-    setStatus('ok', 'key set');
-  }
-  if (window.localBackend?.url) {
-    document.getElementById('local-url').value = window.localBackend.url;
-    if (window.localBackend.model) {
-      const sel = document.getElementById('local-model-select');
-      sel.innerHTML = `<option value="${window.localBackend.model}">${window.localBackend.model}</option>`;
-      sel.value = window.localBackend.model;
-      document.getElementById('local-model-row').style.display = 'block';
-
-      sel?.addEventListener('change', function() {
-        const model = this.value;
-        if (model) {
-          window.localBackend.model = model;
-          localStorage.setItem('agent_local_backend_model', model);
-          updateModelBadgeForLocal(model);
-          updateBadge();
-        }
-      });
-    }
-    if (window.localBackend.enabled) {
-      _activateLocal(true);
-    }
-  }
-  if (window.ollamaBackend?.enabled) {
-    console.debug('[Agent] Skipping local backend probe — Ollama is active');
-  } else {
-    probeLocal().catch(error => {
-      const message = String(error?.message || 'probe failed');
-      console.warn('[Local Probe] startup probe failed:', message);
-    });
-  }
-  window.addEventListener('beforeunload', flushSaveSessions);
-  setStopButtonState(false);
-});
-
-let extensionChannelWarningShown = false;
-
-function installUnhandledRejectionGuard() {
-  if (window.__agentUnhandledRejectionGuardInstalled) return;
-  window.__agentUnhandledRejectionGuardInstalled = true;
-
-  window.addEventListener('unhandledrejection', event => {
-    const message = String(event?.reason?.message || event?.reason || '');
-    const isExtensionChannelClose = /A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received/i.test(message);
-    if (!isExtensionChannelClose) return;
-
-    event.preventDefault();
-    if (extensionChannelWarningShown) return;
-    extensionChannelWarningShown = true;
-    addNotice('Ignored extension async response warning from browser message channel.');
-  });
-}

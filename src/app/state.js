@@ -49,7 +49,7 @@ const NON_CACHEABLE_TOOLS = new Set([
   'runtime_memoryWrite',
   'runtime_spawnAgent'
 ]);
-let notificationPermissionRequested = false;
+// maybeRequestNotifPermission — now in ui-render.js
 // Derive a stable instance ID from localStorage so it survives module load order races.
 // Each page load gets a fresh ID (not persisted), but within a load it is consistent.
 const agentInstanceId = (() => {
@@ -163,10 +163,7 @@ let ollamaBackend = {
   enabled: safeGet('agent_ollama_enabled') === 'true',
   url: safeGet('agent_ollama_url') || 'http://localhost:11434',
 };
-// Set of model names confirmed installed locally via /api/tags probe.
-// Used by isSelectedOllamaModelCloud() for reliable local-vs-cloud routing.
 const ollamaInstalledModels = new Set();
-// Map of model name → { contextLength: number } from Ollama /api/show or /api/tags.
 const ollamaModelContextSizes = new Map();
 console.debug(`[State Init] localBackend: enabled=${localBackend.enabled}, url='${localBackend.url}', model='${localBackend.model}'`);
 console.debug(`[State Init] ollamaBackend: enabled=${ollamaBackend.enabled}, url='${ollamaBackend.url}'`);
@@ -269,65 +266,8 @@ function getDelay() {
   return el ? parseInt(el.value, 10) : 500;
 }
 
-function updateBadge() {
-  const badgeRounds = document.getElementById('badge-rounds');
-  const slRounds = document.getElementById('sl-rounds');
-  if (badgeRounds && slRounds) {
-    badgeRounds.textContent = `rounds ${slRounds.value}`;
-  }
-  
-  const badgeCtx = document.getElementById('badge-ctx');
-  const slCtx = document.getElementById('sl-ctx');
-  if (badgeCtx && slCtx) {
-    badgeCtx.textContent = `context ${slCtx.value}k`;
-  }
-}
-
-function shouldAutoCollapseSidebar() {
-  return window.innerWidth <= SIDEBAR_AUTO_COLLAPSE_WIDTH;
-}
-
-function syncSidebarToggleButtons() {
-  const collapsed = document.body.classList.contains('sidebar-collapsed');
-  const openBtn = document.getElementById('sidebar-open-btn');
-  const collapseBtn = document.getElementById('sidebar-collapse-btn');
-  const openLabel = collapsed ? 'Show sidebar' : 'Hide sidebar';
-  const openIcon = collapsed ? '\u2630' : '\u2190';
-
-  if (openBtn) {
-    openBtn.textContent = openIcon;
-    openBtn.title = openLabel;
-    openBtn.setAttribute('aria-label', openLabel);
-    openBtn.setAttribute('aria-expanded', String(!collapsed));
-  }
-
-  if (collapseBtn) {
-    collapseBtn.textContent = '\u2190';
-    collapseBtn.title = 'Hide sidebar';
-    collapseBtn.setAttribute('aria-label', 'Hide sidebar');
-    collapseBtn.setAttribute('aria-expanded', String(!collapsed));
-  }
-}
-
-function applySidebarState() {
-  const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
-  const collapsed = stored == null ? shouldAutoCollapseSidebar() : stored === 'true';
-  document.body.classList.toggle('sidebar-collapsed', collapsed);
-  syncSidebarToggleButtons();
-}
-function toggleSidebar() {
-  const next = !document.body.classList.contains('sidebar-collapsed');
-  document.body.classList.toggle('sidebar-collapsed', next);
-  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
-  syncSidebarToggleButtons();
-}
-
-function handleResponsiveSidebar() {
-  if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) == null) {
-    applySidebarState();
-  }
-  syncSidebarToggleButtons();
-}
+// updateBadge, shouldAutoCollapseSidebar, syncSidebarToggleButtons,
+// applySidebarState, toggleSidebar, handleResponsiveSidebar — now in ui-render.js
 
 function updateFileAccessStatus() {
   const el = document.getElementById('file-access-status');
@@ -355,25 +295,7 @@ async function requestDirectoryAccess() {
   }
 }
 
-function supportsNotifications() {
-  return 'Notification' in window;
-}
-
-function maybeRequestNotifPermission() {
-  if (notificationPermissionRequested || !supportsNotifications()) return;
-  if (window.Notification.permission !== 'default') return;
-
-  notificationPermissionRequested = true;
-  window.Notification.requestPermission()
-    .then(permission => {
-      if (permission === 'granted') {
-        addNotice('Notifications enabled.');
-      }
-    })
-    .catch(() => {
-      notificationPermissionRequested = false;
-    });
-}
+// supportsNotifications, maybeRequestNotifPermission — now in ui-render.js
 
 function getStoredCloudModelSelection() {
   return localStorage.getItem('agent_cloud_model') || 'gemini/gemini-2.5-flash';
@@ -384,32 +306,7 @@ function getSelectedCloudModelLabel() {
   return raw || 'gemini/gemini-2.5-flash';
 }
 
-function updateActiveProviderBadge() {
-  const badge = document.getElementById('topbar-model');
-  if (!badge) return;
-
-  if (localBackend.enabled) {
-    const model = String(document.getElementById('local-model-select')?.value || localBackend.model || '').trim();
-    badge.textContent = `local/${model || 'unknown'}`;
-    return;
-  }
-
-  if (typeof ollamaBackend !== 'undefined' && ollamaBackend.enabled) {
-    const model = String(getOllamaCloudModel() || '').trim();
-    if (!model) {
-      badge.textContent = 'ollama';
-      return;
-    }
-
-    const route = (typeof isSelectedOllamaModelCloud === 'function' && isSelectedOllamaModelCloud())
-      ? 'cloud'
-      : 'local';
-    badge.textContent = `ollama-${route}/${model}`;
-    return;
-  }
-
-  badge.textContent = getSelectedCloudModelLabel();
-}
+// updateActiveProviderBadge — now in ui-render.js
 
 function activateCloudProvider({ silent = false, reason = '' } = {}) {
   const switchedFromLocal = !!localBackend.enabled;
@@ -478,245 +375,7 @@ function loadCloudModelSelection() {
   updateActiveProviderBadge();
 }
 
-function saveOllamaCloudApiKey() {
-  const input = document.getElementById('ollama-cloud-api-key');
-  if (!input) return;
-  const key = String(input.value || '').trim();
-  if (key) {
-    localStorage.setItem('agent_ollama_cloud_api_key', key);
-    setStatus('ok', 'Ollama API key saved');
-  } else {
-    localStorage.removeItem('agent_ollama_cloud_api_key');
-    setStatus('ok', 'Ollama API key cleared');
-  }
-}
-
-function loadOllamaCloudApiKey() {
-  const input = document.getElementById('ollama-cloud-api-key');
-  if (!input) return;
-  input.value = localStorage.getItem('agent_ollama_cloud_api_key') || '';
-}
-
-function saveOllamaCloudModelSelection() {
-  const select = document.getElementById('ollama-model-select');
-  const model = (select && select.value) || '';
-  if (model) localStorage.setItem('agent_ollama_cloud_model', model);
-  updateActiveProviderBadge();
-  if (model && !ollamaModelContextSizes.has(model)) {
-    fetchModelContextLength(model).catch(() => {});
-  }
-}
-
-function getOllamaCloudApiKey() {
-  return localStorage.getItem('agent_ollama_cloud_api_key') || '';
-}
-
-function getOllamaCloudModel() {
-  const select = document.getElementById('ollama-model-select');
-  if (select && select.value) return select.value;
-  return localStorage.getItem('agent_ollama_cloud_model') || 'qwen3.5:9b';
-}
-
-function getOllamaCloudProxyUrl() {
-  const stored = localStorage.getItem('agent_ollama_cloud_proxy_url') || '';
-  if (stored) return stored;
-  return (ollamaBackend.url || 'http://localhost:11434').replace(/\/+$/, '');
-}
-
-// Returns true when the currently-selected Ollama model needs cloud routing.
-// Primary check: model name NOT in the ollamaInstalledModels Set (populated by probe).
-// Secondary check (when Set is empty / never probed): DOM optgroup id.
-function isSelectedOllamaModelCloud() {
-  const select = document.getElementById('ollama-model-select');
-  if (!select || !select.options.length) return false;
-  const idx = select.selectedIndex;
-  if (idx < 0) return false;
-  const model = select.options[idx].value;
-  if (!model) return false; // placeholder selected
-
-  // If we have probe data, trust it: anything not in the installed set is cloud.
-  if (ollamaInstalledModels.size > 0) {
-    return !ollamaInstalledModels.has(model);
-  }
-
-  // Fallback: check which optgroup the option belongs to.
-  const group = select.options[idx].parentElement;
-  return !!(group && group.id === 'ollama-cloud-optgroup');
-}
-
-// -- OLLAMA BACKEND ------------------------------------------------------------
-
-function toggleOllamaBackend() {
-  const checkbox = document.getElementById('toggle-ollama');
-  ollamaBackend.enabled = checkbox ? checkbox.checked : !ollamaBackend.enabled;
-  localStorage.setItem('agent_ollama_enabled', ollamaBackend.enabled ? 'true' : 'false');
-  if (ollamaBackend.enabled && localBackend.enabled) {
-    // Disable LM Studio when Ollama is turned on
-    localBackend.enabled = false;
-    localStorage.setItem('agent_prefer_local_backend', 'false');
-    const lmToggle = document.getElementById('toggle-local');
-    if (lmToggle) {
-      lmToggle.checked = false;
-      lmToggle.classList.remove('active');
-    }
-  }
-  updateBadge();
-  updateActiveProviderBadge();
-}
-
-async function probeOllama() {
-  const urlInput = document.getElementById('ollama-url');
-  const statusLabel = document.getElementById('ollama-status-label');
-  const dot = document.getElementById('ollama-dot');
-  const select = document.getElementById('ollama-model-select');
-
-  const rawUrl = (urlInput ? urlInput.value.trim() : '') || ollamaBackend.url || 'http://localhost:11434';
-  const baseUrl = rawUrl.replace(/\/+$/, '');
-
-  ollamaBackend.url = baseUrl;
-  localStorage.setItem('agent_ollama_url', baseUrl);
-  if (urlInput) urlInput.value = baseUrl;
-
-  if (statusLabel) statusLabel.textContent = 'probing\u2026';
-  if (dot) dot.className = 'status-dot busy';
-
-  try {
-    const res = await fetchWithTimeout(`${baseUrl}/api/tags`, {}, 5000);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const models = Array.isArray(data.models) ? data.models : [];
-
-    const newInstalledModels = new Set();
-    const newContextSizes = new Map();
-    models.forEach(m => {
-      newInstalledModels.add(m.name);
-      const baseName = m.name.split(':')[0];
-      if (baseName !== m.name) newInstalledModels.add(baseName);
-      const ctxLen = inferContextLength(m.name, m);
-      if (ctxLen) newContextSizes.set(m.name, { contextLength: ctxLen });
-    });
-    ollamaInstalledModels.clear();
-    for (const name of newInstalledModels) ollamaInstalledModels.add(name);
-    ollamaModelContextSizes.clear();
-    for (const [k, v] of newContextSizes) ollamaModelContextSizes.set(k, v);
-
-    if (select) {
-      const saved = localStorage.getItem('agent_ollama_cloud_model') || '';
-      // Remove any previous "Installed" optgroup, keep the static cloud optgroup
-      const existing = select.querySelector('optgroup[label="Installed (local)"]');
-      if (existing) existing.remove();
-      const cloudGroup = select.querySelector('#ollama-cloud-optgroup');
-
-      if (models.length) {
-        const localGroup = document.createElement('optgroup');
-        localGroup.label = 'Installed (local)';
-        models.forEach(m => {
-          const opt = document.createElement('option');
-          opt.value = m.name;
-          opt.textContent = m.name;
-          if (m.name === saved) opt.selected = true;
-          localGroup.appendChild(opt);
-        });
-        // Prepend before the cloud optgroup (or at top if no cloud group)
-        cloudGroup ? select.insertBefore(localGroup, cloudGroup) : select.prepend(localGroup);
-        if (saved && !select.value) select.value = saved;
-      }
-      console.debug(`[Ollama] Probe complete: ${models.length} local models, cloud routing guard updated.`);
-    }
-
-    if (statusLabel) statusLabel.textContent = `${models.length} model${models.length !== 1 ? 's' : ''} installed`;
-    if (dot) dot.className = 'status-dot ok';
-    updateActiveProviderBadge();
-  } catch (e) {
-    if (statusLabel) statusLabel.textContent = `unreachable: ${e.message}`;
-    if (dot) dot.className = 'status-dot error';
-  }
-}
-
-function inferContextLength(modelName, modelMeta) {
-  if (modelMeta?.parameters) {
-    const m = String(modelMeta.parameters).match(/num_ctx\s+(\d+)/);
-    if (m) return parseInt(m[1], 10);
-  }
-  const name = String(modelName || '');
-  const kMatch = name.match(/(\d+)k/i);
-  if (kMatch) return parseInt(kMatch[1], 10) * 1024;
-  const sizeMatch = name.match(/:(\d+)b/i);
-  if (sizeMatch) {
-    const b = parseInt(sizeMatch[1], 10);
-    if (b >= 70) return 128 * 1024;
-    if (b >= 30) return 32 * 1024;
-    if (b >= 14) return 16 * 1024;
-    return 8 * 1024;
-  }
-  return 8 * 1024;
-}
-
-async function fetchModelContextLength(modelName) {
-  const cached = ollamaModelContextSizes.get(modelName);
-  if (cached?.contextLength) return cached.contextLength;
-  const baseUrl = (ollamaBackend.url || 'http://localhost:11434').replace(/\/+$/, '');
-  try {
-    const res = await fetchWithTimeout(`${baseUrl}/api/show`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: modelName })
-    }, 5000);
-    if (res.ok) {
-      const data = await res.json();
-      const params = String(data.parameters || '');
-      const m = params.match(/num_ctx\s+(\d+)/);
-      if (m) {
-        const ctxLen = parseInt(m[1], 10);
-        ollamaModelContextSizes.set(modelName, { contextLength: ctxLen });
-        return ctxLen;
-      }
-      const template = data.template || '';
-      const meta = { parameters: params, template };
-      return inferContextLength(modelName, meta);
-    }
-  } catch {}
-  return inferContextLength(modelName, null);
-}
-
-  function getModelContextLength() {
-  const model = typeof getOllamaCloudModel === 'function' ? getOllamaCloudModel() : '';
-  if (!model) return (typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS || 32000;
-  if (typeof ollamaBackend !== 'undefined' && !ollamaBackend.enabled) {
-    return (typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS || 32000;
-  }
-  const cached = ollamaModelContextSizes.get(model);
-  if (cached?.contextLength) return cached.contextLength;
-  return inferContextLength(model, null);
-}
-
-function getMaxTokensForModel() {
-  const ctxLen = getModelContextLength();
-  const ctxLimit = getCtxLimit();
-  const effectiveCtx = Math.min(ctxLen, ctxLimit);
-  return Math.max(512, Math.floor(effectiveCtx * 0.25));
-}
-
-function loadOllamaBackendState() {
-  const urlInput = document.getElementById('ollama-url');
-  if (urlInput) urlInput.value = ollamaBackend.url || 'http://localhost:11434';
-  const toggle = document.getElementById('toggle-ollama');
-  if (toggle) toggle.checked = ollamaBackend.enabled;
-  loadOllamaCloudApiKey();
-  // Restore saved selection in the select (cloud optgroup is always present)
-  const saved = localStorage.getItem('agent_ollama_cloud_model') || '';
-  if (saved) {
-    const sel = document.getElementById('ollama-model-select');
-    if (sel) {
-      // Try to select the saved model — it may be in the cloud optgroup already
-      const existing = Array.from(sel.options).find(o => o.value === saved);
-      if (existing) sel.value = saved;
-    }
-  }
-  // If Ollama is enabled, auto-probe on startup to load installed models
-  if (ollamaBackend.enabled) probeOllama().catch(() => {});
-  updateActiveProviderBadge();
-}
+// Ollama backend functions moved to local-backend.js
 
 function saveGithubToken() {
   const token = document.getElementById('github-token').value.trim();
@@ -1040,6 +699,65 @@ function resetLiveSessionState() {
   sessionStats = { rounds: 0, tools: 0, resets: 0, msgs: 0 };
 }
 
+function clearSession() {
+  createSession();
+  resetLiveSessionState();
+  if (typeof updateStats === 'function') updateStats();
+  if (typeof updateCtxBar === 'function') updateCtxBar();
+  if (typeof renderChatFromMessages === 'function') renderChatFromMessages();
+  if (typeof renderSessionList === 'function') renderSessionList();
+  if (typeof setStatus === 'function') setStatus('ok', 'idle');
+}
+
+function isLocalModeActive() {
+  if (typeof ollamaBackend !== 'undefined' && ollamaBackend.enabled) return true;
+  return localBackend.enabled && !!localBackend.url;
+}
+
+function isOllamaReady() {
+  if (typeof ollamaBackend === 'undefined' || !ollamaBackend.enabled) return { ready: false, reason: '' };
+  const isCloud = typeof isSelectedOllamaModelCloud === 'function' && isSelectedOllamaModelCloud();
+  if (isCloud) {
+    const key = typeof getOllamaCloudApiKey === 'function' ? getOllamaCloudApiKey() : '';
+    if (!key) return { ready: false, reason: '\u2601 Ollama Cloud model selected \u2014 enter your Ollama API key in Settings \u2192 Ollama and click Save.' };
+  }
+  return { ready: true, reason: '' };
+}
+
+function getSelectedCloudProvider() {
+  const raw = String(document.getElementById('model-select')?.value || '').trim().toLowerCase();
+  if (!raw) return 'gemini';
+  const match = raw.match(/^([a-z0-9_-]+)\//i);
+  return match ? String(match[1] || 'gemini').toLowerCase() : 'gemini';
+}
+
+function getCloudReadiness() {
+  const provider = getSelectedCloudProvider();
+  if (provider === 'azure') {
+    if (!apiKey) {
+      return { ready: false, reason: 'Azure OpenAI requires an API key. Enter your key and click Save.' };
+    }
+    const endpoint = String(localStorage.getItem('agent_azure_openai_endpoint') || '').trim();
+    const deployment = String(localStorage.getItem('agent_azure_openai_deployment') || '').trim();
+    if (!endpoint || !deployment) {
+      return {
+        ready: false,
+        reason: 'Azure OpenAI configuration missing. Set localStorage keys: agent_azure_openai_endpoint and agent_azure_openai_deployment.'
+      };
+    }
+    return { ready: true, reason: '' };
+  }
+  if (!apiKey) {
+    const providerLabel = provider === 'openai' ? 'OpenAI' : provider === 'clawd' ? 'Clawd' : 'Cloud';
+    return { ready: false, reason: `${providerLabel} requires an API key. Enter your key and click Save.` };
+  }
+  return { ready: true, reason: '' };
+}
+
+function canUseCloud() {
+  return getCloudReadiness().ready;
+}
+
 function getActiveSession() {
   return chatSessions.find(session => session.id === activeSessionId) || null;
 }
@@ -1092,19 +810,7 @@ function activateSession(sessionId) {
   setStatus('ok', 'session loaded');
 }
 
-function renderSessionList() {
-  const host = document.getElementById('session-list');
-  if (!host) return;
-
-  host.innerHTML = chatSessions.length
-    ? chatSessions.map(session => `
-      <div class="session-item ${session.id === activeSessionId ? 'active' : ''}" onclick="activateSession('${session.id}')">
-        <span class="session-title">${escHtml(session.title)}</span>
-        <button class="delete-btn" onclick="event.stopPropagation();deleteSession('${session.id}')" title="Delete">×</button>
-      </div>`).join('')
-    : '<div class="session-empty">No conversations yet</div>';
-}
-
+// renderSessionList and renderChatFromMessages — now in ui-render.js
 function deleteSession(sessionId) {
   const nextSessions = chatSessions.filter(session => session.id !== sessionId);
   if (nextSessions.length === chatSessions.length) return;
@@ -1149,45 +855,6 @@ function deleteAllSessions() {
   setStatus('ok', 'all sessions deleted');
 }
 
-function renderChatFromMessages() {
-  const container = document.getElementById('messages');
-  const chat = document.getElementById('chat');
-
-  // Clear messages container
-  if (container) container.innerHTML = '';
-
-  // Show/hide empty state
-  const existingEmpty = document.getElementById('empty');
-  if (!messages.length) {
-    if (!existingEmpty && chat) {
-      const emptyEl = document.createElement('div');
-      emptyEl.className = 'empty-state';
-      emptyEl.id = 'empty';
-      emptyEl.innerHTML = `
-        <div class="empty-logo">⬡</div>
-        <div class="empty-title">What can I help you with?</div>
-        <div class="empty-examples">
-          <button class="example-chip" onclick="useExample(this)">What's the current USD/BRL exchange rate?</button>
-          <button class="example-chip" onclick="useExample(this)">Calculate compound interest: $10k at 5.5% for 7 years</button>
-          <button class="example-chip" onclick="useExample(this)">Search for the latest Fed rate decision and summarize</button>
-          <button class="example-chip" onclick="useExample(this)">What's today's date and what day of the week is it?</button>
-        </div>`;
-      chat.insertBefore(emptyEl, container || null);
-    }
-    return;
-  }
-
-  if (existingEmpty) existingEmpty.remove();
-
-  for (const message of messages.filter(m => m.role !== 'system')) {
-    if (message.role === 'assistant') {
-      const parsed = splitModelReply(message.content);
-      addMessage('agent', parsed.visible, null, false, false, parsed.thinkingBlocks);
-      continue;
-    }
-
-    addMessage(message.role, message.content, null);
-  }
-}
+// renderChatFromMessages — now in ui-render.js
 
 // -- LOCAL BACKEND PROBE ------------------------------------------------------

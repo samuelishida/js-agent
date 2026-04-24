@@ -460,7 +460,9 @@
 <!-- ── 7. Modular subsystems (each IIFE → window.Agent*) ──────────────── -->
 <script src="src/app/permissions.js" defer></script>
 <script src="src/app/compaction.js" defer></script>
+<script src="src/app/reply-analysis.js" defer></script>
 <script src="src/app/steering.js" defer></script>
+<script src="src/app/filesystem-guards.js" defer></script>
  <script src="src/app/rate-limiter.js" defer></script>
 <script src="src/app/worker-manager.js" defer></script>
 
@@ -469,9 +471,14 @@
 <script src="src/app/tools.js" defer></script>
 <script src="src/app/tool-execution.js" defer></script>
 
-<!-- ── 9. LLM + agent loop + UI ───────────────────────────────────────── -->
+<!-- ── 9. UI rendering (markdown, messages, sidebar) ──────────────────── -->
+<script src="src/app/ui-render.js" defer></script>
+
+<!-- ── 10. LLM + agent loop ─────────────────────────────────────────────── -->
 <script src="src/app/llm.js" defer></script>
+<script src="src/app/child-agent.js" defer></script>
 <script src="src/app/agent.js" defer></script>
+<script src="src/app/app-init.js" defer></script>
 <script src="src/app/ui-modern.js" defer></script>
 </body>
 </html>

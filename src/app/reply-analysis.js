@@ -1,0 +1,165 @@
+;(function() {
+  function stripModelMetaCommentary(text) {
+    var value = String(text || '').trim();
+    if (!value) return '';
+    value = value.replace(/^[Ww]e (?:need|have|must) to output (?:tool|function) calls? only\.?\s*/i, '');
+    value = value.replace(/^[Ww]e (?:will|should|must|need to|are going to) (?:call|use|invoke|execute|run) \S+(?:\s+with\s+[^.]+)?\.?\s*/i, '');
+    value = value.replace(/^[Ii] (?:will|should|need to|must|am going to|am) (?:call|use|invoke|execute|run|outputting) \S+(?:\s+with\s+[^.]+)?\.?\s*/i, '');
+    value = value.replace(/^[Ll]et's (?:call|use|try|invoke) \S+\.?\s*/i, '');
+    value = value.replace(/^[Ww]e need to (?:output|generate|produce|call|make) (?:a )?(?:tool|function) call\.?\s*/i, '');
+    value = value.replace(/^I need to (?:output|generate|produce|call|make) (?:a )?(?:tool|function) call\.?\s*/i, '');
+    return value.trim();
+  }
+
+  function isMaxOutputTokenLikeError(error) {
+    var message = String(error && error.message || '');
+    if (!message) return false;
+    return /(max(?:imum)?\s*(?:output\s*)?tokens?|max_output_tokens|output token limit|too many output tokens|exceeded.*output|finish_reason\s*[:=]\s*"?length"?)/i.test(message);
+  }
+
+  function looksLikeDeferredActionReply(text) {
+    var value = String(text || '').trim();
+    if (!value) return false;
+    var futureActionPattern = /\b(?:i\s+will|i'll|let me|i am going to|i'm going to|next[, ]+i(?:\s+will|'ll)?|i'll\s+(?:start|begin|now)|now\s+i(?:'ll|\s+will))\b/i;
+    var actionVerbPattern = /\b(?:search|look up|check|verify|probe|inspect|browse|review|find|perform|run|try|investigate|list|listing|read|reading|fetch|fetching|scan|scanning|call|calling|execute|executing|start|starting|begin|beginning|map|mapping|gather|gathering|analyze|analyzing|collect|collecting|query|querying|load|loading|open|opening|access|accessing|retrieve|retrieving|walk|walking|traverse|traversing|explore|exploring|examine|examining|identify|identifying|inspect)\b/i;
+    var finalityPattern = /\b(?:final answer|in summary|overall|therefore|the answer is|based on (?:the|current) (?:evidence|information))\b/i;
+    return futureActionPattern.test(value) && actionVerbPattern.test(value) && !finalityPattern.test(value);
+  }
+
+  function looksLikeToolExecutionClaimWithoutCall(text) {
+    var value = String(text || '').trim();
+    if (!value) return false;
+    var executionClaimPattern = /\b(?:i\s+(?:have|already)\s+(?:executed|called|run|performed)|(?:the\s+)?tool\s+call\s+(?:has\s+been\s+)?(?:executed|made|performed)|executed\s+the\s+necessary\s+tool\s+call|necessary\s+tool\s+call)\b/i;
+    var waitingPattern = /\b(?:please\s+wait|wait\s+for\s+(?:the\s+)?tool\s+output|await(?:ing)?\s+tool\s+output|once\s+the\s+tool\s+output|after\s+tool\s+output|provide\s+the\s+final\s+answer\s+after\s+tool\s+output)\b/i;
+    var finalityPattern = /\b(?:final answer|in summary|overall|therefore|the answer is|based on (?:the|current) (?:evidence|information))\b/i;
+    return executionClaimPattern.test(value) && waitingPattern.test(value) && !finalityPattern.test(value);
+  }
+
+  function getToolCallCleanupRegex() {
+    var regex = window.AgentRegex;
+    var sharedToolBlock = regex && regex.TOOL_BLOCK;
+    if (sharedToolBlock instanceof RegExp) {
+      return new RegExp(sharedToolBlock.source, 'gi');
+    }
+    return /<tool_call(?:\s[^>]*>|>?)\s*[\s\S]*?<\/tool_call>/gi;
+  }
+
+  function extractPlannerOptimizedQueryFromMessages(messages) {
+    var recentUserMessages = Array.isArray(messages)
+      ? messages.filter(function(message) { return message && message.role === 'user'; }).slice(-8).reverse()
+      : [];
+
+    for (var i = 0; i < recentUserMessages.length; i++) {
+      var content = String(recentUserMessages[i] && recentUserMessages[i].content || '');
+      var queryPlanBlocks = [];
+      var match;
+      var qpRegex = /<tool_result\s+tool="query_plan">\s*([\s\S]*?)\s*<\/tool_result>/gi;
+      while ((match = qpRegex.exec(content)) !== null) {
+        queryPlanBlocks.push(match);
+      }
+      for (var j = queryPlanBlocks.length - 1; j >= 0; j--) {
+        var block = String(queryPlanBlocks[j] && queryPlanBlocks[j][1] || '');
+        var directMatch = block.match(/(?:^|\n)query=([^\n]+)/i);
+        if (directMatch && directMatch[1]) {
+          var query = String(directMatch[1]).trim();
+          if (query) return query;
+        }
+      }
+      var plannerMatch = content.match(/Planner optimized query:\s*"([^"]+)"/i);
+      if (plannerMatch && plannerMatch[1]) {
+        var pquery = String(plannerMatch[1]).trim();
+        if (pquery) return pquery;
+      }
+    }
+    return '';
+  }
+
+  function extractThinkingBlocks(text) {
+    var blocks = [];
+    var remaining = String(text || '');
+    var prev;
+    do {
+      prev = remaining;
+      remaining = remaining.replace(/<think(?:\s[^>]*)?>\s*([\s\S]*?)\s*<\/think>/gi, function(_, content) {
+        var trimmed = content.trim();
+        if (trimmed) {
+          var nested = extractThinkingBlocks(trimmed);
+          if (nested.length > 0) {
+            for (var ni = 0; ni < nested.length; ni++) blocks.push(nested[ni]);
+          } else {
+            blocks.push(trimmed);
+          }
+        }
+        return '';
+      });
+    } while (remaining !== prev);
+    return blocks.filter(Boolean);
+  }
+
+  function normalizeVisibleModelText(text) {
+    var value = String(text || '').trim();
+    if (!value) return '';
+
+    value = value
+      .replace(/^```(?:xml|html)?\s*([\s\S]*?)\s*```$/i, '$1')
+      .trim();
+
+    value = value.replace(/^markdown\s+(?=[#>*\-\d`\[]|\w)/i, '');
+
+    var answerDelimiters = [
+      /\n\n((?:[A-Z][\s\S]*))/,
+      /\n(So\s+(?:the |the )?(?:answer|result|conclusion|output|response) is\b[\s\S]*)/i,
+      /\n(Therefore,?\s*[\s\S]*)/i,
+      /\n(In (?:conclusion|summary),?\s*[\s\S]*)/i,
+      /\n((?:Chuck |As of |The |It is |He |She |They |This )(?:(?:is|are|was|were|has|have)\b)[\s\S]*)/i,
+    ];
+
+    var startsWithReasoning = /^(?:We (?:will|should|need|could)|I (?:will|should|need|could|am|can)|Let's|Actually|Hmm|Wait|First,|Let me)/i.test(value);
+    if (startsWithReasoning && value.length > 150) {
+      for (var di = 0; di < answerDelimiters.length; di++) {
+        var delimMatch = value.match(answerDelimiters[di]);
+        if (delimMatch && delimMatch[1] && delimMatch[1].trim().length > 20) {
+          value = delimMatch[1].trim();
+          break;
+        }
+      }
+    }
+
+    return value.trim();
+  }
+
+  function splitModelReply(text) {
+    var raw = String(text || '');
+    var withoutThinking = raw;
+    var prev;
+    do {
+      prev = withoutThinking;
+      withoutThinking = withoutThinking.replace(/<think(?:\s[^>]*)?>[\s\S]*?<\/think>/gi, '');
+    } while (withoutThinking !== prev);
+    return {
+      raw: raw,
+      thinkingBlocks: extractThinkingBlocks(raw),
+      visible: normalizeVisibleModelText(withoutThinking)
+    };
+  }
+
+  window.AgentReplyAnalysis = {
+    stripModelMetaCommentary: stripModelMetaCommentary,
+    isMaxOutputTokenLikeError: isMaxOutputTokenLikeError,
+    looksLikeDeferredActionReply: looksLikeDeferredActionReply,
+    looksLikeToolExecutionClaimWithoutCall: looksLikeToolExecutionClaimWithoutCall,
+    getToolCallCleanupRegex: getToolCallCleanupRegex,
+    extractPlannerOptimizedQueryFromMessages: extractPlannerOptimizedQueryFromMessages,
+    extractThinkingBlocks: extractThinkingBlocks,
+    normalizeVisibleModelText: normalizeVisibleModelText,
+    splitModelReply: splitModelReply
+  };
+
+  window.stripModelMetaCommentary = stripModelMetaCommentary;
+  window.isMaxOutputTokenLikeError = isMaxOutputTokenLikeError;
+  window.looksLikeDeferredActionReply = looksLikeDeferredActionReply;
+  window.looksLikeToolExecutionClaimWithoutCall = looksLikeToolExecutionClaimWithoutCall;
+  window.getToolCallCleanupRegex = getToolCallCleanupRegex;
+  window.extractPlannerOptimizedQueryFromMessages = extractPlannerOptimizedQueryFromMessages;
+  window.splitModelReply = splitModelReply;
+})();

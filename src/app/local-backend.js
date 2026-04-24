@@ -355,4 +355,231 @@ function _deactivateLocal() {
   addNotice('Local backend deactivated. Back to cloud model.');
 }
 
+// ── Ollama backend (moved from state.js) ────────────────────────────────────
+
+function saveOllamaCloudApiKey() {
+  const input = document.getElementById('ollama-cloud-api-key');
+  if (!input) return;
+  const key = String(input.value || '').trim();
+  if (key) {
+    localStorage.setItem('agent_ollama_cloud_api_key', key);
+    setStatus('ok', 'Ollama API key saved');
+  } else {
+    localStorage.removeItem('agent_ollama_cloud_api_key');
+    setStatus('ok', 'Ollama API key cleared');
+  }
+}
+
+function loadOllamaCloudApiKey() {
+  const input = document.getElementById('ollama-cloud-api-key');
+  if (!input) return;
+  input.value = localStorage.getItem('agent_ollama_cloud_api_key') || '';
+}
+
+function saveOllamaCloudModelSelection() {
+  const select = document.getElementById('ollama-model-select');
+  const model = (select && select.value) || '';
+  if (model) localStorage.setItem('agent_ollama_cloud_model', model);
+  if (typeof updateActiveProviderBadge === 'function') updateActiveProviderBadge();
+  if (model && !ollamaModelContextSizes.has(model)) {
+    fetchModelContextLength(model).catch(() => {});
+  }
+}
+
+function getOllamaCloudApiKey() {
+  return localStorage.getItem('agent_ollama_cloud_api_key') || '';
+}
+
+function getOllamaCloudModel() {
+  const select = document.getElementById('ollama-model-select');
+  if (select && select.value) return select.value;
+  return localStorage.getItem('agent_ollama_cloud_model') || 'qwen3.5:9b';
+}
+
+function getOllamaCloudProxyUrl() {
+  const stored = localStorage.getItem('agent_ollama_cloud_proxy_url') || '';
+  if (stored) return stored;
+  return (ollamaBackend.url || 'http://localhost:11434').replace(/\/+$/, '');
+}
+
+function isSelectedOllamaModelCloud() {
+  const select = document.getElementById('ollama-model-select');
+  if (!select || !select.options.length) return false;
+  const idx = select.selectedIndex;
+  if (idx < 0) return false;
+  const model = select.options[idx].value;
+  if (!model) return false;
+  if (ollamaInstalledModels.size > 0) {
+    return !ollamaInstalledModels.has(model);
+  }
+  const group = select.options[idx].parentElement;
+  return !!(group && group.id === 'ollama-cloud-optgroup');
+}
+
+function toggleOllamaBackend() {
+  const checkbox = document.getElementById('toggle-ollama');
+  ollamaBackend.enabled = checkbox ? checkbox.checked : !ollamaBackend.enabled;
+  localStorage.setItem('agent_ollama_enabled', ollamaBackend.enabled ? 'true' : 'false');
+  if (ollamaBackend.enabled && localBackend.enabled) {
+    localBackend.enabled = false;
+    localStorage.setItem('agent_prefer_local_backend', 'false');
+    const lmToggle = document.getElementById('toggle-local');
+    if (lmToggle) {
+      lmToggle.checked = false;
+      lmToggle.classList.remove('active');
+    }
+  }
+  if (typeof updateBadge === 'function') updateBadge();
+  if (typeof updateActiveProviderBadge === 'function') updateActiveProviderBadge();
+}
+
+async function probeOllama() {
+  const urlInput = document.getElementById('ollama-url');
+  const statusLabel = document.getElementById('ollama-status-label');
+  const dot = document.getElementById('ollama-dot');
+  const select = document.getElementById('ollama-model-select');
+
+  const rawUrl = (urlInput ? urlInput.value.trim() : '') || ollamaBackend.url || 'http://localhost:11434';
+  const baseUrl = rawUrl.replace(/\/+$/, '');
+
+  ollamaBackend.url = baseUrl;
+  localStorage.setItem('agent_ollama_url', baseUrl);
+  if (urlInput) urlInput.value = baseUrl;
+
+  if (statusLabel) statusLabel.textContent = 'probing\u2026';
+  if (dot) dot.className = 'status-dot busy';
+
+  try {
+    const res = await fetchWithTimeout(`${baseUrl}/api/tags`, {}, 5000);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const models = Array.isArray(data.models) ? data.models : [];
+
+    const newInstalledModels = new Set();
+    const newContextSizes = new Map();
+    models.forEach(m => {
+      newInstalledModels.add(m.name);
+      const baseName = m.name.split(':')[0];
+      if (baseName !== m.name) newInstalledModels.add(baseName);
+      const ctxLen = inferContextLength(m.name, m);
+      if (ctxLen) newContextSizes.set(m.name, { contextLength: ctxLen });
+    });
+    ollamaInstalledModels.clear();
+    for (const name of newInstalledModels) ollamaInstalledModels.add(name);
+    ollamaModelContextSizes.clear();
+    for (const [k, v] of newContextSizes) ollamaModelContextSizes.set(k, v);
+
+    if (select) {
+      const saved = localStorage.getItem('agent_ollama_cloud_model') || '';
+      const existing = select.querySelector('optgroup[label="Installed (local)"]');
+      if (existing) existing.remove();
+      const cloudGroup = select.querySelector('#ollama-cloud-optgroup');
+
+      if (models.length) {
+        const localGroup = document.createElement('optgroup');
+        localGroup.label = 'Installed (local)';
+        models.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.name;
+          opt.textContent = m.name;
+          if (m.name === saved) opt.selected = true;
+          localGroup.appendChild(opt);
+        });
+        cloudGroup ? select.insertBefore(localGroup, cloudGroup) : select.prepend(localGroup);
+        if (saved && !select.value) select.value = saved;
+      }
+      console.debug(`[Ollama] Probe complete: ${models.length} local models, cloud routing guard updated.`);
+    }
+
+    if (statusLabel) statusLabel.textContent = `${models.length} model${models.length !== 1 ? 's' : ''} installed`;
+    if (dot) dot.className = 'status-dot ok';
+    if (typeof updateActiveProviderBadge === 'function') updateActiveProviderBadge();
+  } catch (e) {
+    if (statusLabel) statusLabel.textContent = `unreachable: ${e.message}`;
+    if (dot) dot.className = 'status-dot error';
+  }
+}
+
+function inferContextLength(modelName, modelMeta) {
+  if (modelMeta?.parameters) {
+    const m = String(modelMeta.parameters).match(/num_ctx\s+(\d+)/);
+    if (m) return parseInt(m[1], 10);
+  }
+  const name = String(modelName || '');
+  const kMatch = name.match(/(\d+)k/i);
+  if (kMatch) return parseInt(kMatch[1], 10) * 1024;
+  const sizeMatch = name.match(/:(\d+)b/i);
+  if (sizeMatch) {
+    const b = parseInt(sizeMatch[1], 10);
+    if (b >= 70) return 128 * 1024;
+    if (b >= 30) return 32 * 1024;
+    if (b >= 14) return 16 * 1024;
+    return 8 * 1024;
+  }
+  return 8 * 1024;
+}
+
+async function fetchModelContextLength(modelName) {
+  const cached = ollamaModelContextSizes.get(modelName);
+  if (cached?.contextLength) return cached.contextLength;
+  const baseUrl = (ollamaBackend.url || 'http://localhost:11434').replace(/\/+$/, '');
+  try {
+    const res = await fetchWithTimeout(`${baseUrl}/api/show`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: modelName })
+    }, 5000);
+    if (res.ok) {
+      const data = await res.json();
+      const params = String(data.parameters || '');
+      const m = params.match(/num_ctx\s+(\d+)/);
+      if (m) {
+        const ctxLen = parseInt(m[1], 10);
+        ollamaModelContextSizes.set(modelName, { contextLength: ctxLen });
+        return ctxLen;
+      }
+      const template = data.template || '';
+      const meta = { parameters: params, template };
+      return inferContextLength(modelName, meta);
+    }
+  } catch {}
+  return inferContextLength(modelName, null);
+}
+
+function getModelContextLength() {
+  const model = typeof getOllamaCloudModel === 'function' ? getOllamaCloudModel() : '';
+  if (!model) return (typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS || 32000;
+  if (typeof ollamaBackend !== 'undefined' && !ollamaBackend.enabled) {
+    return (typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS || 32000;
+  }
+  const cached = ollamaModelContextSizes.get(model);
+  if (cached?.contextLength) return cached.contextLength;
+  return inferContextLength(model, null);
+}
+
+function getMaxTokensForModel() {
+  const ctxLen = getModelContextLength();
+  const ctxLimit = typeof getCtxLimit === 'function' ? getCtxLimit() : 32000;
+  const effectiveCtx = Math.min(ctxLen, ctxLimit);
+  return Math.max(512, Math.floor(effectiveCtx * 0.25));
+}
+
+function loadOllamaBackendState() {
+  const urlInput = document.getElementById('ollama-url');
+  if (urlInput) urlInput.value = ollamaBackend.url || 'http://localhost:11434';
+  const toggle = document.getElementById('toggle-ollama');
+  if (toggle) toggle.checked = ollamaBackend.enabled;
+  loadOllamaCloudApiKey();
+  const saved = localStorage.getItem('agent_ollama_cloud_model') || '';
+  if (saved) {
+    const sel = document.getElementById('ollama-model-select');
+    if (sel) {
+      const existing = Array.from(sel.options).find(o => o.value === saved);
+      if (existing) sel.value = saved;
+    }
+  }
+  if (ollamaBackend.enabled) probeOllama().catch(() => {});
+  if (typeof updateActiveProviderBadge === 'function') updateActiveProviderBadge();
+}
+
 // -- TOOLS ---------------------------------------------------------------------

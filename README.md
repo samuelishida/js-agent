@@ -67,7 +67,7 @@ Agent/
     │   ├── shared.js   → window.AgentSkills            (preflight + registry wiring)
     │   └── index.js                                    (finalizes skill surface)
     └── app/
-        ├── state.js          → session, localStorage, BroadcastChannel sync
+        ├── state.js          → session, localStorage, BroadcastChannel sync, routing readiness
         ├── constants.js      → window.CONSTANTS         (budgets, timeouts, thresholds)
         ├── runtime-memory.js → window.AgentRuntimeCache, window.AgentMemory
         ├── permissions.js    → window.AgentPermissions  (denial tracking, escalation)
@@ -75,11 +75,16 @@ Agent/
         ├── steering.js       → window.AgentSteering     (mid-flight guidance buffer)
         ├── rate-limiter.js   → window.AgentRateLimiter  (per-tool rate limiting)
         ├── worker-manager.js → window.AgentWorkers      (sandbox worker only)
-        ├── local-backend.js                             (LM Studio / Ollama probe)
+        ├── local-backend.js                             (LM Studio probe, Ollama probe + cloud routing)
         ├── tools.js                                     (tool group rendering, toggle)
-        ├── tool-execution.js → window.AgentToolExecution (dispatch, batching, fs guards)
+        ├── tool-execution.js → window.AgentToolExecution (dispatch, batching, fs guard aliases)
+        ├── filesystem-guards.js → window.AgentFilesystemGuards (path validation, dangerous path detection)
+        ├── reply-analysis.js → window.AgentReplyAnalysis (model reply parsing, thinking blocks, repair detection)
+        ├── ui-render.js      → window.AgentUIRender     (markdown engine, messages, sidebar, badges)
         ├── llm.js            → window.AgentLLMControl   (multi-lane routing, abort, streaming)
+        ├── child-agent.js    → window.AgentChildAgent    (spawnAgentChild sub-loop)
         ├── agent.js                                     (agent loop, UI wiring)
+        ├── app-init.js                                 (DOMContentLoaded bootstrap)
         └── ui-modern.js      → window.openSettings/closeSettings
 ```
 
@@ -95,9 +100,10 @@ Scripts load with `defer`; execution order is declaration order — no bundler n
 | 4. Skill assembly | `shared.js`, `groups/*.js`, `index.js` | `AgentSkills` |
 | 5. Orchestrator | `orchestrator.js` | `AgentOrchestrator` |
 | 6. App state | `state.js`, `constants.js`, `runtime-memory.js` | `CONSTANTS`, `AgentRuntimeCache`, `AgentMemory` |
-| 7. App subsystems | `permissions.js`, `compaction.js`, `steering.js` | `AgentPermissions`, `AgentCompaction`, `AgentSteering` |
+| 7. App subsystems | `permissions.js`, `compaction.js`, `filesystem-guards.js`, `steering.js` | `AgentPermissions`, `AgentCompaction`, `AgentFilesystemGuards`, `AgentSteering` |
 | 8. Tool infra | `local-backend.js`, `tools.js`, `tool-execution.js` | `AgentToolExecution` |
-| 9. LLM + loop | `llm.js`, `agent.js`, `ui-modern.js` | `AgentLLMControl`, inline-handler globals |
+| 9. UI layer | `ui-render.js`, `reply-analysis.js` | `AgentUIRender`, `AgentReplyAnalysis` |
+| 10. LLM + loop | `llm.js`, `child-agent.js`, `agent.js`, `app-init.js`, `ui-modern.js` | `AgentLLMControl`, `AgentChildAgent`, inline-handler globals |
 
 `constants.js` must precede all modules that read `window.CONSTANTS`. Skills must be assembled before the orchestrator describes available tools.
 
@@ -137,7 +143,7 @@ All local Ollama calls use streaming (`stream: true`) to prevent timeout errors 
 
 ### Model context size inference
 
-`state.js` infers context window size from the model name:
+`local-backend.js` infers context window size from the model name:
 
 - Explicit suffix: `qwen3.5:9b-256k` → 256k context
 - Size bracket: `:70b` → 128k, `:30b` → 32k, `:14b` → 16k, `:<14b` → 8k default
@@ -173,6 +179,11 @@ node --check src/app/permissions.js
 node --check src/app/compaction.js
 node --check src/app/steering.js
 node --check src/app/tool-execution.js
+node --check src/app/filesystem-guards.js
+node --check src/app/reply-analysis.js
+node --check src/app/ui-render.js
+node --check src/app/child-agent.js
+node --check src/app/app-init.js
 ```
 
 ```bash

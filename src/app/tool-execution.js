@@ -134,106 +134,17 @@
     return deduped;
   }
 
-  // ── Path normalization and validation ──
-
-  function normalizePathInput(value) {
-    return String(value || '').trim().replace(/^['"`]+|['"`]+$/g, '').trim();
-  }
-
-  function containsGlobPattern(value) {
-    return /[*?[\]{}]/.test(String(value || ''));
-  }
-
-  function containsVulnerableUncPathLight(value) {
-    const text = String(value || '');
-    return text.startsWith('\\\\') || text.startsWith('//');
-  }
-
-  function hasSuspiciousWindowsPathPattern(value) {
-    const text = String(value || '');
-    if (!text) return false;
-    const firstColon = text.indexOf(':');
-    if (firstColon >= 0) {
-      const secondColon = text.indexOf(':', firstColon + 1);
-      if (secondColon !== -1) return true;
-    }
-    if (/~\d/.test(text)) return true;
-    if (text.startsWith('\\\\?\\') || text.startsWith('\\\\.\\') || text.startsWith('//?/') || text.startsWith('//./')) return true;
-    if (/[.\s]+$/.test(text)) return true;
-    if (/\.(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(text)) return true;
-    if (/(^|\/|\\)\.{3,}(\/|\\|$)/.test(text)) return true;
-    return false;
-  }
-
-  function isDangerousRemovalPath(pathValue) {
-    const normalized = String(pathValue || '').replace(/[\\/]+/g, '/').trim();
-    if (!normalized) return true;
-    if (normalized === '*' || normalized.endsWith('/*')) return true;
-    const withoutTrailingSlash = normalized === '/' ? normalized : normalized.replace(/\/$/, '');
-    if (withoutTrailingSlash === '/') return true;
-    if (/^[A-Za-z]:\/?$/.test(withoutTrailingSlash)) return true;
-    const parent = withoutTrailingSlash.includes('/')
-      ? withoutTrailingSlash.slice(0, withoutTrailingSlash.lastIndexOf('/')) || '/'
-      : '';
-    if (parent === '/') return true;
-    if (/^[A-Za-z]:\/[^/]+$/.test(withoutTrailingSlash)) return true;
-    return false;
-  }
-
-  // ── Filesystem guards ──
-
-  function getFilesystemOperationType(toolName) {
-    const tool = String(toolName || '').trim();
-    const writeTools = new Set(['fs_write_file','file_write','write_file','file_edit','edit_file','fs_copy_file','fs_move_file','fs_delete_path','fs_rename_path','fs_mkdir','fs_touch','fs_save_upload']);
-    if (writeTools.has(tool)) return 'write';
-    if (tool === 'fs_download_file') return 'create';
-    if (tool.startsWith('fs_') || tool === 'file_read' || tool === 'read_file' || tool === 'glob' || tool === 'grep') return 'read';
-    return 'none';
-  }
-
-  function extractFilesystemPathsFromArgs(toolName, args = {}) {
-    const tool = String(toolName || '').trim();
-    const normalizedArgs = normalizeToolArgs(args);
-    const values = [];
-    const push = (name, value) => {
-      const path = normalizePathInput(value);
-      if (!path) return;
-      values.push({ arg: name, path });
-    };
-    const generalKeys = ['path','filePath','sourcePath','destinationPath','new_path','newPath','root','directory'];
-    for (const key of generalKeys) {
-      if (Object.prototype.hasOwnProperty.call(normalizedArgs, key)) push(key, normalizedArgs[key]);
-    }
-    if (tool === 'fs_rename_path' && normalizedArgs.newName) {
-      const sourcePath = normalizePathInput(normalizedArgs.path);
-      const parent = sourcePath.replace(/[\\/]+/g, '/').split('/').slice(0, -1).join('/');
-      const candidate = parent ? `${parent}/${normalizedArgs.newName}` : String(normalizedArgs.newName);
-      push('newName', candidate);
-    }
-    return values;
-  }
-
-  function validateFilesystemCallGuard(call) {
-    const operationType = getFilesystemOperationType(call?.tool);
-    if (operationType === 'none') return { allowed: true };
-    const paths = extractFilesystemPathsFromArgs(call?.tool, call?.args);
-    if (!paths.length && operationType !== 'read') {
-      return { allowed: false, reason: 'A valid filesystem path is required for this write operation.' };
-    }
-    for (const item of paths) {
-      const path = item.path;
-      if (containsVulnerableUncPathLight(path)) return { allowed: false, reason: `UNC network path '${path}' requires explicit manual approval.`, path };
-      if (path.startsWith('~') && !/^~(?:\/|\\|$)/.test(path)) return { allowed: false, reason: `Tilde expansion variant in '${path}' requires manual approval.`, path };
-      if (path.includes('$') || path.includes('%') || path.startsWith('=')) return { allowed: false, reason: `Shell expansion syntax in '${path}' requires manual approval.`, path };
-      if (hasSuspiciousWindowsPathPattern(path)) return { allowed: false, reason: `Suspicious Windows path pattern detected in '${path}'.`, path };
-      if ((operationType === 'write' || operationType === 'create') && containsGlobPattern(path)) return { allowed: false, reason: `Glob patterns are blocked for write operations ('${path}'). Use an exact path.`, path };
-    }
-    if (String(call?.tool || '') === 'fs_delete_path') {
-      const target = normalizePathInput(call?.args?.path);
-      if (isDangerousRemovalPath(target)) return { allowed: false, reason: `Refusing dangerous delete target '${target || '(empty)'}.`, path: target };
-    }
-    return { allowed: true };
-  }
+  // Path validation and filesystem guards are now in filesystem-guards.js
+  // Access via window.AgentFsGuards.* (normalizePathInput, containsGlobPattern, etc.)
+  // Local aliases for hot-path convenience:
+  const normalizePathInput = (window.AgentFsGuards || {}).normalizePathInput || function(v) { return String(v || '').trim().replace(/^['"`]+|['"`]+$/g, '').trim(); };
+  const containsGlobPattern = (window.AgentFsGuards || {}).containsGlobPattern || function(v) { return /[*?[\]{}]/.test(String(v || '')); };
+  const containsVulnerableUncPathLight = (window.AgentFsGuards || {}).containsVulnerableUncPathLight || function(v) { return String(v || '').startsWith('\\\\') || String(v || '').startsWith('//'); };
+  const hasSuspiciousWindowsPathPattern = (window.AgentFsGuards || {}).hasSuspiciousWindowsPathPattern || function() { return false; };
+  const isDangerousRemovalPath = (window.AgentFsGuards || {}).isDangerousRemovalPath || function() { return true; };
+  const getFilesystemOperationType = (window.AgentFsGuards || {}).getFilesystemOperationType || function() { return 'none'; };
+  const extractFilesystemPathsFromArgs = (window.AgentFsGuards || {}).extractFilesystemPathsFromArgs || function() { return []; };
+  const validateFilesystemCallGuard = (window.AgentFsGuards || {}).validateFilesystemCallGuard || function() { return { allowed: true }; };
 
   // P3.1: Blast-radius confirmation gate
   function getToolRisk(tool) {
@@ -394,6 +305,39 @@
     }
     return batches;
   }
+
+  // ── Tool call steering / rewriting ──────────────────────────────────────────
+  // Intercepts and rewrites known-bad model-generated tool inputs BEFORE they
+  // reach the executor — a defence-in-depth layer on top of system-prompt rules.
+
+  function steerToolCall(toolName, args) {
+    const C = window.CONSTANTS || {};
+    if (typeof args.command === 'string') {
+      const cmd = args.command;
+      const blockedCmd = C?.INJECTION_PATTERNS?.BLOCKED_CMD_REGEX;
+      const blockedDisk = C?.INJECTION_PATTERNS?.BLOCKED_DISK_OPS_REGEX;
+      if ((blockedCmd && blockedCmd.test(cmd)) || (blockedDisk && blockedDisk.test(cmd))) {
+        args.command = 'echo BLOCKED: refusing to delete root filesystem';
+        return;
+      }
+    }
+
+    const patterns = C?.INJECTION_PATTERNS || {};
+    const sanitizeStringArg = val => val
+      .replace(patterns.INJECTION_TAG_STRIP_REGEX || /<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+      .replace(patterns.REMINDER_TAG_STRIP_REGEX || /<system-reminder[^>]*>[\s\S]*?<\/system-reminder>/gi, '')
+      .replace(patterns.DENIAL_TAG_STRIP_REGEX || /<permission_denials[^>]*>[\s\S]*?<\/permission_denials>/gi, '')
+      .trim();
+
+    const keys = C?.SANITIZE_STRING_ARGS || ['path', 'filePath', 'sourcePath', 'destinationPath', 'content', 'query', 'text'];
+    for (const key of keys) {
+      if (typeof args[key] === 'string') {
+        args[key] = sanitizeStringArg(args[key]);
+      }
+    }
+  }
+
+  window.steerToolCall = steerToolCall;
 
   // ── Run state ──
 

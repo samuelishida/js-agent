@@ -279,13 +279,17 @@ const SKILL_SCRIPTS = [
   'src/app/runtime-memory.js',
   'src/app/permissions.js',
   'src/app/compaction.js',
+  'src/app/filesystem-guards.js',
   'src/app/steering.js',
   'src/app/rate-limiter.js',
   'src/app/worker-manager.js',
   'src/app/local-backend.js',
   'src/app/tools.js',
   'src/app/tool-execution.js',
+  'src/app/ui-render.js',
+  'src/app/reply-analysis.js',
   'src/app/llm.js',
+  'src/app/child-agent.js',
   'src/app/agent.js',
   'src/app/ui-modern.js'
 ];
@@ -1364,7 +1368,7 @@ async function main() {
   });
 
   await group('extractThinkingBlocks — extracts thinking blocks', () => {
-    const fn = LLM?.extractThinkingBlocks;
+    const fn = globalThis.window.AgentReplyAnalysis?.extractThinkingBlocks;
     if (!fn) { console.log('  (skipped — function not exported)'); return; }
     const blocks = fn('Hello <think>reasoning here</think> world <think>more thinking</think> end');
     assert.equal(blocks.length, 2, 'should extract 2 thinking blocks');
@@ -1373,14 +1377,14 @@ async function main() {
   });
 
   await group('extractThinkingBlocks — no thinking blocks', () => {
-    const fn = LLM?.extractThinkingBlocks;
+    const fn = globalThis.window.AgentReplyAnalysis?.extractThinkingBlocks;
     if (!fn) { console.log('  (skipped — function not exported)'); return; }
     assert.deepEqual(fn('No thinking here'), [], 'should return empty array');
     assert.deepEqual(fn(''), [], 'empty string returns empty array');
   });
 
   await group('splitModelReply — splits thinking and visible content', () => {
-    const fn = LLM?.splitModelReply;
+    const fn = globalThis.window.AgentReplyAnalysis?.splitModelReply;
     if (!fn) { console.log('  (skipped — function not exported)'); return; }
     const result = fn('<think>step by step</think>The answer is 42');
     assert.equal(result.thinkingBlocks.length, 1, 'should have 1 thinking block');
@@ -1390,7 +1394,7 @@ async function main() {
   });
 
   await group('splitModelReply — sequential thinking blocks', () => {
-    const fn = LLM?.splitModelReply;
+    const fn = globalThis.window.AgentReplyAnalysis?.splitModelReply;
     if (!fn) { console.log('  (skipped — function not exported)'); return; }
     const result = fn('<think>first thought</think> visible text <think>second thought</think> more visible');
     assert.equal(result.thinkingBlocks.length, 2, 'should extract both thinking blocks');

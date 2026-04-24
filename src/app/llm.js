@@ -798,8 +798,15 @@ async function callOpenRouter(msgs, signal, options = {}) {
   }
 
   const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content || '';
-  return { text };
+
+  // Check for native tool_calls before falling back to content
+  const toolCalls = data?.choices?.[0]?.message?.tool_calls;
+  if (Array.isArray(toolCalls) && toolCalls.length) {
+    const xml = normalizeFunctionCallsToXml(toolCalls);
+    if (xml) return xml;
+  }
+
+  return data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || '';
 }
 
 // Markdown/HTML rendering functions moved to ui-render.js:

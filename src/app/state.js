@@ -758,6 +758,9 @@ function getCloudReadiness() {
     }
     return { ready: true, reason: '' };
   }
+  if (typeof openrouterBackend !== 'undefined' && openrouterBackend.enabled && openrouterBackend.apiKey) {
+    return { ready: true, reason: '' };
+  }
   if (!apiKey) {
     const providerLabel = provider === 'openai' ? 'OpenAI' : provider === 'clawd' ? 'Clawd' : 'Cloud';
     return { ready: false, reason: `${providerLabel} requires an API key. Enter your key and click Save.` };

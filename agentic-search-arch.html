@@ -704,11 +704,13 @@
             <span class="fp">tool-execution.js</span>
             <span class="fp">tools.js</span>
             <span class="fp">local-backend.js</span>
+            <span class="fp">rate-limiter.js</span>
             <span class="fp">runtime-memory.js</span>
+            <span class="fp">worker-manager.js</span>
             <span class="fp">ui-modern.js</span>
           </div>
           <div class="lcard-bts">
-            <span class="lbadge lbadge-pub">CONSTANTS · AgentPermissions · AgentCompaction · AgentSteering · AgentToolExecution · AgentMemory · AgentRuntimeCache · AgentLLMControl</span>
+            <span class="lbadge lbadge-pub">CONSTANTS · AgentPermissions · AgentCompaction · AgentSteering · AgentToolExecution · AgentMemory · AgentRuntimeCache · AgentWorkers · AgentLLMControl</span>
             <span class="lbadge lbadge-load">loads last</span>
           </div>
           <button class="card-tog">▼</button>
@@ -729,7 +731,7 @@
             <div class="lcard-rows">
               <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>AgentOrchestrator</code>, <code>AgentSkills</code>, <code>AgentRegex</code>, <code>AgentPrompts</code></span></div>
               <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v"><code>window.CONSTANTS</code>, <code>window.AgentPermissions</code>, <code>window.AgentCompaction</code>, <code>window.AgentSteering</code>, <code>window.AgentToolExecution</code>, <code>window.AgentLLMControl</code>, <code>window.AgentMemory</code>, <code>window.AgentRuntimeCache</code></span></div>
-              <div class="ir"><span class="ir-k">Internal load order</span><span class="ir-v"><code>state.js</code> → <code>constants.js</code> → <code>runtime-memory.js</code> → <code>permissions.js</code> → <code>compaction.js</code> → <code>steering.js</code> → <code>local-backend.js</code> → <code>tools.js</code> → <code>tool-execution.js</code> → <code>llm.js</code> → <code>agent.js</code> → <code>ui-modern.js</code></span></div>
+              <div class="ir"><span class="ir-k">Internal load order</span><span class="ir-v"><code>state.js</code> → <code>constants.js</code> → <code>runtime-memory.js</code> → <code>permissions.js</code> → <code>compaction.js</code> → <code>steering.js</code> → <code>rate-limiter.js</code> → <code>local-backend.js</code> → <code>tools.js</code> → <code>tool-execution.js</code> → <code>llm.js</code> → <code>agent.js</code> → <code>worker-manager.js</code> → <code>ui-modern.js</code></span></div>
               <div class="ir"><span class="ir-k">LLM lanes</span><span class="ir-v">Three lanes: <code>local</code> (LM Studio / custom Ollama), <code>ollama</code> (Ollama Cloud via proxy), <code>cloud</code> (Gemini, OpenAI, Claude, Azure). Local → cloud fallback automatic.</span></div>
             </div>
             <div class="cb">

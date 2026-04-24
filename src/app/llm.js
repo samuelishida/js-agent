@@ -58,6 +58,7 @@ async function readOllamaNativeStream(response, onChunk) {
   if (!reader) return null;
   const decoder = new TextDecoder();
   let fullContent = '';
+  let fullReasoning = '';
   let buffer = '';
   try {
     while (true) {
@@ -72,13 +73,24 @@ async function readOllamaNativeStream(response, onChunk) {
         try {
           const obj = JSON.parse(trimmed);
           if (obj.error) {
-            const err = new Error(String(obj.error?.message || obj.error || 'Ollama streaming error').slice(0, 200));
+            const msg = String(obj.error?.message || obj.error || 'Ollama streaming error').slice(0, 200);
+            if (/^EOF$/i.test(msg.trim())) {
+              console.warn('[readOllamaNativeStream] stream ended with EOF error - returning accumulated content');
+              if (!fullContent && fullReasoning) {
+                return '<think>\n' + fullReasoning + '\n</think>';
+              }
+            }
+            const err = new Error(msg);
             throw err;
           }
           const delta = obj.message?.content || '';
+          const reasoning = obj.message?.reasoning || obj.message?.reasoning_content || '';
           if (delta) {
             fullContent += delta;
             if (onChunk) onChunk(delta, fullContent);
+          }
+          if (reasoning) {
+            fullReasoning += reasoning;
           }
           if (obj.done) { reader.cancel(); return fullContent; }
         } catch (e) {
@@ -90,10 +102,16 @@ async function readOllamaNativeStream(response, onChunk) {
       try {
         const obj = JSON.parse(buffer.trim());
         if (obj.message?.content) fullContent += obj.message.content;
+        if (obj.message?.reasoning || obj.message?.reasoning_content) {
+          fullReasoning += (obj.message.reasoning || obj.message.reasoning_content);
+        }
         if (obj.done) return fullContent;
       } catch {}
     }
   } finally { reader.releaseLock(); }
+  if (fullReasoning && !fullContent) {
+    return '<think>\n' + fullReasoning + '\n</think>';
+  }
   return fullContent;
 }
 
@@ -102,6 +120,7 @@ async function readStreamingResponse(response) {
   if (!reader) return null;
   const decoder = new TextDecoder();
   let fullContent = '';
+  let fullReasoning = '';
   let buffer = '';
   try {
     while (true) {
@@ -113,16 +132,28 @@ async function readStreamingResponse(response) {
       for (const chunk of chunks) {
         const events = parseSSEChunk(chunk);
         for (const event of events) {
-          if (event.done) { reader.cancel(); return fullContent; }
-          const delta = event.parsed?.choices?.[0]?.delta?.content || '';
+          if (event.done) {
+            reader.cancel();
+            if (!fullContent && fullReasoning) return '<tool_call>think>\n' + fullReasoning + '\n</think>';
+            return fullContent;
+          }
+          const deltaObj = event.parsed?.choices?.[0]?.delta;
+          const delta = deltaObj?.content || '';
+          const reasoning = deltaObj?.reasoning || deltaObj?.reasoning_content || '';
           if (delta) {
             fullContent += delta;
             if (streamingCallback) streamingCallback(delta, fullContent);
+          }
+          if (reasoning) {
+            fullReasoning += reasoning;
           }
         }
       }
     }
   } finally { reader.releaseLock(); }
+  if (!fullContent && fullReasoning) {
+    return '<think>\n' + fullReasoning + '\n</think>';
+  }
   return fullContent;
 }
 
@@ -760,6 +791,31 @@ function normalizeVisibleModelText(text) {
 
   // Some models prepend a literal "markdown" token before the actual answer.
   value = value.replace(/^markdown\s+(?=[#>*\-\d`\[]|\w)/i, '');
+
+  // Models that leak reasoning into content often produce:
+  //   "We will use X? Actually... So answer: Y"
+  //   "I could search... Let me think... The answer is Z"
+  // If the text contains a clear answer delimiter after reasoning, extract just the answer.
+  const answerDelimiters = [
+    /\n\n((?:[A-Z][\s\S]*))/,
+    /\n(So\s+(?:the |the )?(?:answer|result|conclusion|output|response) is\b[\s\S]*)/i,
+    /\n(Therefore,?\s*[\s\S]*)/i,
+    /\n(In (?:conclusion|summary),?\s*[\s\S]*)/i,
+    /\n((?:Chuck |As of |The |It is |He |She |They |This )(?:(?:is|are|was|were|has|have)\b)[\s\S]*)/i,
+  ];
+
+  // Only apply if text is long enough to have reasoning + answer (> 150 chars)
+  // and starts with a reasoning leak pattern
+  const startsWithReasoning = /^(?:We (?:will|should|need|could)|I (?:will|should|need|could|am|can)|Let's|Actually|Hmm|Wait|First,|Let me)/i.test(value);
+  if (startsWithReasoning && value.length > 150) {
+    for (const delim of answerDelimiters) {
+      const match = value.match(delim);
+      if (match && match[1] && match[1].trim().length > 20) {
+        value = match[1].trim();
+        break;
+      }
+    }
+  }
 
   return value.trim();
 }
@@ -1507,12 +1563,13 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
         continue;
       }
       if (res.status === 500 && /EOF/i.test(errText)) {
-        const eofError = new Error(
+        lastError = new Error(
           `Ollama model crashed (HTTP 500 EOF). This usually means the model doesn't support the request format or ran out of memory. Try a smaller model or reduce context size.`
         );
-        eofError.status = res.status;
-        eofError.code = 'OLLAMA_MODEL_CRASH';
-        throw eofError;
+        lastError.status = res.status;
+        lastError.code = 'OLLAMA_MODEL_CRASH';
+        if (endpoints.indexOf(ep) === endpoints.length - 1) throw lastError;
+        continue;
       }
       lastError = new Error(`Ollama returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
       lastError.status = res.status;
@@ -1523,10 +1580,18 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
     // Handle streaming for both OpenAI SSE and Ollama native NDJSON
     if (shouldStream && res.body) {
       let streamResult;
-      if (isNative) {
-        streamResult = await readOllamaNativeStream(res, streamingCallback);
-      } else {
-        streamResult = await readStreamingResponse(res);
+      try {
+        if (isNative) {
+          streamResult = await readOllamaNativeStream(res, streamingCallback);
+        } else {
+          streamResult = await readStreamingResponse(res);
+        }
+      } catch (streamErr) {
+        if (signal?.aborted || streamErr?.name === 'AbortError') throw streamErr;
+        console.warn(`[Ollama] stream error from ${endpointUrl}: ${streamErr?.message}`);
+        lastError = streamErr;
+        if (endpoints.indexOf(ep) === endpoints.length - 1) throw lastError;
+        continue;
       }
       if (streamResult !== null && streamResult !== '') return streamResult;
       lastError = new Error('Ollama stream exhausted without content');
@@ -1551,7 +1616,22 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
     }
 
     if (data.error) {
-      lastError = new Error(String(data.error?.message || data.error || 'Ollama API error').slice(0, 200));
+      const errMsg = String(data.error?.message || data.error || 'Ollama API error').slice(0, 200);
+      if (/^EOF$/i.test(errMsg.trim())) {
+        const eofReasoning = isNative
+          ? (data.message?.reasoning || data.message?.reasoning_content || '')
+          : (data.choices?.[0]?.message?.reasoning || data.choices?.[0]?.message?.reasoning_content || '');
+        if (!eofReasoning?.trim()) {
+          const eofError = new Error('Ollama model crashed (EOF). Try a smaller model or reduce context size.');
+          eofError.status = 500;
+          eofError.code = 'OLLAMA_MODEL_CRASH';
+          if (endpoints.indexOf(ep) === endpoints.length - 1) throw eofError;
+          lastError = eofError;
+          continue;
+        }
+        return '<' + 'think>\n' + eofReasoning + '\n</' + 'think>';
+      }
+      lastError = new Error(errMsg);
       if (endpoints.indexOf(ep) === endpoints.length - 1) throw lastError;
       continue;
     }
@@ -1565,6 +1645,18 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
           || data.message?.content
           || data.response
           || '');
+
+    const rawReasoning = isNative
+      ? (data.message?.reasoning || data.message?.reasoning_content || '')
+      : (data.choices?.[0]?.message?.reasoning
+          || data.choices?.[0]?.message?.reasoning_content
+          || data.choices?.[0]?.reasoning
+          || data.choices?.[0]?.reasoning_content
+          || '');
+
+    if (!rawContent && rawReasoning && rawReasoning.trim()) {
+      return '<' + 'think>\n' + rawReasoning + '\n</' + 'think>';
+    }
 
     // Check for incomplete generation (finish_reason null/length) or garbage output.
     const finishReason = isNative
@@ -1767,7 +1859,7 @@ async function callLocal(msgs, signal, options = {}) {
   for (const ep of endpoints) {
     try {
       let body;
-      const localStream = !!(streamingCallback);
+      const localStream = true;
       if (ep.format === 'ollama') {
         body = {
           model,
@@ -1816,7 +1908,12 @@ async function callLocal(msgs, signal, options = {}) {
 
       if (localStream && res.body && ep.format !== 'ollama_generate') {
         try {
-          const streamedContent = await readStreamingResponse(res);
+          let streamedContent;
+          if (ep.format === 'ollama') {
+            streamedContent = await readOllamaNativeStream(res, streamingCallback);
+          } else {
+            streamedContent = await readStreamingResponse(res);
+          }
           if (streamedContent !== null && streamedContent.length > 0) return streamedContent;
         } catch {}
         lastEndpointError = `${ep.path}: stream exhausted without content`;

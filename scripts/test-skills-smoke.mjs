@@ -181,8 +181,8 @@ async function main() {
     async load() {
       return 'policy';
     },
-    async loadRendered() {
-      return 'system';
+    async loadRendered(_, vars) {
+      return vars?.tools_list || 'Available tools: (none)';
     }
   };
 
@@ -193,7 +193,7 @@ async function main() {
     ctxLimit: 32000,
     enabledTools: ['tool_search', 'snapshot_skill_catalog']
   });
-  assert.match(prompt, /Imported Snapshot Skills/i, 'orchestrator prompt is missing snapshot addendum');
+  assert.match(prompt, /Available tools/i, 'orchestrator prompt is missing tool list');
 
   process.stdout.write(
     [

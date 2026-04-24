@@ -46,8 +46,11 @@
 
   function getCallSignature(call) {
     const TE = window.AgentToolExecution;
-    if (TE?.getSemanticToolCallSignature) return TE.getSemanticToolCallSignature(call);
-    return `${String(call?.tool || 'unknown')}:${JSON.stringify(call?.args || {})}`;
+    if (TE?.getToolCallSignature) return TE.getToolCallSignature(call);
+    const args = call?.args || {};
+    const sortedKeys = Object.keys(args).sort();
+    const stableArgs = '{' + sortedKeys.map(k => `${JSON.stringify(k)}:${JSON.stringify(args[k])}`).join(',') + '}';
+    return `${String(call?.tool || 'unknown')}:${stableArgs}`;
   }
 
   function recordRepeatedToolCall(call) {
@@ -152,7 +155,9 @@
     const indices = [];
 
     source.forEach((message, index) => {
-      if (message?.role === 'user' && /<tool_result\b/i.test(String(message.content || ''))) {
+      const isToolResult = (message?.role === 'user' && /<tool_result\b/i.test(String(message.content || '')))
+        || message?.role === 'tool';
+      if (isToolResult) {
         indices.push(index);
       }
     });
@@ -174,7 +179,7 @@
 
       const original = String(message?.content || '');
       const replacement = clearOnly
-        ? `<tool_result tool="compacted">\n${clearedNotice}\n</tool_result>`
+        ? (message.role === 'tool' ? clearedNotice : `<tool_result tool="compacted">\n${clearedNotice}\n</tool_result>`)
         : clearedNotice;
       if (original === replacement) return message;
 
@@ -200,7 +205,7 @@
     return null;
   }
 
-  async function applyContextManagementPipeline({ ctxLimit } = {}) {
+  function applyContextManagementPipeline({ ctxLimit } = {}) {
     const messages = Array.isArray(window.messages) ? window.messages : [];
     const limit = Number(ctxLimit || C().DEFAULT_CTX_LIMIT_CHARS || 32000);
     const tokenLimit = Math.floor(limit / CHAR_TOKEN_RATIO);

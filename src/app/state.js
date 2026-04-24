@@ -586,14 +586,19 @@ async function probeOllama() {
     const data = await res.json();
     const models = Array.isArray(data.models) ? data.models : [];
 
-    // Update the installed-models Set (used for reliable local-vs-cloud routing).
-    ollamaInstalledModels.clear();
-    ollamaModelContextSizes.clear();
+    const newInstalledModels = new Set();
+    const newContextSizes = new Map();
     models.forEach(m => {
-      ollamaInstalledModels.add(m.name);
+      newInstalledModels.add(m.name);
+      const baseName = m.name.split(':')[0];
+      if (baseName !== m.name) newInstalledModels.add(baseName);
       const ctxLen = inferContextLength(m.name, m);
-      if (ctxLen) ollamaModelContextSizes.set(m.name, { contextLength: ctxLen });
+      if (ctxLen) newContextSizes.set(m.name, { contextLength: ctxLen });
     });
+    ollamaInstalledModels.clear();
+    for (const name of newInstalledModels) ollamaInstalledModels.add(name);
+    ollamaModelContextSizes.clear();
+    for (const [k, v] of newContextSizes) ollamaModelContextSizes.set(k, v);
 
     if (select) {
       const saved = localStorage.getItem('agent_ollama_cloud_model') || '';
@@ -668,17 +673,18 @@ async function fetchModelContextLength(modelName) {
       }
       const template = data.template || '';
       const meta = { parameters: params, template };
-      const inferred = inferContextLength(modelName, meta);
-      ollamaModelContextSizes.set(modelName, { contextLength: inferred });
-      return inferred;
+      return inferContextLength(modelName, meta);
     }
   } catch {}
   return inferContextLength(modelName, null);
 }
 
-function getModelContextLength() {
+  function getModelContextLength() {
   const model = typeof getOllamaCloudModel === 'function' ? getOllamaCloudModel() : '';
   if (!model) return (typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS || 32000;
+  if (typeof ollamaBackend !== 'undefined' && !ollamaBackend.enabled) {
+    return (typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS || 32000;
+  }
   const cached = ollamaModelContextSizes.get(model);
   if (cached?.contextLength) return cached.contextLength;
   return inferContextLength(model, null);
@@ -1114,6 +1120,9 @@ function deleteSession(sessionId) {
     localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
     saveSessions();
     activateSession(activeSessionId);
+    updateStats();
+    updateCtxBar();
+    setStatus('ok', 'session deleted');
     return;
   }
 

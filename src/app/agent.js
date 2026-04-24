@@ -5,6 +5,18 @@
 // on orchestration and event binding.
 // ─────────────────────────────────────────────────────────────────────────────
 
+function stripModelMetaCommentary(text) {
+  let value = String(text || '').trim();
+  if (!value) return '';
+  value = value.replace(/^[Ww]e (?:need|have|must) to output (?:tool|function) calls? only\.?\s*/i, '');
+  value = value.replace(/^[Ww]e (?:will|should|must|need to|are going to) (?:call|use|invoke|execute|run) \S+(?:\s+with\s+[^.]+)?\.?\s*/i, '');
+  value = value.replace(/^[Ii] (?:will|should|need to|must|am going to|am) (?:call|use|invoke|execute|run|outputting) \S+(?:\s+with\s+[^.]+)?\.?\s*/i, '');
+  value = value.replace(/^[Ll]et's (?:call|use|try|invoke) \S+\.?\s*/i, '');
+  value = value.replace(/^[Ww]e need to (?:output|generate|produce|call|make) (?:a )?(?:tool|function) call\.?\s*/i, '');
+  value = value.replace(/^I need to (?:output|generate|produce|call|make) (?:a )?(?:tool|function) call\.?\s*/i, '');
+  return value.trim();
+}
+
 // ── Constants accessor ───────────────────────────────────────────────────────
 const C = () => window.CONSTANTS || {};
 
@@ -81,7 +93,7 @@ function getToolCallCleanupRegex() {
   if (sharedToolBlock instanceof RegExp) {
     return new RegExp(sharedToolBlock.source, 'gi');
   }
-  return /<tool_call>\s*[\s\S]*?<\/tool_call>/gi;
+  return /<tool_call(?:\s[^>]*>|>?)\s*[\s\S]*?<\/tool_call>/gi;
 }
 
 // ── Query planning helpers ───────────────────────────────────────────────────
@@ -479,10 +491,19 @@ async function agentLoop(userMessage) {
       }
 
       // Model crashed or produced garbage — show user-friendly message
-      if (e?.code === 'OLLAMA_INCOMPLETE_OUTPUT' || e?.code === 'LOCAL_INCOMPLETE_OUTPUT' || e?.code === 'OLLAMA_MODEL_CRASH') {
+      if (e?.code === 'OLLAMA_INCOMPLETE_OUTPUT' || e?.code === 'LOCAL_INCOMPLETE_OUTPUT') {
         addMessage('error', e.message, round);
         setStatus('error', 'model error');
         return;
+      }
+      if (e?.code === 'OLLAMA_MODEL_CRASH' && round < MAX_ROUNDS) {
+        addNotice(`Model crashed (EOF). Retrying with a compact continuation prompt.`);
+        window.messages.push({
+          role: 'user',
+          content: 'The previous model call crashed. Continue now with a shorter, focused response: call one tool with complete args, or provide a concise final answer.'
+        });
+        updateCtxBar();
+        continue;
       }
       addMessage('error', `LLM error: ${e.message}`, round);
       setStatus('error', 'api error');
@@ -628,7 +649,7 @@ async function agentLoop(userMessage) {
     }
 
     consecutiveNonActionRounds = 0;
-    const toolContent = String(reply || '').replace(/<tool_call>\s*[\s\S]*?<\/tool_call>/gi, '').trim();
+    const toolContent = stripModelMetaCommentary(String(reply || '').replace(/<tool_call(?:\s[^>]*>|>?)\s*[\s\S]*?<\/tool_call>/gi, ''));
     if (toolContent) {
       addMessage('agent', toolContent, round, false, false, []);
     }
@@ -797,7 +818,7 @@ async function agentLoop(userMessage) {
     const finalReply = await callLLM(window.messages, getTurnLlmCallOptions());
     throwIfStopRequested();
     const parsedFinalReply = splitModelReply(finalReply);
-    const finalMarkdown = parsedFinalReply.visible.replace(getToolCallCleanupRegex(), '').trim();
+    const finalMarkdown = stripModelMetaCommentary(parsedFinalReply.visible.replace(getToolCallCleanupRegex(), ''));
     throwIfStopRequested();
 
     hideThinking();

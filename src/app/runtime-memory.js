@@ -62,7 +62,11 @@
   }
 
   function saveRuntimeCacheStore(store) {
-    localStorage.setItem(RUNTIME_CACHE_KEY, JSON.stringify(store));
+    try {
+      localStorage.setItem(RUNTIME_CACHE_KEY, JSON.stringify(store));
+    } catch {
+      console.warn('[RuntimeCache] Could not persist cache (storage quota exceeded or blocked).');
+    }
   }
 
   function ensureScope(store, scope) {
@@ -130,7 +134,7 @@
 
     entry.lastAccessedAt = Date.now();
     entry.hits = toNumber(entry.hits, 0) + 1;
-    saveRuntimeCacheStore(store);
+    if (entry.hits % 10 === 0 || changed) saveRuntimeCacheStore(store);
     return entry.payload;
   }
 
@@ -351,6 +355,7 @@
 
     if (changed) {
       saveLongTermMemoryStore(store);
+      clearRuntimeScope('memory_retrieval');
     }
   }
 
@@ -450,6 +455,9 @@
     search: searchLongTermMemories,
     buildContextBlock: buildMemoryContextBlock,
     extractFromTurn,
-    formatList: formatMemoryList
+    formatList: formatMemoryList,
+    onTurnComplete({ userMessage = '', assistantMessage = '' } = {}) {
+      return extractFromTurn({ userMessage, assistantMessage });
+    }
   };
 })();

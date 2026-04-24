@@ -1,6 +1,6 @@
 ﻿(() => {
-  const TOOL_BLOCK = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/i;
-  const TOOL_BLOCK_GLOBAL = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
+  const TOOL_BLOCK = /<tool_call(?:\s[^>]*>|>?)\s*([\s\S]*?)\s*<\/tool_call>/i;
+  const TOOL_BLOCK_GLOBAL = /<tool_call(?:\s[^>]*>|>?)\s*([\s\S]*?)\s*<\/tool_call>/gi;
 
   // Matches <|tool_call>call:name{...} or <|tool_call>name{...} used by some local models.
   // The args block is shallow (no nested braces) so [^{}]* is sufficient.
@@ -372,7 +372,11 @@
       /^in portuguese\b/i,
       /^the user (might|is|wrote)/i,
       /^i need to\b/i,
-      /^the response should\b/i
+      /^the response should\b/i,
+      /^we (?:need|have|must) to (?:output|generate|produce|call|make)\b/i,
+      /^we (?:will|should|must|are going to) (?:call|use|invoke|execute|run)\b/i,
+      /^i (?:will|should|am going to|am) (?:call|use|invoke|execute|run|outputting)\b/i,
+      /^(let's|lets) (?:call|use|try|invoke)\b/i
     ].some(pattern => pattern.test(value));
   }
 

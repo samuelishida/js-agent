@@ -6,7 +6,6 @@
     policy: 'prompts/orchestrator.md',
     safety: 'prompts/safety_guidelines.md'
   };
-  const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__';
   let cachedSafetyGuidelines = null;
 
   async function loadSafetyGuidelines() {
@@ -64,12 +63,6 @@
   function sanitizeProviderMentions(text) {
     const sanitize = getSnapshotApi()?.sanitizeVendorMentions;
     return sanitize ? sanitize(String(text || '')) : String(text || '');
-  }
-
-  function getSnapshotSnippets() {
-    const snippets = getSnapshotApi()?.getPromptSnippets?.();
-    if (!snippets || typeof snippets !== 'object') return {};
-    return snippets;
   }
 
   function buildToolList(enabledTools = []) {
@@ -137,49 +130,14 @@
     ].join('\n');
   }
 
-  function buildDoingTasksSection() {
-    return [
-      '# Doing tasks',
-      '- Treat vague requests as software-engineering tasks in the current working context and act on the code, not just the wording.',
-      '- Read relevant files before proposing or making code changes.',
-      '- Avoid speculative refactors, new abstractions, or extra features beyond the request.',
-      '- If an approach fails, diagnose why before switching tactics.',
-      '- Report outcomes faithfully: do not claim checks passed unless verified.',
-      '- If blocked, pivot tools or approach before asking the user for help.'
-    ].join('\n');
-  }
-
   function buildUsingToolsSection() {
     return [
       '# Using your tools',
       '- Prefer dedicated tools over generic shell commands whenever available.',
       '- Use read_file before edit_file or multi_edit.',
       '- Prefer edit_file for targeted edits and multi_edit for coordinated file changes.',
-      '- For tasks with 3 or more concrete steps, create and maintain a todo list with todo_write.',
       '- Call multiple independent read-only tools in parallel when safe.',
-      '- Sequence dependent tool calls; do not parallelize dependency chains.',
       '- Do not invent tool outputs, files, URLs, or command results.'
-    ].join('\n');
-  }
-
-  function buildToneAndStyleSection() {
-    return [
-      '# Tone and style',
-      '- Keep responses concise and direct.',
-      '- Use Markdown for user-facing answers.',
-      '- Include file references as path:line when citing specific code.',
-      '- Do not add a colon immediately before tool calls in narration.',
-      '- Only use emojis if the user explicitly asks for them.'
-    ].join('\n');
-  }
-
-  function buildOutputEfficiencySection() {
-    return [
-      '# Output efficiency',
-      '- Lead with the answer or next action.',
-      '- Before the first tool call, briefly state what you are about to do.',
-      '- Keep progress updates short and milestone-based.',
-      '- Avoid repeating context the user already provided.'
     ].join('\n');
   }
 
@@ -190,50 +148,7 @@
       '# Environment',
       `- Runtime: browser app`,
       `- Primary authorized root: ${rootId}`,
-      `- Date: ${today}`,
-      '- Some extension-only capabilities may be available through the local dev-server bridge when running same-origin.'
-    ].join('\n');
-  }
-
-  function buildToolReferenceSection() {
-    return [
-      '# Tool reference',
-      'Key tools for common tasks (call these by the names shown here):',
-      '- read_file(path, startLine?, endLine?): Read a file with optional 1-based line range',
-      '- write_file(path, content): Create or overwrite a file with complete content',
-      '- edit_file(path, oldString, newString, replaceAll?): Surgical string replacement in a file',
-      '- multi_edit(edits[]): Atomic multi-file edit batch — each edit: {path, oldString, newString}',
-      '- list_dir(path): List directory contents',
-      '- glob(pattern, exclude?): Find files by glob pattern',
-      '- search_code(query, glob?, isRegex?, caseSensitive?, contextLines?): Search code/text files',
-      '- run_terminal(command, cwd?): Run a shell command through the local dev-server bridge',
-      '- web_fetch(url): Fetch a URL and return readable text',
-      '- get_diagnostics(path?, severity?): Get diagnostics from the local bridge when available',
-      '- todo_write(todos): Persist a structured todo list',
-      '- memory_read(scope?): Read compat memory (global/project scope)',
-      '- memory_write(topic?, content, replace?, scope?): Write compat memory',
-      '- spawn_agent(task, tools?, maxIterations?): Run a focused sub-agent task'
-    ].join('\n');
-  }
-
-  function buildAutopilotRulesSection() {
-    return [
-      '# Autopilot rules',
-      '- Act autonomously on reversible local work.',
-      '- Always read a file before editing it.',
-      '- Prefer edit_file for targeted changes and multi_edit for coordinated edits.',
-      '- After edits, use diagnostics or another verification step before reporting success.',
-      '- For multi-step tasks, keep todo state current instead of batching updates.'
-    ].join('\n');
-  }
-
-  function buildEditRulesSection() {
-    return [
-      '# File edit rules',
-      '- oldString must match the file exactly; include surrounding context when needed.',
-      '- Preserve exact whitespace and indentation.',
-      '- If an edit target is missing, re-read the file before retrying.',
-      '- If the same oldString appears multiple times, add more context or use replaceAll only when intentional.'
+      `- Date: ${today}`
     ].join('\n');
   }
 
@@ -248,17 +163,6 @@
       '- You may call up to 5 tools in a single reply; independent reads can run in parallel.',
       hint ? `- Query hint: ${hint}` : ''
     ].filter(Boolean).join('\n');
-  }
-
-  function buildImportedSkillSnapshotSection() {
-    const skills = getSnapshotApi()?.getBundledSkills?.() || [];
-    if (!skills.length) return '';
-    const lines = skills.slice(0, SNAPSHOT_SKILL_LIMIT).map(item => {
-      const name = sanitizeProviderMentions(item?.name || 'unknown');
-      const desc = sanitizeProviderMentions(item?.description || item?.whenToUse || '');
-      return `- ${name}${desc ? `: ${desc}` : ''}`;
-    });
-    return ['# Imported skill patterns', ...lines].join('\n');
   }
 
   function mergePromptSections(sections = []) {
@@ -322,7 +226,7 @@
     const toolsList = buildToolList(enabledTools);
     const pair = window.AgentSkills?.detectFxPair?.(userMessage);
     const hint = pair ? `The user likely wants the ${pair.base}/${pair.quote} exchange rate.` : '';
-    const snapshotSnippets = getSnapshotSnippets();
+
     const safetyGuidelines = await loadSafetyGuidelines();
     const [policy, systemPromptTemplate] = await Promise.all([
       window.AgentPrompts.load(DEFAULT_PROMPTS.policy),
@@ -334,41 +238,17 @@
       })
     ]);
 
-    const actionsSection = sanitizeProviderMentions(snapshotSnippets.actionsSection || safetyGuidelines.executing_actions_with_care || '');
-    const hooksSection = sanitizeProviderMentions(snapshotSnippets.hooksSection || safetyGuidelines.hooks || '');
-    const remindersSection = sanitizeProviderMentions(snapshotSnippets.remindersSection || safetyGuidelines.reminders || '');
-    const autonomousSection = sanitizeProviderMentions(snapshotSnippets.autonomousSection || safetyGuidelines.autonomous_loop_behavior || '');
-    const functionResultClearingSection = sanitizeProviderMentions(snapshotSnippets.functionResultClearingSection || '');
-    const summarizeToolResultsSection = sanitizeProviderMentions(snapshotSnippets.summarizeToolResultsSection || '');
-    const promptInjectionSection = sanitizeProviderMentions(snapshotSnippets.promptInjectionSection || safetyGuidelines.prompt_injection_safety || '');
-    const snapshotDefaultPrompt = sanitizeProviderMentions(snapshotSnippets.defaultAgentPrompt || '');
-    const snapshotAddendum = sanitizeProviderMentions(getSnapshotApi()?.getPromptAddendum?.() || '');
+    const promptInjectionSection = sanitizeProviderMentions(safetyGuidelines.prompt_injection_safety || '');
 
     return mergePromptSections([
-      buildPromptHeader(snapshotSnippets, safetyGuidelines),
-      snapshotDefaultPrompt,
+      buildPromptHeader({}, safetyGuidelines),
       buildSystemSection(),
-      buildDoingTasksSection(),
-      actionsSection,
       buildUsingToolsSection(),
-      buildToneAndStyleSection(),
-      buildOutputEfficiencySection(),
       buildEnvironmentSection(),
-      buildToolReferenceSection(),
-      SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
       buildSessionGuidanceSection({ maxRounds, ctxLimit, hint }),
-      hooksSection,
-      remindersSection,
-      functionResultClearingSection,
-      summarizeToolResultsSection,
       promptInjectionSection,
-      autonomousSection,
-      buildAutopilotRulesSection(),
-      buildEditRulesSection(),
-      buildImportedSkillSnapshotSection(),
       sanitizeProviderMentions(policy),
-      sanitizeProviderMentions(systemPromptTemplate),
-      snapshotAddendum
+      sanitizeProviderMentions(systemPromptTemplate)
     ]);
   }
 

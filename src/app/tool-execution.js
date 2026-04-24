@@ -442,7 +442,7 @@
 
   function resolveToolCallsFromModelReply(reply, rawReply) {
     const scanTarget = String(rawReply || '').replace(/<think>[\s\S]*?<\/think>/gi, '');
-    const blockMatches = scanTarget.match(/<tool_call>\s*[\s\S]*?<\/tool_call>/gi) || [];
+    const blockMatches = scanTarget.match(/<tool_call(?:\s[^>]*>|>?)\s*[\s\S]*?<\/tool_call>/gi) || [];
     const parsedBlockCalls = blockMatches.map(block => parseToolCallCompat(block)).filter(call => !!call?.tool);
     if (parsedBlockCalls.length) return dedupeToolCalls(parsedBlockCalls);
     const fallbackCall = resolveToolCallFromModelReply(reply, scanTarget);

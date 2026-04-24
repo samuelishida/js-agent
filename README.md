@@ -126,6 +126,16 @@ Tools carry execution metadata (`readOnly`, `concurrencySafe`, `risk`). Read-onl
 
 ## 🚀 Deploy to Production (Render.com — Free Tier)
 
+### CI/CD Status
+
+![CI](https://github.com/samuelishida/js-agent/workflows/CI/badge.svg)
+
+Every push to `main` triggers:
+- JS syntax check (`npm run check:js`)
+- Smoke tests (`npm run test:smoke`)
+- Skills smoke tests (`npm run test:skills-smoke`)
+- Matrix across Node 18, 20, 22
+
 ### One-click deploy
 
 1. Fork this repo on GitHub

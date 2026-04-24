@@ -94,7 +94,7 @@ async function main() {
   installBrowserStubs();
 
   const skillScripts = [
-    'src/app/runtime-memory.js',
+    'src/app/context/runtime-memory.js',
     'src/skills/core/intents.js',
     'src/skills/core/tool-meta.js',
     'src/skills/generated/snapshot-data.js',

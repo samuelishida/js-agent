@@ -763,7 +763,7 @@ async function callCloud(msgs, signal, options = {}) {
 
 async function callOpenRouter(msgs, signal, options = {}) {
   const apiKey = String(openrouterBackend?.apiKey || '').trim();
-  const model = String(openrouterBackend?.model || 'google/gemma-4-26b-a4b-it:free').trim();
+  const model = String(openrouterBackend?.model || 'openai/gpt-oss-120b:free').trim();
   if (!apiKey) throw new Error('OpenRouter API key not configured');
 
   const maxTokens = Math.max(512, Number(options.maxTokens) || 4096);

@@ -1442,7 +1442,7 @@ async function main() {
     // We verify the state is valid for routing
     assert.ok(globalThis.window.openrouterBackend.enabled, 'should be enabled');
     assert.ok(globalThis.window.openrouterBackend.apiKey, 'should have key');
-    globalThis.window.openrouterBackend = { enabled: originalEnabled || false, apiKey: originalKey || '', model: 'google/gemma-4-26b-a4b-it:free' };
+    globalThis.window.openrouterBackend = { enabled: originalEnabled || false, apiKey: originalKey || '', model: 'openai/gpt-oss-120b:free' };
   });
 
   await group('callOpenRouter function exists in llm module', () => {

@@ -559,7 +559,7 @@ function saveOpenRouterModelSelection() {
 function loadOpenRouterModelSelection() {
   const select = document.getElementById('openrouter-model-select');
   if (!select) return;
-  const saved = localStorage.getItem('agent_openrouter_model') || 'google/gemini-2.5-flash-lite';
+  const saved = localStorage.getItem('agent_openrouter_model') || 'openai/gpt-oss-120b:free';
   select.value = saved;
   openrouterBackend.model = saved;
 }

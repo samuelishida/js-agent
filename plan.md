@@ -1,6 +1,11 @@
 # JS Agent — Comprehensive Improvement Plan
 
-> **Status:** Draft · **Last updated:** 2026-04-24 · **Codebase:** ~16,300 lines across 30+ files
+> **Status:** In Progress · **Last updated:** 2026-04-24 · **Codebase:** ~16,300 lines across 30+ files
+>
+> **Completed Phases:** 1, 2, 3, 4, 5, 7  
+> **Current Branch:** `dev`  
+> **Latest Commit:** `eb6e910` — Phase 5 + Phase 7  
+> **Test Status:** All 117 smoke tests + skills smoke + security tests passing ✅
 
 ---
 
@@ -1568,13 +1573,15 @@ Phase 7: "feat: security hardening and performance optimization"
 
 | Metric | Current | Target | How to Measure |
 |--------|---------|--------|----------------|
-| Largest file (lines) | 1,773 (shared.js) | < 500 | `wc -l src/**/*.js` |
-| agent.js (lines) | 763 | < 200 | `wc -l src/app/agent/agent-loop.js` |
-| `window.*` global reads | ~150+ | < 50 (via registry) | `grep -c 'window\.Agent' src/**/*.js` |
-| Files with `// @ts-check` | 0 | 8 | `grep -rl '@ts-check' src/` |
-| Unit test count | 0 | 200+ | `npm run test:unit` |
-| Test coverage | 0% | 60%+ | `npm run test:coverage` |
-| ESLint warnings | N/A | 0 | `npm run lint` |
+| Largest file (lines) | 1,773 (shared.js) | < 500 | `wc -l src/**/*.js` | **Pending Phase 6** |
+| agent.js (lines) | 763 → 150 | < 200 | `wc -l src/app/agent/agent.js` | ✅ **Done** |
+| llm.js (lines) | 1,764 → 273 | < 500 | `wc -l src/app/llm/llm.js` | ✅ **Done** |
+| state.js (lines) | 874 → 251 | < 300 | `wc -l src/app/core/state.js` | ✅ **Done** |
+| `window.*` global reads | ~150+ | < 50 (via registry) | `grep -c 'window\.Agent' src/**/*.js` | In progress |
+| Files with `// @ts-check` | 0 | 8 | `grep -rl '@ts-check' src/` | Pending |
+| Unit test count | 0 → 117 smoke + security | 200+ | `npm run test:smoke` | In progress |
+| Test coverage | 0% | 60%+ | `npm run test:coverage` | Pending |
+| ESLint warnings | N/A | 0 | `npm run lint` | Pending |
 
 ### Performance Metrics
 

@@ -667,6 +667,9 @@
       const hasFxIntent = !!detectFxPair(searchQuery);
       const hasWeatherIntent = detectWeatherIntent(searchQuery);
 
+      // For biographical facts, ensure we get multiple sources even if recency is detected
+      const shouldForceMultipleSources = isBioFactQuery && isRecentQuery;
+      
       const runners = [
         { name: 'weather_current', enabled: () => hasWeatherIntent, run: () => getCurrentWeather({}) },
         { name: 'fx_rate', enabled: () => hasFxIntent, run: () => searchFxRate(searchQuery) },
@@ -712,6 +715,37 @@
       }
 
       console.debug(`Search complete: ${results.length} providers returned results`);
+
+      // For biographical facts with recency, wait for at least 2 non-news sources before returning
+      if (shouldForceMultipleSources && results.length > 0) {
+        const nonNewsResults = results.filter(entry => !entry.source.includes('news'));
+        if (nonNewsResults.length < 2) {
+          // Continue running other sources to get more diverse information
+          const remainingRunners = runners.filter(runner => 
+            !results.some(result => result.source === runner.name) &&
+            !['weather_current', 'fx_rate', 'github_repositories'].includes(runner.name)
+          );
+          
+          for (const runner of remainingRunners) {
+            if (typeof runner.enabled === 'function' && !runner.enabled()) continue;
+            
+            try {
+              const result = await runner.run();
+              if (hasMeaningfulToolBody(result)) {
+                results.push({ source: runner.name, content: result });
+                diagnostics.push(`${runner.name}: ok (forced for diversity)`);
+                console.debug(`${runner.name}: got forced results for diversity`);
+                
+                // If we now have at least 2 non-news sources, we can break early
+                const currentNonNews = results.filter(entry => !entry.source.includes('news'));
+                if (currentNonNews.length >= 2) break;
+              }
+            } catch (error) {
+              console.debug(`${runner.name}: forced diversity run failed: ${error.message}`);
+            }
+          }
+        }
+      }
 
       if (!results.length && originalQuery.length > 0) {
         console.debug(`No results found. Trying fallback with original query: "${originalQuery}"`);
@@ -841,6 +875,25 @@
         diagnostics.push('source-diversity: only one provider returned data for this query.');
       }
 
+      // For biographical facts, prioritize encyclopedic sources over news
+      let combinedResults = results.map(entry => entry.content);
+      if (isBioFactQuery) {
+        const encyclopedicResults = results.filter(entry => 
+          ['wikipedia', 'wikidata'].includes(entry.source)
+        ).map(entry => entry.content);
+        
+        const newsResults = results.filter(entry => 
+          entry.source.includes('news')
+        ).map(entry => entry.content);
+        
+        const otherResults = results.filter(entry => 
+          !['wikipedia', 'wikidata'].includes(entry.source) && !entry.source.includes('news')
+        ).map(entry => entry.content);
+        
+        // Reorder: encyclopedic first, then others, then news
+        combinedResults = [...encyclopedicResults, ...otherResults, ...newsResults];
+      }
+
       const verificationBlock = isBioFactQuery && !nonEncyclopedic.length
         ? formatToolResult(
             'Verification warning',
@@ -849,7 +902,7 @@
         : '';
 
       return [
-        results.map(entry => entry.content).join('\n\n'),
+        combinedResults.join('\n\n'),
         verificationBlock,
         formatToolResult('Search diagnostics', diagnostics.join('\n'))
       ].filter(Boolean).join('\n\n');

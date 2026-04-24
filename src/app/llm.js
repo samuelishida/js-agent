@@ -766,6 +766,12 @@ async function callOpenRouter(msgs, signal, options = {}) {
   const model = String(openrouterBackend?.model || 'openai/gpt-oss-120b:free').trim();
   if (!apiKey) throw new Error('OpenRouter API key not configured');
 
+  // Update topbar badge with OpenRouter model name
+  if (!localBackend.enabled) {
+    const badgeModel = document.getElementById('topbar-model');
+    if (badgeModel) badgeModel.textContent = model;
+  }
+
   const maxTokens = Math.max(512, Number(options.maxTokens) || 4096);
   const temperature = Number.isFinite(options.temperature) ? options.temperature : 0.7;
 

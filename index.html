@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Agent</title>
+<title>js-agent</title>
+<link rel="icon" type="image/svg+xml" href="assets/icon.svg">
 <link rel="stylesheet" href="assets/styles.css">
 <link rel="stylesheet" href="assets/styles/components/confirmation.css">
 </head>
@@ -11,6 +12,10 @@
 <!-- SIDEBAR (Left Navigation) -->
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-header">
+    <a href="/" class="sidebar-logo" title="js-agent">
+      <img src="assets/icon.svg" alt="js-agent" width="28" height="28">
+      <span>js-agent</span>
+    </a>
     <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" onclick="toggleSidebar()" title="Hide sidebar" aria-label="Hide sidebar" type="button">
       &larr;
     </button>
@@ -61,7 +66,7 @@
 <!-- MAIN CHAT -->
 <main class="chat-container" id="chat">
   <div class="empty-state" id="empty">
-    <div class="empty-logo">⬡</div>
+    <div class="empty-logo"><img src="assets/icon.svg" alt="js-agent" width="48" height="48"></div>
     <div class="empty-title">What can I help you with?</div>
     <div class="empty-examples">
       <button class="example-chip" onclick="useExample(this)">Search web for latest news</button>

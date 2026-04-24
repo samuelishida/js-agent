@@ -1,5 +1,9 @@
 # JS Agent
 
+<p align="center">
+  <img src="assets/logo.svg" alt="js-agent logo" width="320">
+</p>
+
 Browser-first multi-step AI agent. No bundler. Local or cloud LLM. Modular skill runtime with 80+ tools. Runs from a single dev server command.
 
 ## Running

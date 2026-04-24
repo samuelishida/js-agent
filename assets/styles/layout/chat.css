@@ -30,7 +30,7 @@
 .empty-logo {
   width: 56px;
   height: 56px;
-  background: linear-gradient(135deg, #1da1f2, #5b9bfd);
+  background: linear-gradient(135deg, #0B3C5D, #1F5FA3);
   border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
@@ -38,6 +38,11 @@
   font-size: 28px;
   opacity: 0.8;
   flex-shrink: 0;
+}
+
+.empty-logo img {
+  width: 32px;
+  height: 32px;
 }
 
 .empty-title {

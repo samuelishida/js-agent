@@ -55,6 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadGithubTokenStatus();
   if (typeof loadCloudModelSelection === 'function') loadCloudModelSelection();
   if (typeof loadOllamaBackendState === 'function') loadOllamaBackendState();
+  if (typeof loadOpenRouterBackendState === 'function') loadOpenRouterBackendState();
   if (!window.chatSessions.length) createSession();
   if (!getActiveSession()) window.activeSessionId = window.chatSessions[0]?.id || createSession().id;
   renderSessionList();

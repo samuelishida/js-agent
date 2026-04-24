@@ -519,6 +519,111 @@ function inferContextLength(modelName, modelMeta) {
   return 8 * 1024;
 }
 
+// ── OpenRouter backend ───────────────────────────────────────────────────────
+
+function saveOpenRouterApiKey() {
+  const input = document.getElementById('openrouter-api-key');
+  if (!input) return;
+  const key = String(input.value || '').trim();
+  if (key) {
+    localStorage.setItem('agent_openrouter_api_key', key);
+    openrouterBackend.apiKey = key;
+    setStatus('ok', 'OpenRouter API key saved');
+  } else {
+    localStorage.removeItem('agent_openrouter_api_key');
+    openrouterBackend.apiKey = '';
+    setStatus('ok', 'OpenRouter API key cleared');
+  }
+  updateOpenRouterStatus();
+}
+
+function loadOpenRouterApiKey() {
+  const input = document.getElementById('openrouter-api-key');
+  if (!input) return;
+  const key = localStorage.getItem('agent_openrouter_api_key') || '';
+  input.value = key;
+  openrouterBackend.apiKey = key;
+  updateOpenRouterStatus();
+}
+
+function saveOpenRouterModelSelection() {
+  const select = document.getElementById('openrouter-model-select');
+  const model = (select && select.value) || '';
+  if (model) {
+    localStorage.setItem('agent_openrouter_model', model);
+    openrouterBackend.model = model;
+  }
+  if (typeof updateActiveProviderBadge === 'function') updateActiveProviderBadge();
+}
+
+function loadOpenRouterModelSelection() {
+  const select = document.getElementById('openrouter-model-select');
+  if (!select) return;
+  const saved = localStorage.getItem('agent_openrouter_model') || 'google/gemini-2.5-flash-lite';
+  select.value = saved;
+  openrouterBackend.model = saved;
+}
+
+function toggleOpenRouterBackend() {
+  const checkbox = document.getElementById('toggle-openrouter');
+  const enabled = checkbox ? checkbox.checked : false;
+  openrouterBackend.enabled = enabled;
+  localStorage.setItem('agent_openrouter_enabled', String(enabled));
+
+  if (enabled) {
+    localBackend.enabled = false;
+    if (typeof ollamaBackend !== 'undefined') ollamaBackend.enabled = false;
+    localStorage.setItem('agent_prefer_local_backend', 'false');
+    localStorage.setItem('agent_ollama_enabled', 'false');
+    const localCb = document.getElementById('toggle-local');
+    const ollamaCb = document.getElementById('toggle-ollama');
+    if (localCb) localCb.checked = false;
+    if (ollamaCb) ollamaCb.checked = false;
+    setStatus('ok', 'OpenRouter active');
+  } else {
+    setStatus('ok', 'OpenRouter deactivated');
+  }
+
+  if (typeof updateBadge === 'function') updateBadge();
+  if (typeof updateActiveProviderBadge === 'function') updateActiveProviderBadge();
+  updateOpenRouterStatus();
+}
+
+function loadOpenRouterBackendState() {
+  const checkbox = document.getElementById('toggle-openrouter');
+  if (checkbox) checkbox.checked = openrouterBackend.enabled;
+  loadOpenRouterApiKey();
+  loadOpenRouterModelSelection();
+  updateOpenRouterStatus();
+}
+
+function updateOpenRouterStatus() {
+  const dot = document.getElementById('openrouter-dot');
+  const label = document.getElementById('openrouter-status-label');
+  if (!dot || !label) return;
+
+  const hasKey = !!String(openrouterBackend.apiKey || '').trim();
+  if (!hasKey) {
+    dot.className = 'status-dot error';
+    label.textContent = 'no API key';
+    return;
+  }
+  if (openrouterBackend.enabled) {
+    dot.className = 'status-dot ok';
+    label.textContent = openrouterBackend.model;
+  } else {
+    dot.className = 'status-dot';
+    label.textContent = 'ready';
+  }
+}
+
+function isOpenRouterReady() {
+  return {
+    ready: !!String(openrouterBackend?.apiKey || '').trim(),
+    reason: openrouterBackend?.apiKey ? '' : 'OpenRouter API key not set.'
+  };
+}
+
 async function fetchModelContextLength(modelName) {
   const cached = ollamaModelContextSizes.get(modelName);
   if (cached?.contextLength) return cached.contextLength;

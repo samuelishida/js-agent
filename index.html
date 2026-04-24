@@ -176,6 +176,65 @@
 
       <div class="settings-divider"></div>
 
+      <!-- OpenRouter Section -->
+      <div class="settings-section">
+        <h3 class="settings-title">OpenRouter</h3>
+        <p class="settings-desc">OpenAI-compatible API with access to 100+ models — free tier available</p>
+
+        <div class="settings-group">
+          <label class="settings-label">API Key</label>
+          <div class="settings-row">
+            <input class="settings-input" id="openrouter-api-key" type="password" placeholder="sk-or-..." autocomplete="off" />
+            <button class="btn-primary btn-sm" onclick="saveOpenRouterApiKey()">Save</button>
+          </div>
+          <div class="settings-hint">Get a free key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a></div>
+        </div>
+
+        <div class="settings-group">
+          <label class="settings-label">Model</label>
+          <select id="openrouter-model-select" class="settings-select" onchange="saveOpenRouterModelSelection()">
+            <optgroup label="Free — Agentic / Reasoning">
+              <option value="nvidia/nemotron-3-super">nvidia/nemotron-3-super — MoE reasoning, 262K ctx</option>
+              <option value="xiaomi/mimo-v2-pro">xiaomi/mimo-v2-pro — 1M ctx, tooling/orchestration</option>
+              <option value="nvidia/nemotron-3-nano-30b">nvidia/nemotron-3-nano-30b — compact MoE agentic</option>
+              <option value="zhipu/glm-4.5-air">zhipu/glm-4.5-air — thinking modes, tool use</option>
+              <option value="qwen/qwen3-coder">qwen/qwen3-coder — function-calling, RAG</option>
+              <option value="qwen/qwen3-next">qwen/qwen3-next — MoE code/agent</option>
+              <option value="minimax/minimax-m2.5">minimax/minimax-m2.5 — multi-step automation</option>
+              <option value="inclusionai/ling-2.6-flash">inclusionai/ling-2.6-flash — fast, coding</option>
+              <option value="inclusionai/ling-2.6-1t">inclusionai/ling-2.6-1t — lightweight agent loops</option>
+            </optgroup>
+            <optgroup label="Paid — Production / Premium">
+              <option value="openai/gpt-5.4">openai/gpt-5.4 — best multi-step reasoning</option>
+              <option value="anthropic/claude-sonnet-4">anthropic/claude-sonnet-4 — safe iterative workflows</option>
+              <option value="anthropic/claude-opus-4">anthropic/claude-opus-4 — robust reasoning</option>
+              <option value="google/gemini-3.1-pro">google/gemini-3.1-pro — 1M ctx, tool integration</option>
+              <option value="google/gemini-3.1-flash-lite">google/gemini-3.1-flash-lite — low latency</option>
+              <option value="deepseek/deepseek-v3.2">deepseek/deepseek-v3.2 — cost-efficient planning</option>
+              <option value="xiaomi/mimo-v2-pro-paid">xiaomi/mimo-v2-pro (paid) — trillion-param throughput</option>
+              <option value="minimax/minimax-m2.7">minimax/minimax-m2.7 — production agent workloads</option>
+              <option value="minimax/minimax-m2.5-paid">minimax/minimax-m2.5 (paid) — balanced cost/latency</option>
+              <option value="moonshotai/kimi-k2.6">moonshotai/kimi-k2.6 — coding, multi-modal</option>
+            </optgroup>
+          </select>
+          <div class="settings-hint">Free models marked. Paid models require credits on your OpenRouter account.</div>
+        </div>
+
+        <div class="settings-group">
+          <label class="settings-checkbox">
+            <input type="checkbox" id="toggle-openrouter" onchange="toggleOpenRouterBackend()" />
+            <span>Use OpenRouter as active provider</span>
+          </label>
+        </div>
+
+        <div style="margin-top:8px;display:flex;align-items:center;gap:6px">
+          <span class="status-dot" id="openrouter-dot"></span>
+          <span id="openrouter-status-label" class="status-indicator">not configured</span>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
       <!-- Ollama Section -->
       <div class="settings-section">
         <h3 class="settings-title">Ollama</h3>

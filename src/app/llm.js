@@ -160,6 +160,7 @@ async function readStreamingResponse(response) {
 const laneState = {
   local: { chain: Promise.resolve(), nextAt: 0 },
   cloud: { chain: Promise.resolve(), nextAt: 0 },
+  openrouter: { chain: Promise.resolve(), nextAt: 0 },
   // Ollama gets its own queue so it doesn't share rate-limit state with cloud calls.
   ollama: { chain: Promise.resolve(), nextAt: 0 }
 };
@@ -177,6 +178,10 @@ function executeLane(lane, msgs, options, outerSignal) {
         if (lane === 'ollama') {
           console.debug(`[callLLM] Executing on OLLAMA lane at ${ollamaBackend.url}`);
           return callOllamaCloud(msgs, signal, options);
+        }
+        if (lane === 'openrouter') {
+          console.debug(`[callLLM] Executing on OPENROUTER lane, model=${openrouterBackend.model}`);
+          return callOpenRouter(msgs, signal, options);
         }
         if (lane === 'local') {
           console.debug(`[callLLM] Executing on LOCAL lane at ${localBackend.url}`);
@@ -522,6 +527,16 @@ function getLaneForRequest() {
     return { lane: 'ollama', error: '' };
   }
 
+  if (typeof openrouterBackend !== 'undefined' && openrouterBackend.enabled) {
+    const hasKey = !!String(openrouterBackend.apiKey || '').trim();
+    if (hasKey) {
+      console.debug(`[LLM Route] openrouterBackend.enabled=true, model='${openrouterBackend.model}' → lane='openrouter'`);
+      return { lane: 'openrouter', error: '' };
+    }
+    console.debug(`[LLM Route] openrouterBackend.enabled=true but no API key → lane='cloud'`);
+    return { lane: 'cloud', error: 'OpenRouter enabled but no API key set.' };
+  }
+
   if (localBackend.enabled) {
     const localUrlState = validateAndNormalizeLocalUrl(localBackend.url);
     if (!localUrlState.valid) {
@@ -744,6 +759,47 @@ async function callCloud(msgs, signal, options = {}) {
   if (provider === 'azure') return callAzureOpenAiCloud(msgs, signal, options, model);
   if (provider === 'ollama') return callOllamaCloud(msgs, signal, options, model);
   return callGeminiDirect(msgs, signal, options, model);
+}
+
+async function callOpenRouter(msgs, signal, options = {}) {
+  const apiKey = String(openrouterBackend?.apiKey || '').trim();
+  const model = String(openrouterBackend?.model || 'google/gemini-2.5-flash-lite').trim();
+  if (!apiKey) throw new Error('OpenRouter API key not configured');
+
+  const maxTokens = Math.max(512, Number(options.maxTokens) || 4096);
+  const temperature = Number.isFinite(options.temperature) ? options.temperature : 0.7;
+
+  const body = {
+    model,
+    messages: msgs.map(m => ({
+      role: m.role === 'tool' ? 'user' : m.role,
+      content: String(m.content || '')
+    })),
+    max_tokens: maxTokens,
+    temperature,
+    stream: false
+  };
+
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': window.location.origin,
+      'X-Title': 'JS Agent'
+    },
+    body: JSON.stringify(body),
+    signal
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`OpenRouter HTTP ${res.status}: ${text.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const text = data?.choices?.[0]?.message?.content || '';
+  return { text };
 }
 
 // Markdown/HTML rendering functions moved to ui-render.js:

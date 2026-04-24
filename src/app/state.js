@@ -163,6 +163,11 @@ let ollamaBackend = {
   enabled: safeGet('agent_ollama_enabled') === 'true',
   url: safeGet('agent_ollama_url') || 'http://localhost:11434',
 };
+let openrouterBackend = {
+  enabled: safeGet('agent_openrouter_enabled') === 'true',
+  apiKey: safeGet('agent_openrouter_api_key') || '',
+  model: safeGet('agent_openrouter_model') || 'google/gemini-2.5-flash-lite',
+};
 const ollamaInstalledModels = new Set();
 const ollamaModelContextSizes = new Map();
 console.debug(`[State Init] localBackend: enabled=${localBackend.enabled}, url='${localBackend.url}', model='${localBackend.model}'`);
@@ -219,6 +224,12 @@ bindWindowStateProperty('localBackend', () => localBackend, value => {
 bindWindowStateProperty('ollamaBackend', () => ollamaBackend, value => {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     ollamaBackend = value;
+  }
+});
+
+bindWindowStateProperty('openrouterBackend', () => openrouterBackend, value => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    openrouterBackend = value;
   }
 });
 

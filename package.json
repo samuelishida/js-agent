@@ -7,14 +7,11 @@
     "build:snapshot": "node scripts/build-snapshot.mjs",
     "test:skills-smoke": "node scripts/test-skills-smoke.mjs",
     "test:smoke": "node scripts/test-smoke.mjs",
-    "check:types": "tsc --noEmit",
     "check:js": "node --check src/app/agent.js && node --check src/app/llm.js && node --check src/app/orchestrator.js && node --check src/app/constants.js && node --check src/app/permissions.js && node --check src/app/compaction.js && node --check src/app/steering.js && node --check src/app/tool-execution.js",
     "lint": "eslint src/"
   },
   "devDependencies": {
-    "esbuild": "^0.25.12",
-    "typescript": "^5.8.3",
-    "@types/node": "^22.13.1"
+    "esbuild": "^0.25.12"
   },
   "dependencies": {
     "openclaude": "^0.0.1"

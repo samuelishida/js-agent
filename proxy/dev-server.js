@@ -267,16 +267,7 @@ async function handleDiagnostics(req, res) {
       const result = await runCommand(command, ROOT, 30000);
       resultText = result.ok ? `No diagnostics for ${relPath}.` : result.output;
     } else {
-      const command = 'npx tsc --noEmit --pretty false';
-      const result = await runCommand(command, ROOT, 60000);
-      const filtered = relPath
-        ? result.output
-            .split(/\r?\n/)
-            .filter(line => !relPath || line.toLowerCase().includes(relPath.toLowerCase()))
-            .join('\n')
-            .trim()
-        : result.output;
-      resultText = filtered || `No diagnostics returned${relPath ? ` for ${relPath}` : ''}.`;
+      resultText = `No type-checking available for ${relPath}. Only .js and .json files are checked.`;
     }
 
     if (severity === 'error') {

@@ -1,15 +1,25 @@
-<svg width="420" height="120" viewBox="0 0 420 120" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="60" cy="60" r="28" fill="#0B3C5D"/>
-  <line x1="60" y1="32" x2="60" y2="10" stroke="#1F5FA3" stroke-width="4"/>
-  <line x1="60" y1="88" x2="60" y2="110" stroke="#1F5FA3" stroke-width="4"/>
-  <line x1="32" y1="60" x2="10" y2="60" stroke="#1F5FA3" stroke-width="4"/>
-  <line x1="88" y1="60" x2="110" y2="60" stroke="#1F5FA3" stroke-width="4"/>
+<svg width="420" height="160" viewBox="0 0 420 160" xmlns="http://www.w3.org/2000/svg">
 
-  <text x="140" y="72"
-        font-family="Inter, Arial, sans-serif"
-        font-size="40"
+  <!-- target rings -->
+  <circle cx="80" cy="80" r="46" stroke="#0B3C5D" stroke-width="6" fill="none"/>
+  <circle cx="80" cy="80" r="28" stroke="#1F5FA3" stroke-width="6" fill="none"/>
+
+  <!-- center agent core -->
+  <circle cx="80" cy="80" r="10" fill="#0B3C5D"/>
+
+  <!-- agent action lines -->
+  <line x1="80" y1="34" x2="80" y2="10" stroke="#1F5FA3" stroke-width="6" stroke-linecap="round"/>
+  <line x1="80" y1="126" x2="80" y2="150" stroke="#1F5FA3" stroke-width="6" stroke-linecap="round"/>
+  <line x1="34" y1="80" x2="10" y2="80" stroke="#1F5FA3" stroke-width="6" stroke-linecap="round"/>
+  <line x1="126" y1="80" x2="150" y2="80" stroke="#1F5FA3" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- project name -->
+  <text x="180" y="95"
+        font-family="Inter, Segoe UI, Arial, sans-serif"
+        font-size="42"
         fill="#0B3C5D"
         font-weight="600">
         js-agent
   </text>
+
 </svg>

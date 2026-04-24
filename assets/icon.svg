@@ -1,8 +1,17 @@
 <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- dark blue rounded square background -->
   <rect width="64" height="64" rx="12" fill="#0B3C5D"/>
-  <circle cx="32" cy="32" r="14" fill="#FFFFFF"/>
-  <line x1="32" y1="18" x2="32" y2="6" stroke="#1F5FA3" stroke-width="3"/>
-  <line x1="32" y1="46" x2="32" y2="58" stroke="#1F5FA3" stroke-width="3"/>
-  <line x1="18" y1="32" x2="6" y2="32" stroke="#1F5FA3" stroke-width="3"/>
-  <line x1="46" y1="32" x2="58" y2="32" stroke="#1F5FA3" stroke-width="3"/>
+
+  <!-- target rings -->
+  <circle cx="32" cy="32" r="20" stroke="#FFFFFF" stroke-width="3" fill="none" opacity="0.9"/>
+  <circle cx="32" cy="32" r="12" stroke="#5b9bfd" stroke-width="3" fill="none" opacity="0.9"/>
+
+  <!-- center agent core -->
+  <circle cx="32" cy="32" r="5" fill="#FFFFFF"/>
+
+  <!-- agent action lines -->
+  <line x1="32" y1="12" x2="32" y2="4" stroke="#5b9bfd" stroke-width="3" stroke-linecap="round"/>
+  <line x1="32" y1="52" x2="32" y2="60" stroke="#5b9bfd" stroke-width="3" stroke-linecap="round"/>
+  <line x1="12" y1="32" x2="4" y2="32" stroke="#5b9bfd" stroke-width="3" stroke-linecap="round"/>
+  <line x1="52" y1="32" x2="60" y2="32" stroke="#5b9bfd" stroke-width="3" stroke-linecap="round"/>
 </svg>

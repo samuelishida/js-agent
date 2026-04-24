@@ -74,7 +74,7 @@ Agent/
         ├── compaction.js     → window.AgentCompaction   (context compaction, injection detection)
         ├── steering.js       → window.AgentSteering     (mid-flight guidance buffer)
         ├── rate-limiter.js   → window.AgentRateLimiter  (per-tool rate limiting)
-        ├── worker-manager.js → sandbox worker management
+        ├── worker-manager.js → window.AgentWorkers      (sandbox worker only)
         ├── local-backend.js                             (LM Studio / Ollama probe)
         ├── tools.js                                     (tool group rendering, toggle)
         ├── tool-execution.js → window.AgentToolExecution (dispatch, batching, fs guards)
@@ -181,22 +181,52 @@ npm run build:snapshot      # regenerate src/skills/generated/snapshot-data.js
 
 ## Bug Fixes (Code Review)
 
+Round 1 — 14 bugs:
+
 | File | Bug | Fix |
 |------|-----|-----|
-| `tool-execution.js:149` | `containsVulnerableUncPathLight` checked `startsWith('\}')` (closing brace) instead of `startsWith('\\\\')` — UNC path detection broken | Fixed to `startsWith('\\\\')` |
-| `compaction.js:129-134` | Head/tail overlap when text < 2×effectivePreview produced negative `omitted` count and duplicated content | Added overlap guard; returns original text when omitted ≤ 0 |
-| `compaction.js:28-30` | `ctxTokenEstimate` passed array `content` to `estimateTokens`, which returned 0 silently | `estimateTokens` now handles array content (OpenAI multi-part) |
-| `rate-limiter.js:42-58` | `remaining` off-by-one: computed before recording the call, reported value 1 too high | Return `remaining - 1` |
-| `steering.js:25-26` | Null dereference crash when `steering-input` DOM element missing | Added `if (!input) return` guard |
-| `state.js:681` | `C()` reference error — `C` is not in scope in `state.js`, only in `agent.js` as a local const | Changed to `(typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS` |
-| `agent.js:805` | Max-rounds forced answer pushed raw `finalReply` (with think/tool remnants) into messages, inconsistent with line 586 which pushes `finalMarkdown` (clean) | Changed to push `finalMarkdown` |
-| `orchestrator.js:415-416` | `when` condition failure consumed retry attempts instead of breaking the retry loop, burning all retries on condition check | Changed `throw` to `break` — skip to next fallback |
-| `orchestrator.js:522-524` | `normalizeToolCall` prefix matching too aggressive: `requested.startsWith(normalized)` matched wrong tools by short prefix (e.g. `"r"` → `runtime_readFile`) | Added minimum-length guard: match only if `requested.length >= Math.min(4, normalized.length)` |
-| `llm.js:731-748` | `extractThinkingBlocks` duplicated content for nested blocks (pushed outer content + inner nested blocks) | Changed to push only leaf blocks; outer block discarded if nested blocks found |
-| `llm.js:731+` | Regex `/<think[\s\S]*?<\/think>/gi` captured `>` as part of content group — `.extractThinkingBlocks("<tool_call>reasoning")` returned `">reasoning"` | Fixed all 5 instances to `/<think(?:\s[^>]*)?>[\s\S]*?<\/think>/gi` — properly matches the closing `>` of opening tag |
-| `llm.js:1529` | Dead code: `shouldStream && !res.body` check after `res.body` was already confirmed truthy and consumed | Removed dead branch; stream exhaustion now continues to next endpoint |
-| `llm.js:1814-1821` | After streaming falls through with empty content, `res.json()` called on already-consumed body → `TypeError: body already consumed` | Added `continue` after stream exhaustion; separate `!res.body` guard before `res.json()` |
-| `tool-execution.js:559` | Sandbox fallback: `result += '\n[sandbox unavailable]'` on non-string `result` produced `[object Object]...` | Added type check: `typeof result === 'string' ? result : JSON.stringify(result)` |
+| `tool-execution.js:149` | `containsVulnerableUncPathLight` checked `startsWith('\}')` instead of `startsWith('\\\\')` — UNC path detection broken | Fixed to `startsWith('\\\\')` |
+| `compaction.js:129-134` | Head/tail overlap when text < 2×effectivePreview produced negative `omitted` count | Added overlap guard; returns original text when omitted ≤ 0 |
+| `compaction.js:28-30` | `ctxTokenEstimate` passed array `content` to `estimateTokens`, returned 0 silently | `estimateTokens` now handles array content |
+| `rate-limiter.js:42-58` | `remaining` off-by-one: computed before recording the call | Return `remaining - 1` |
+| `steering.js:25-26` | Null dereference when `steering-input` DOM element missing | Added `if (!input) return` guard |
+| `state.js:681` | `C()` not in scope — only defined in `agent.js` | Changed to `(typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS` |
+| `agent.js:805` | Forced answer pushed raw `finalReply` (with think/tool remnants) | Changed to push `finalMarkdown` |
+| `orchestrator.js:415-416` | `when` condition failure consumed retry attempts instead of breaking | Changed `throw` to `break` |
+| `orchestrator.js:522-524` | `normalizeToolCall` prefix too aggressive (`"r"` → `runtime_readFile`) | Added minimum-length guard: `requested.length >= Math.min(4, normalized.length)` |
+| `llm.js:731-748` | `extractThinkingBlocks` duplicated content for nested blocks | Push only leaf blocks |
+| `llm.js:731+` | Regex `/<think[\s\S]*?<\/think>/gi` captured `>` as content | Fixed to `/<think(?:\s[^>]*)?>[\s\S]*?<\/think>/gi` |
+| `llm.js:1529` | Dead `shouldStream && !res.body` branch after body consumed | Removed dead branch; stream exhaustion continues to next endpoint |
+| `llm.js:1814-1821` | `res.json()` on already-consumed streaming body | Added `continue` after stream exhaustion; separate `!res.body` guard |
+| `tool-execution.js:559` | Sandbox fallback on non-string `result` produced `[object Object]` | Added type check + `JSON.stringify` |
+
+Round 2 — 12 bugs:
+
+| File | Bug | Fix |
+|------|-----|-----|
+| `compaction.js` | `microcompactToolResultMessages` only matched `role:'user'` with XML wrapper, missed `role:'tool'` | Match `role:'tool'` natively; use raw text for tool-role replacement |
+| `compaction.js` | `getCallSignature` used semantic merge (different args → same sig) | Use exact signature + stable key ordering |
+| `compaction.js` | `applyContextManagementPipeline` marked `async` with no `await` | Dropped `async` |
+| `runtime-memory.js` | `onTurnComplete` never exported — auto-extraction never fired | Added to `AgentMemory` export |
+| `runtime-memory.js` | `saveRuntimeCacheStore` unguarded `QuotaExceededError` | Wrapped in try-catch |
+| `runtime-memory.js` | Write-every-read on cache hits | Debounced to every 10th hit |
+| `runtime-memory.js` | `touchMemoryEntries` didn't invalidate `memory_retrieval` cache | Added `clearRuntimeScope('memory_retrieval')` after mutation |
+| `state.js` | Non-atomic swap of `ollamaInstalledModels` during probe | Atomic swap via temp set + bare name support |
+| `state.js` | Failed `/api/show` cached 8K fallback | No longer caches on failure; cloud models default to 32K |
+| `state.js` | `getModelContextLength` returned Ollama heuristic for cloud models | Returns `DEFAULT_CTX_LIMIT_CHARS` (32K) for cloud |
+| `state.js` | `deleteSession` skipped UI updates when active session deleted | Added `updateStats`, `updateCtxBar`, `setStatus` |
+| `llm.js` | Ollama `OLLAMA_MODEL_CRASH` not retried | Added continuation prompt retry on crash |
+
+Round 3 — gpt-oss:120b tool-call + reasoning leak:
+
+| File | Bug | Fix |
+|------|-----|-----|
+| `regex.js` | `TOOL_BLOCK` regex required `>` on open tag — models omitting `>` produced no match, triggering repair pass; when `>` present, capture group included it, breaking JSON parse | Changed to `/<tool_call(?:\s[^>]*>|>?)\s*([\s\S]*?)\s*<\/tool_call>/` — makes `>` optional |
+| `tool-execution.js` | Block match regex same `>` issue | Updated block match regex to match |
+| `agent.js` | Tool-call cleanup regex same `>` issue | Updated cleanup regex to match |
+| `regex.js` | `looksLikeReasoningLeak` missed model meta-commentary patterns | Added "We need to...", "We will call...", "I will call...", "Let's call..." |
+| `agent.js` | Model reasoning leaks ("We need to output tool calls only") shown to user | Added `stripModelMetaCommentary()` — strips steering sentences from visible output |
+| `llm.js` | Model monologue leaks into content without `<think>` tags | `normalizeVisibleModelText()` detects reasoning-prefixed long text, extracts answer after delimiter |
 
 ## Documentation
 

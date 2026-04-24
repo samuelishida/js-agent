@@ -371,18 +371,18 @@
         <div class="settings-group">
           <label class="settings-label">
             Planning Depth
-            <span class="settings-value" id="val-rounds">50</span>
+            <span class="settings-value" id="val-rounds">10</span>
           </label>
-          <input class="settings-slider" type="range" id="sl-rounds" min="1" max="50" value="50"
+          <input class="settings-slider" type="range" id="sl-rounds" min="1" max="50" value="10"
                  oninput="document.getElementById('val-rounds').textContent=this.value;localStorage.setItem('agent_sl_rounds',this.value);updateBadge()">
         </div>
 
         <div class="settings-group">
           <label class="settings-label">
             Context Budget
-            <span class="settings-value" id="val-ctx">32</span>
+            <span class="settings-value" id="val-ctx">128</span>
           </label>
-          <input class="settings-slider" type="range" id="sl-ctx" min="8" max="256" value="32"
+          <input class="settings-slider" type="range" id="sl-ctx" min="8" max="256" value="128"
                  oninput="document.getElementById('val-ctx').textContent=this.value;localStorage.setItem('agent_sl_ctx',this.value);updateBadge()">
         </div>
 

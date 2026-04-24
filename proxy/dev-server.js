@@ -13,6 +13,7 @@ const API_PREFIX = '/api/ollama/v1';const GNEWS_PREFIX = '/api/gnews';
 const GNEWS_BASE = 'https://news.google.com';const TERMINAL_PREFIX = '/api/terminal';
 const DIAGNOSTICS_PREFIX = '/api/diagnostics';
 const HEALTH_PREFIX = '/api/health';
+const ENV_PREFIX = '/api/env';
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -411,6 +412,33 @@ async function handleHealth(req, res) {
   });
 }
 
+async function handleEnv(req, res) {
+  if (req.method === 'OPTIONS') {
+    send(res, 204, '', {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET,OPTIONS',
+      'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type',
+      'Access-Control-Max-Age': '86400'
+    });
+    return;
+  }
+  if (req.method !== 'GET') {
+    send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+  const env = {
+    OPEN_ROUTER_API_KEY: process.env.OPEN_ROUTER_API_KEY || ''
+  };
+  send(res, 200, JSON.stringify(env), {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': '*'
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
@@ -443,6 +471,10 @@ const server = http.createServer(async (req, res) => {
       await handleHealth(req, res);
       return;
     }
+    if (parsedUrl.pathname === ENV_PREFIX) {
+      await handleEnv(req, res);
+      return;
+    }
     serveStatic(req, res, parsedUrl);
   } catch (error) {
     send(res, 500, `Server error: ${error.message}`);
@@ -453,8 +485,11 @@ server.listen(PORT, () => {
   console.log(`[dev-server] running at http://127.0.0.1:${PORT}`);
   console.log(`[dev-server] proxy route: ${API_PREFIX} -> ${OLLAMA_BASE}/v1`);
   console.log(`[dev-server] proxy route: ${GNEWS_PREFIX} -> ${GNEWS_BASE}`);
-  console.log(`[dev-server] compat routes: ${TERMINAL_PREFIX}, ${DIAGNOSTICS_PREFIX}`);
+  console.log(`[dev-server] compat routes: ${TERMINAL_PREFIX}, ${DIAGNOSTICS_PREFIX}, ${ENV_PREFIX}`);
   if (!process.env.OLLAMA_API_KEY) {
     console.log('[dev-server] no OLLAMA_API_KEY env var detected; browser Authorization header will be forwarded if provided.');
+  }
+  if (process.env.OPEN_ROUTER_API_KEY) {
+    console.log('[dev-server] OPEN_ROUTER_API_KEY detected; will be served to browser on /api/env');
   }
 });

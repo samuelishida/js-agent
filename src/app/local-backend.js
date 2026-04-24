@@ -653,9 +653,9 @@ async function fetchModelContextLength(modelName) {
 
 function getModelContextLength() {
   const model = typeof getOllamaCloudModel === 'function' ? getOllamaCloudModel() : '';
-  if (!model) return (typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS || 32000;
+  if (!model) return (typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS || 128000;
   if (typeof ollamaBackend !== 'undefined' && !ollamaBackend.enabled) {
-    return (typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS || 32000;
+    return (typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS || 128000;
   }
   const cached = ollamaModelContextSizes.get(model);
   if (cached?.contextLength) return cached.contextLength;
@@ -664,7 +664,7 @@ function getModelContextLength() {
 
 function getMaxTokensForModel() {
   const ctxLen = getModelContextLength();
-  const ctxLimit = typeof getCtxLimit === 'function' ? getCtxLimit() : 32000;
+  const ctxLimit = typeof getCtxLimit === 'function' ? getCtxLimit() : 128000;
   const effectiveCtx = Math.min(ctxLen, ctxLimit);
   return Math.max(512, Math.floor(effectiveCtx * 0.25));
 }

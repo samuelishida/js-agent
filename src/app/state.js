@@ -269,7 +269,7 @@ function getMaxRounds() {
 
 function getCtxLimit() {
   const el = document.getElementById('sl-ctx');
-  return el ? parseInt(el.value, 10) * 1000 : 32000;
+  return el ? parseInt(el.value, 10) * 1000 : 128000;
 }
 
 function getDelay() {

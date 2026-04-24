@@ -56,6 +56,24 @@ document.addEventListener('DOMContentLoaded', () => {
   if (typeof loadCloudModelSelection === 'function') loadCloudModelSelection();
   if (typeof loadOllamaBackendState === 'function') loadOllamaBackendState();
   if (typeof loadOpenRouterBackendState === 'function') loadOpenRouterBackendState();
+
+  // Auto-detect OPEN_ROUTER_API_KEY from server env and pre-fill if available
+  try {
+    fetch('/api/env')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.OPEN_ROUTER_API_KEY && !openrouterBackend.apiKey) {
+          openrouterBackend.apiKey = data.OPEN_ROUTER_API_KEY;
+          localStorage.setItem('agent_openrouter_api_key', data.OPEN_ROUTER_API_KEY);
+          const input = document.getElementById('openrouter-api-key');
+          if (input) input.value = data.OPEN_ROUTER_API_KEY;
+          updateOpenRouterStatus();
+          console.log('[Agent] Auto-loaded OPEN_ROUTER_API_KEY from server env');
+        }
+      })
+      .catch(() => {});
+  } catch {}
+
   if (!window.chatSessions.length) createSession();
   if (!getActiveSession()) window.activeSessionId = window.chatSessions[0]?.id || createSession().id;
   renderSessionList();

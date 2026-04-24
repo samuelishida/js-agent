@@ -207,7 +207,7 @@
 
   function applyContextManagementPipeline({ ctxLimit } = {}) {
     const messages = Array.isArray(window.messages) ? window.messages : [];
-    const limit = Number(ctxLimit || C().DEFAULT_CTX_LIMIT_CHARS || 32000);
+    const limit = Number(ctxLimit || C().DEFAULT_CTX_LIMIT_CHARS || 128000);
     const tokenLimit = Math.floor(limit / CHAR_TOKEN_RATIO);
     const policy = C().CONTEXT_COMPACTION_POLICY || {};
     const charThreshold = Math.floor(limit * Number(policy.thresholdRatio || 0.82));

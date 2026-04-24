@@ -1465,9 +1465,9 @@ async function main() {
     assert.equal(cfg.DEFAULT_MAX_TOKENS_CLOUD, 4096, 'DEFAULT_MAX_TOKENS_CLOUD should be 4096');
   });
 
-  await group('DEFAULT_CTX_LIMIT_CHARS is 32000', () => {
+  await group('DEFAULT_CTX_LIMIT_CHARS is 128000', () => {
     const cfg = globalThis.window.CONSTANTS;
-    assert.equal(cfg.DEFAULT_CTX_LIMIT_CHARS, 32000, 'DEFAULT_CTX_LIMIT_CHARS should be 32000');
+    assert.equal(cfg.DEFAULT_CTX_LIMIT_CHARS, 128000, 'DEFAULT_CTX_LIMIT_CHARS should be 128000');
   });
 
   await group('MAX_CTX_LIMIT_CHARS is 256000', () => {
@@ -1484,7 +1484,7 @@ async function main() {
     // Verify the constant that backs the max slider value
     const cfg = globalThis.window.CONSTANTS;
     assert.equal(cfg.MAX_CTX_LIMIT_CHARS, 256000, 'MAX_CTX_LIMIT_CHARS should be 256000');
-    assert.equal(cfg.DEFAULT_CTX_LIMIT_CHARS, 32000, 'DEFAULT_CTX_LIMIT_CHARS should be 32000');
+    assert.equal(cfg.DEFAULT_CTX_LIMIT_CHARS, 128000, 'DEFAULT_CTX_LIMIT_CHARS should be 128000');
   });
 
   // ── Summary ──────────────────────────────────────────────────────────────────────

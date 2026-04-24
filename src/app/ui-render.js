@@ -417,7 +417,7 @@
     var Comp = window.AgentCompaction;
     var size = Comp && Comp.ctxSize ? Comp.ctxSize(window.messages) : (Array.isArray(window.messages) ? window.messages.reduce(function(n, m) { return n + (m.content || '').length; }, 0) : 0);
     var limitEl = document.getElementById('sl-ctx');
-    var limit = limitEl ? parseInt(limitEl.value, 10) * 1000 : 32000;
+    var limit = limitEl ? parseInt(limitEl.value, 10) * 1000 : 128000;
     var pct = Math.min(100, (size / limit) * 100);
     var bar = document.getElementById('ctx-bar');
     var label = document.getElementById('ctx-pct');

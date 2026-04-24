@@ -497,6 +497,9 @@
   9. LLM + agent loop + UI        → window.AgentLLMControl, inline-handler globals
 -->
 
+<!-- ── 0. Module registry (must load first) ─────────────────────────────── -->
+<script src="src/core/registry.js" defer></script>
+
 <!-- ── 1. Core parser and prompt loader ────────────────────────────────── -->
 <script src="src/core/regex.js" defer></script>
 <script src="src/core/prompt-loader.js" defer></script>

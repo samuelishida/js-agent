@@ -194,30 +194,31 @@
           <label class="settings-label">Model</label>
           <select id="openrouter-model-select" class="settings-select" onchange="saveOpenRouterModelSelection()">
             <optgroup label="Free — Agentic / Reasoning">
-              <option value="nvidia/nemotron-3-super">nvidia/nemotron-3-super — MoE reasoning, 262K ctx</option>
-              <option value="xiaomi/mimo-v2-pro">xiaomi/mimo-v2-pro — 1M ctx, tooling/orchestration</option>
-              <option value="nvidia/nemotron-3-nano-30b">nvidia/nemotron-3-nano-30b — compact MoE agentic</option>
-              <option value="zhipu/glm-4.5-air">zhipu/glm-4.5-air — thinking modes, tool use</option>
-              <option value="qwen/qwen3-coder">qwen/qwen3-coder — function-calling, RAG</option>
-              <option value="qwen/qwen3-next">qwen/qwen3-next — MoE code/agent</option>
-              <option value="minimax/minimax-m2.5">minimax/minimax-m2.5 — multi-step automation</option>
-              <option value="inclusionai/ling-2.6-flash">inclusionai/ling-2.6-flash — fast, coding</option>
-              <option value="inclusionai/ling-2.6-1t">inclusionai/ling-2.6-1t — lightweight agent loops</option>
+              <option value="nvidia/nemotron-3-super-120b-a12b:free">nvidia/nemotron-3-super-120b-a12b:free — MoE reasoning, 262K ctx</option>
+              <option value="nvidia/nemotron-3-nano-30b-a3b:free">nvidia/nemotron-3-nano-30b-a3b:free — compact MoE agentic</option>
+              <option value="z-ai/glm-4.5-air:free">z-ai/glm-4.5-air:free — thinking modes, tool use</option>
+              <option value="qwen/qwen3-coder:free">qwen/qwen3-coder:free — function-calling, RAG</option>
+              <option value="qwen/qwen3-next-80b-a3b-instruct:free">qwen/qwen3-next-80b-a3b-instruct:free — MoE code/agent</option>
+              <option value="minimax/minimax-m2.5:free">minimax/minimax-m2.5:free — multi-step automation</option>
+              <option value="inclusionai/ling-2.6-flash:free">inclusionai/ling-2.6-flash:free — fast, coding</option>
+              <option value="inclusionai/ling-2.6-1t:free">inclusionai/ling-2.6-1t:free — lightweight agent loops</option>
+              <option value="tencent/hy3-preview:free">tencent/hy3-preview:free — agentic workflows</option>
+              <option value="google/gemma-4-26b-a4b-it:free">google/gemma-4-26b-a4b-it:free — vision + text</option>
             </optgroup>
             <optgroup label="Paid — Production / Premium">
               <option value="openai/gpt-5.4">openai/gpt-5.4 — best multi-step reasoning</option>
-              <option value="anthropic/claude-sonnet-4">anthropic/claude-sonnet-4 — safe iterative workflows</option>
-              <option value="anthropic/claude-opus-4">anthropic/claude-opus-4 — robust reasoning</option>
-              <option value="google/gemini-3.1-pro">google/gemini-3.1-pro — 1M ctx, tool integration</option>
-              <option value="google/gemini-3.1-flash-lite">google/gemini-3.1-flash-lite — low latency</option>
+              <option value="anthropic/claude-sonnet-4.6">anthropic/claude-sonnet-4.6 — safe iterative workflows</option>
+              <option value="anthropic/claude-opus-4.6">anthropic/claude-opus-4.6 — robust reasoning</option>
+              <option value="google/gemini-3.1-pro-preview">google/gemini-3.1-pro-preview — 1M ctx, tool integration</option>
+              <option value="google/gemini-3.1-flash-lite-preview">google/gemini-3.1-flash-lite-preview — low latency</option>
               <option value="deepseek/deepseek-v3.2">deepseek/deepseek-v3.2 — cost-efficient planning</option>
-              <option value="xiaomi/mimo-v2-pro-paid">xiaomi/mimo-v2-pro (paid) — trillion-param throughput</option>
+              <option value="xiaomi/mimo-v2-pro">xiaomi/mimo-v2-pro — trillion-param throughput</option>
               <option value="minimax/minimax-m2.7">minimax/minimax-m2.7 — production agent workloads</option>
-              <option value="minimax/minimax-m2.5-paid">minimax/minimax-m2.5 (paid) — balanced cost/latency</option>
+              <option value="minimax/minimax-m2.5">minimax/minimax-m2.5 — balanced cost/latency</option>
               <option value="moonshotai/kimi-k2.6">moonshotai/kimi-k2.6 — coding, multi-modal</option>
             </optgroup>
           </select>
-          <div class="settings-hint">Free models marked. Paid models require credits on your OpenRouter account.</div>
+          <div class="settings-hint">Free models marked with :free suffix. Paid models require credits on your OpenRouter account.</div>
         </div>
 
         <div class="settings-group">

@@ -18,6 +18,12 @@ PORT=8080 node proxy/dev-server.js                  # custom port
 
 **Requirements:** Node.js 18+ (no `npm install` needed — dev server uses only built-ins). Chrome or Edge required for the File System Access API.
 
+### First-time setup (OpenRouter — recommended)
+
+1. Settings → **OpenRouter** → paste API key → **Save** ([get a free key](https://openrouter.ai/keys))
+2. Select a model from the dropdown (free models marked with `:free` suffix)
+3. Check **"Use OpenRouter as active provider"** → start chatting
+
 ### First-time setup (Ollama Cloud)
 
 1. Settings → **Ollama** → paste API key → **Save** ([get a key](https://ollama.com/settings/api-keys))
@@ -120,7 +126,22 @@ Tools carry execution metadata (`readOnly`, `concurrencySafe`, `risk`). Read-onl
 
 ## Model Routing
 
-Three lanes in `llm.js`: `local` (LM Studio / Ollama at a custom host), `ollama` (local Ollama or Ollama Cloud via proxy), and `cloud` (Gemini, OpenAI, Claude, Azure). Local failures fall back to cloud automatically.
+Four lanes in `llm.js`:
+- **`openrouter`** — OpenRouter.ai (OpenAI-compatible API, 100+ models including free tier)
+- **`local`** — LM Studio / llama.cpp at a custom host
+- **`ollama`** — Local Ollama or Ollama Cloud via proxy
+- **`cloud`** — Direct browser API calls (Gemini, OpenAI, Claude, Azure)
+
+Local failures fall back to cloud automatically. OpenRouter is the recommended provider for new users — it requires only a free API key and offers access to state-of-the-art models.
+
+### OpenRouter setup
+
+1. Get a free key at [openrouter.ai/keys](https://openrouter.ai/keys)
+2. Paste it in Settings → **OpenRouter** → API Key → **Save**
+3. Select a model from the dropdown (free models use the `:free` suffix)
+4. Check **"Use OpenRouter as active provider"**
+
+The topbar badge shows the active OpenRouter model ID. Free models include `openai/gpt-oss-120b:free`, `nvidia/nemotron-3-super-120b-a12b:free`, `google/gemma-4-26b-a4b-it:free`, and others.
 
 ### Ollama local model routing
 

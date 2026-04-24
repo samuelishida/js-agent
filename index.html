@@ -549,9 +549,15 @@
 <!-- ── 9. UI rendering (markdown, messages, sidebar) ──────────────────── -->
 <script src="src/app/ui/ui-render.js" defer></script>
 
-<!-- ── 10. LLM + agent loop ─────────────────────────────────────────────── -->
+<!-- ── 10. LLM + child agent ─────────────────────────────────────────── -->
 <script src="src/app/llm/llm.js" defer></script>
 <script src="src/app/llm/child-agent.js" defer></script>
+
+<!-- ── 11. Agent loop + extracted modules ─────────────────────────────── -->
+<script src="src/app/agent/session-lifecycle.js" defer></script>
+<script src="src/app/agent/tool-call-repair.js" defer></script>
+<script src="src/app/agent/error-recovery.js" defer></script>
+<script src="src/app/agent/round-controller.js" defer></script>
 <script src="src/app/agent/agent.js" defer></script>
 <script src="src/app/app-init.js" defer></script>
 <script src="src/app/ui/ui-modern.js" defer></script>

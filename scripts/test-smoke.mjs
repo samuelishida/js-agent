@@ -290,6 +290,10 @@ const SKILL_SCRIPTS = [
   'src/app/reply-analysis.js',
   'src/app/llm/llm.js',
   'src/app/llm/child-agent.js',
+  'src/app/agent/session-lifecycle.js',
+  'src/app/agent/tool-call-repair.js',
+  'src/app/agent/error-recovery.js',
+  'src/app/agent/round-controller.js',
   'src/app/agent/agent.js',
   'src/app/ui/ui-modern.js'
 ];

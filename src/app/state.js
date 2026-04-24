@@ -166,7 +166,7 @@ let ollamaBackend = {
 let openrouterBackend = {
   enabled: safeGet('agent_openrouter_enabled') === 'true',
   apiKey: safeGet('agent_openrouter_api_key') || '',
-  model: safeGet('agent_openrouter_model') || 'google/gemini-2.5-flash-lite',
+  model: safeGet('agent_openrouter_model') || 'nvidia/nemotron-3-super-120b-a12b:free',
 };
 const ollamaInstalledModels = new Set();
 const ollamaModelContextSizes = new Map();

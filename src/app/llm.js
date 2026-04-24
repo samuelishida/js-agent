@@ -763,7 +763,7 @@ async function callCloud(msgs, signal, options = {}) {
 
 async function callOpenRouter(msgs, signal, options = {}) {
   const apiKey = String(openrouterBackend?.apiKey || '').trim();
-  const model = String(openrouterBackend?.model || 'openai/gpt-oss-120b:free').trim();
+  const model = String(openrouterBackend?.model || 'nvidia/nemotron-3-super-120b-a12b:free').trim();
   if (!apiKey) throw new Error('OpenRouter API key not configured');
 
   // Update topbar badge with OpenRouter model name

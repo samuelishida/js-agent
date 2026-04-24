@@ -559,7 +559,7 @@ function saveOpenRouterModelSelection() {
 function loadOpenRouterModelSelection() {
   const select = document.getElementById('openrouter-model-select');
   if (!select) return;
-  const saved = localStorage.getItem('agent_openrouter_model') || 'openai/gpt-oss-120b:free';
+  const saved = localStorage.getItem('agent_openrouter_model') || 'nvidia/nemotron-3-super-120b-a12b:free';
   select.value = saved;
   openrouterBackend.model = saved;
 }

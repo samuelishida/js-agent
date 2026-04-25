@@ -30,8 +30,34 @@ function drainSteering(messages) {
   return { messages: updated, steeringNotice: notice };
 }
 
+// Build LLM call options based on mode and recovery state.
+function getTurnLlmCallOptions() {
+  const Comp = window.AgentCompaction || {};
+  const recoverySteps = Math.max(0, Number(Comp.runMaxOutputTokensRecoveryCount || 0));
+  const cfg = window.CONSTANTS || {};
+  const modelMaxTokens = typeof getMaxTokensForModel === 'function'
+    ? getMaxTokensForModel()
+    : (cfg.DEFAULT_MAX_TOKENS_LOCAL || 4096);
+  const maxTokens = Math.max(512, modelMaxTokens - (recoverySteps * 280));
+
+  if (isLocalModeActive()) {
+    return {
+      timeoutMs: cfg.DEFAULT_TIMEOUT_MS_LOCAL || 120000,
+      retries: cfg.DEFAULT_RETRIES_LOCAL || 0,
+      maxTokens,
+      enabledTools: Object.entries(window.enabledTools || {}).filter(([, v]) => !!v).map(([k]) => k)
+    };
+  }
+  return {
+    timeoutMs: cfg.DEFAULT_TIMEOUT_MS_CLOUD || 35000,
+    retries: cfg.DEFAULT_RETRIES_CLOUD || 2,
+    maxTokens,
+    enabledTools: Object.entries(window.enabledTools || {}).filter(([, v]) => !!v).map(([k]) => k)
+  };
+}
+
 /**
- * Call the LLM and handle errors via error recovery.
+ * Call LLM and recover from errors.
  * @param {Object} opts
  * @param {SessionMessage[]} opts.messages
  * @param {number} opts.round

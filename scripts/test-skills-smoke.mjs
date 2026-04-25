@@ -103,6 +103,12 @@ async function main() {
     'src/skills/modules/data-runtime.js',
     'src/skills/modules/registry-runtime.js',
     'src/skills/modules/web-runtime.js',
+    'src/skills/skill-broadcast.js',
+    'src/skills/skill-planner.js',
+    'src/skills/skill-preflight.js',
+    'src/skills/skill-executor.js',
+    'src/skills/skill-memory.js',
+    'src/skills/skill-registry.js',
     'src/skills/shared.js'
   ];
 

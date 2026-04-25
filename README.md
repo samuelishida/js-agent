@@ -75,27 +75,15 @@ Agent/
     │   │   └── registry-runtime.js
     │   ├── groups/web.js, device.js, data.js, filesystem.js   (UI descriptors)
     │   ├── shared.js   → window.AgentSkills            (preflight + registry wiring)
-    │   └── index.js                                    (finalizes skill surface)
-    └── app/
-        ├── state.js          → session, localStorage, BroadcastChannel sync, routing readiness
-        ├── constants.js      → window.CONSTANTS         (budgets, timeouts, thresholds)
-        ├── runtime-memory.js → window.AgentRuntimeCache, window.AgentMemory
-        ├── permissions.js    → window.AgentPermissions  (denial tracking, escalation)
-        ├── compaction.js     → window.AgentCompaction   (context compaction, injection detection)
-        ├── steering.js       → window.AgentSteering     (mid-flight guidance buffer)
-        ├── rate-limiter.js   → window.AgentRateLimiter  (per-tool rate limiting)
-        ├── worker-manager.js → window.AgentWorkers      (sandbox worker only)
-        ├── local-backend.js                             (LM Studio probe, Ollama probe + cloud routing)
-        ├── tools.js                                     (tool group rendering, toggle)
-        ├── tool-execution.js → window.AgentToolExecution (dispatch, batching, fs guard aliases)
-        ├── filesystem-guards.js → window.AgentFilesystemGuards (path validation, dangerous path detection)
-        ├── reply-analysis.js → window.AgentReplyAnalysis (model reply parsing, thinking blocks, repair detection)
-        ├── ui-render.js      → window.AgentUIRender     (markdown engine, messages, sidebar, badges)
-        ├── llm.js            → window.AgentLLMControl   (multi-lane routing, abort, streaming)
-        ├── child-agent.js    → window.AgentChildAgent    (spawnAgentChild sub-loop)
-        ├── agent.js                                     (agent loop, UI wiring)
-        ├── app-init.js                                 (DOMContentLoaded bootstrap)
-        └── ui-modern.js      → window.openSettings/closeSettings
+│   └── index.js                                    (finalizes skill surface)
+     │   └── app/
+     │       ├── core/                # state.js, constants.js, permissions.js, provider-state.js
+     │       ├── agent/              # agent.js, round-controller.js, session-lifecycle.js, error-recovery.js, tool-call-repair.js
+     │       ├── llm/               # llm.js, local-backend.js, child-agent.js + provider-*.js
+     │       ├── tools/              # tool-execution.js, filesystem-guards.js, rate-limiter.js
+     │       ├── context/           # compaction.js, steering.js, runtime-memory.js
+     │       ├── ui/               # ui-render.js, tools.js, ui-modern.js
+     │       └── app-init.js
 ```
 
 ## Bootstrap Order

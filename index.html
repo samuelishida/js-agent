@@ -516,7 +516,15 @@
 <script src="src/skills/modules/registry-runtime.js" defer></script>
 <script src="src/skills/modules/web-runtime.js" defer></script>
 
-<!-- ── 4. Skill assembly ───────────────────────────────────────────────── -->
+<!-- ── 4. Skill modules (must load before shared.js) ─────────────────────── -->
+<script src="src/skills/skill-broadcast.js" defer></script>
+<script src="src/skills/skill-planner.js" defer></script>
+<script src="src/skills/skill-preflight.js" defer></script>
+<script src="src/skills/skill-executor.js" defer></script>
+<script src="src/skills/skill-memory.js" defer></script>
+<script src="src/skills/skill-registry.js" defer></script>
+
+<!-- ── 5. Skill assembly hub ──────────────────────────────────────────────── -->
 <script src="src/skills/shared.js" defer></script>
 <script src="src/skills/groups/web.js" defer></script>
 <script src="src/skills/groups/device.js" defer></script>

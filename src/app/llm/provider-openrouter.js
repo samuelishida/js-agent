@@ -2,7 +2,7 @@
 // OpenRouter provider implementation.
 
 async function callOpenRouter(msgs, signal, options = {}, initialModel = '') {
-  const apiKey = window.apiKey;
+  const apiKey = openrouterBackend?.apiKey || window.apiKey || '';
   if (!apiKey) {
     const error = new Error('OpenRouter API key is missing. Enter your API key and click Save.');
     error.status = 401;
@@ -10,7 +10,8 @@ async function callOpenRouter(msgs, signal, options = {}, initialModel = '') {
   }
 
   const modelSelect = document.getElementById('model-select');
-  const model = String(initialModel || (modelSelect ? modelSelect.value : '') || 'openai/gpt-4o-mini').trim();
+  const openRouterModel = openrouterBackend?.model || '';
+  const model = String(initialModel || openRouterModel || (modelSelect ? modelSelect.value : '') || 'openai/gpt-4o-mini').trim();
   if (modelSelect && modelSelect.value !== model) modelSelect.value = model;
   if (!localBackend?.enabled) {
     const badgeModel = document.getElementById('topbar-model');

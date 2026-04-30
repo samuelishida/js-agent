@@ -89,6 +89,7 @@
     ].join('\n');
 
     try {
+      let timeoutId;
       const raw = await Promise.race([
         llm(
           [
@@ -97,8 +98,9 @@
           ],
           { maxTokens: 220, temperature: 0.1, timeoutMs: 9000, retries: 0 }
         ),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout 9600ms')), 9600))
+        new Promise((_, reject) => { timeoutId = setTimeout(() => reject(new Error('timeout 9600ms')), 9600); })
       ]);
+      clearTimeout(timeoutId);
 
       const parsed = parseJsonObjectFromText(raw);
       if (!parsed || typeof parsed !== 'object') return null;

@@ -47,6 +47,10 @@
 
   function executeSandboxed(tool, args) {
     const worker = getSandboxWorker();
+    // Pass terminal auth token to worker (worker has no window access)
+    if (window.__terminalToken && worker) {
+      try { worker.postMessage({ type: '__config', terminalToken: window.__terminalToken }); } catch {}
+    }
     return postToWorker(worker, { tool, args });
   }
 

@@ -37,6 +37,13 @@ function parseSSEChunk(chunk) {
   return events;
 }
 
+function _combineReasoningContent(fullReasoning, fullContent) {
+  if (!fullReasoning) return fullContent;
+  let result = '\u003cthink\u003e\n' + fullReasoning + '\n\u003c/think\u003e';
+  if (fullContent) result += '\n' + fullContent;
+  return result;
+}
+
 async function readOllamaNativeStream(response, onChunk) {
   const reader = response.body?.getReader();
   if (!reader) return null;
@@ -58,17 +65,27 @@ async function readOllamaNativeStream(response, onChunk) {
           const obj = JSON.parse(trimmed);
           if (obj.error) {
             const msg = String(obj.error?.message || obj.error || 'Ollama streaming error').slice(0, 200);
+            if (/memory layout cannot be allocated/i.test(msg)) {
+              const oomErr = new Error('Ollama ran out of GPU/CPU memory (memory layout cannot be allocated). Free up VRAM or use a smaller model.');
+              oomErr.code = 'OLLAMA_OOM';
+              oomErr.status = 500;
+              throw oomErr;
+            }
             if (/^EOF$/i.test(msg.trim())) {
               console.warn('[readOllamaNativeStream] stream ended with EOF error - returning accumulated content');
-              if (!fullContent && fullReasoning) {
-                return '\u003cthink\u003e\n' + fullReasoning + '\n\u003c/think\u003e';
+              if (fullReasoning || fullContent) {
+                return _combineReasoningContent(fullReasoning, fullContent);
               }
+              const eofErr = new Error('Ollama model crashed mid-stream (EOF with no content). Try a smaller model or reduce context size.');
+              eofErr.code = 'OLLAMA_MODEL_CRASH';
+              eofErr.status = 500;
+              throw eofErr;
             }
             const err = new Error(msg);
             throw err;
           }
           const delta = obj.message?.content || '';
-          const reasoning = obj.message?.reasoning || obj.message?.reasoning_content || '';
+          const reasoning = obj.message?.reasoning || obj.message?.reasoning_content || obj.message?.thinking || '';
           if (delta) {
             fullContent += delta;
             if (onChunk) onChunk(delta, fullContent);
@@ -76,14 +93,17 @@ async function readOllamaNativeStream(response, onChunk) {
           if (reasoning) {
             fullReasoning += reasoning;
           }
-          if (obj.done) { reader.cancel(); return fullContent; }
+          if (obj.done) {
+            reader.cancel();
+            return _combineReasoningContent(fullReasoning, fullContent);
+          }
         } catch (e) {
           if (e.message && !e.message.includes('JSON')) throw e;
         }
       }
     }
   } finally { reader.releaseLock(); }
-  return fullContent;
+  return _combineReasoningContent(fullReasoning, fullContent);
 }
 
 async function readStreamingResponse(response, onChunk) {
@@ -103,20 +123,23 @@ async function readStreamingResponse(response, onChunk) {
       for (const chunk of chunks) {
         const events = parseSSEChunk(chunk);
         for (const event of events) {
-          if (event.done) { reader.cancel(); return fullContent; }
+          if (event.done) {
+            reader.cancel();
+            return _combineReasoningContent(fullReasoning, fullContent);
+          }
           const delta = event.parsed?.choices?.[0]?.delta;
           if (delta?.content) {
             fullContent += delta.content;
             if (onChunk) onChunk(delta.content, fullContent);
           }
-          if (delta?.reasoning) {
-            fullReasoning += delta.reasoning;
+          if (delta?.reasoning || delta?.reasoning_content || delta?.thinking) {
+            fullReasoning += (delta?.reasoning || delta?.reasoning_content || delta?.thinking);
           }
         }
       }
     }
   } finally { reader.releaseLock(); }
-  return fullContent;
+  return _combineReasoningContent(fullReasoning, fullContent);
 }
 
 function delay(ms, signal) {
@@ -133,7 +156,7 @@ function isRetryableError(error) {
   if (error.code === 'OLLAMA_CLOUD_CORS_BLOCKED' || error.code === 'OLLAMA_PROXY_NOT_CONFIGURED') return false;
   const message = String(error.message || '');
   if (/EOF.*api_erro|api_erro.*EOF/i.test(message)) return false;
-  if (error.code === 'OLLAMA_INCOMPLETE_OUTPUT' || error.code === 'LOCAL_INCOMPLETE_OUTPUT' || error.code === 'OLLAMA_MODEL_CRASH') return false;
+  if (error.code === 'OLLAMA_OOM' || error.code === 'OLLAMA_INCOMPLETE_OUTPUT' || error.code === 'LOCAL_INCOMPLETE_OUTPUT' || error.code === 'OLLAMA_MODEL_CRASH') return false;
   const status = Number(error.status);
   if (LLM_RETRY_STATUSES.has(status)) return true;
   if (/\b(408|425|429|500|502|503|504)\b/.test(message)) return true;

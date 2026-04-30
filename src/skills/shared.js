@@ -15,6 +15,7 @@
   const Executor = window.AgentSkillExecutor || {};
   const Memory = window.AgentSkillMemory || {};
   const Registry = window.AgentSkillRegistry || {};
+  const GithubRuntimeFactory = window.AgentSkillModules?.createGithubRuntime;
 
   // ── Shared state (used by fs runtime and preflight) ──────────────────────
   const state = { roots: new Map(), defaultRootId: null, uploads: new Map() };
@@ -127,6 +128,26 @@
   ];
 
   compatTools.forEach(tool => Registry.registerCompatTool(registry, skillGroups, tool));
+
+  // ── GitHub tools ─────────────────────────────────────────────────────────
+  if (typeof GithubRuntimeFactory === 'function') {
+    const githubRuntime = GithubRuntimeFactory({ formatToolResult: Executor.formatToolResult });
+    const githubToolDefs = [
+      { name: 'github_search_code',  description: 'Search GitHub code across repositories.',                          run: githubRuntime.githubSearchCode },
+      { name: 'github_get_pr',       description: 'Get pull request details and changed files.',                      run: githubRuntime.githubGetPr },
+      { name: 'github_list_prs',     description: 'List pull requests for a repository.',                             run: githubRuntime.githubListPrs },
+      { name: 'github_create_issue', description: 'Create a new GitHub issue.',                                       run: githubRuntime.githubCreateIssue },
+      { name: 'github_get_file',     description: 'Read a file from a GitHub repository at a specific ref.',          run: githubRuntime.githubGetFile },
+      { name: 'github_list_issues',  description: 'List issues for a repository, optionally filtered by label/state.', run: githubRuntime.githubListIssues }
+    ];
+    if (!skillGroups.github) skillGroups.github = { label: 'GitHub', tools: [] };
+    for (const def of githubToolDefs) {
+      if (!registry[def.name]) {
+        registry[def.name] = { name: def.name, description: def.description, retries: 1, run: def.run };
+        skillGroups.github.tools.push({ name: def.name, signature: `${def.name}(...)` });
+      }
+    }
+  }
 
   // ── Snapshot tools ──────────────────────────────────────────────────────
   Registry.registerSnapshotTools(registry, skillGroups, Executor.formatToolResult);

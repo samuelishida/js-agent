@@ -153,6 +153,13 @@ async function callLocal(msgs, signal, options = {}) {
       if (!res.ok) {
         let detail = '';
         try { detail = String(await res.text()).slice(0, 180); } catch {}
+        // Detect OOM errors from local Ollama instances
+        if (res.status === 500 && /memory layout cannot be allocated/i.test(detail)) {
+          const oomError = new Error('Local LLM ran out of GPU/CPU memory (memory layout cannot be allocated). Free up VRAM or use a smaller model.');
+          oomError.status = 500;
+          oomError.code = 'OLLAMA_OOM';
+          throw oomError;
+        }
         attempts.push({ path: ep.path, status: res.status, detail });
         lastEndpointStatus = res.status;
         lastEndpointError = `${ep.path}: HTTP ${res.status}`;
@@ -165,10 +172,15 @@ async function callLocal(msgs, signal, options = {}) {
           if (ep.format === 'ollama') {
             streamedContent = await window.AgentLLMUtils?.readOllamaNativeStream?.(res, window.AgentLLMUtils?.streamingCallback);
           } else {
-            streamedContent = await window.AgentLLMUtils?.readStreamingResponse?.(res);
+            streamedContent = await window.AgentLLMUtils?.readStreamingResponse?.(res, window.AgentLLMUtils?.streamingCallback);
           }
           if (streamedContent !== null && streamedContent.length > 0) return streamedContent;
-        } catch {}
+        } catch (streamErr) {
+          if (signal?.aborted || streamErr?.name === 'AbortError') throw streamErr;
+          // Propagate OOM and crash errors — don't silently continue
+          if (streamErr?.code === 'OLLAMA_OOM' || streamErr?.code === 'OLLAMA_MODEL_CRASH') throw streamErr;
+          console.warn(`[Local] stream error from ${ep.path}: ${streamErr?.message}`);
+        }
         lastEndpointError = `${ep.path}: stream exhausted without content`;
         continue;
       }

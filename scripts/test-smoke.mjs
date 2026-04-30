@@ -762,6 +762,11 @@ async function main() {
 
   const BASE = `http://127.0.0.1:${TEST_PORT}`;
 
+  // Fetch terminal auth token from /api/env (localhost request, so permitted)
+  const envRes = await httpGet(`${BASE}/api/env`);
+  const terminalToken = JSON.parse(envRes.body).terminalToken || '';
+  const terminalHeaders = terminalToken ? { 'Authorization': `Bearer ${terminalToken}` } : {};
+
   await group('GET / returns 200 with HTML', async () => {
     const res = await httpGet(`${BASE}/`);
     assert.equal(res.status, 200, `expected 200, got ${res.status}`);
@@ -780,7 +785,7 @@ async function main() {
   });
 
   await group('POST /api/terminal echo returns ok:true', async () => {
-    const res = await httpPost(`${BASE}/api/terminal`, { command: 'echo smoke-test-ok' });
+    const res = await httpPost(`${BASE}/api/terminal`, { command: 'echo smoke-test-ok' }, terminalHeaders);
     assert.equal(res.status, 200, `expected 200, got ${res.status}`);
     const json = JSON.parse(res.body);
     assert.ok(json.ok === true, `expected ok:true, got ok:${json.ok}`);
@@ -788,10 +793,15 @@ async function main() {
   });
 
   await group('POST /api/terminal missing command returns 400', async () => {
-    const res = await httpPost(`${BASE}/api/terminal`, {});
+    const res = await httpPost(`${BASE}/api/terminal`, {}, terminalHeaders);
     assert.equal(res.status, 400, `expected 400, got ${res.status}`);
     const json = JSON.parse(res.body);
     assert.ok(json.error, 'no error field in 400 response');
+  });
+
+  await group('POST /api/terminal without token returns 401', async () => {
+    const res = await httpPost(`${BASE}/api/terminal`, { command: 'echo unauth' });
+    assert.equal(res.status, 401, `expected 401, got ${res.status}`);
   });
 
   await group('POST /api/diagnostics returns 200 JSON', async () => {

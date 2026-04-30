@@ -2,8 +2,11 @@
 // OpenRouter provider implementation.
 
 async function callOpenRouter(msgs, signal, options = {}, initialModel = '') {
-  const apiKey = openrouterBackend?.apiKey || window.apiKey || '';
-  if (!apiKey) {
+  const localKey = openrouterBackend?.apiKey === '__proxy__' ? '' : (openrouterBackend?.apiKey || '');
+  const useProxy = !localKey && (window.__serverHasOpenRouterKey || false);
+  const apiKey = localKey;
+
+  if (!apiKey && !useProxy) {
     const error = new Error('OpenRouter API key is missing. Enter your API key and click Save.');
     error.status = 401;
     throw error;
@@ -32,14 +35,17 @@ async function callOpenRouter(msgs, signal, options = {}, initialModel = '') {
     stream: false
   };
 
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  // Use local proxy when server has the key (key never exposed to browser)
+  const endpoint = useProxy
+    ? `${window.location.origin}/api/openrouter/chat/completions`
+    : 'https://openrouter.ai/api/v1/chat/completions';
+  const fetchHeaders = useProxy
+    ? { 'Content-Type': 'application/json' }
+    : { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': window.location.origin, 'X-Title': 'JS Agent' };
+
+  const res = await fetch(endpoint, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': window.location.origin,
-      'X-Title': 'JS Agent'
-    },
+    headers: fetchHeaders,
     body: JSON.stringify(body),
     signal
   });

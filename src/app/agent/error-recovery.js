@@ -15,8 +15,9 @@
 function classifyLlmError(error, round, maxRounds) {
   if (window.AgentReplyAnalysis?.isMaxOutputTokenLikeError?.(error)) return 'max_output_tokens';
   if (error.message?.includes('LOCAL_TIMEOUT')) return 'local_timeout';
+  if (error.code === 'OLLAMA_OOM') return 'ollama_incomplete';
   if (error.code === 'OLLAMA_MODEL_CRASH') return 'ollama_crash';
-  if (error.code === 'OLLAMA_INCOMPLETE_OUTPUT' || error.code === 'LOCAL_INCOMPLETE_OUTPUT') return 'ollama_incomplete';
+  if (error.code === 'OLLAMA_INCOMPLETE_OUTPUT' || error.code === 'LOCAL_INCOMPLETE_OUTPUT' || error.code === 'GEMINI_SAFETY' || error.code === 'GEMINI_RECITATION' || error.code === 'GEMINI_OTHER') return 'ollama_incomplete';
   if (error.status === 429) return 'rate_limit';
   if (error.message?.includes('network') || error.message?.includes('fetch')) return 'network';
   return 'unknown';

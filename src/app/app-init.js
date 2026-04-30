@@ -57,22 +57,34 @@ document.addEventListener('DOMContentLoaded', () => {
   if (typeof loadOllamaBackendState === 'function') loadOllamaBackendState();
   if (typeof loadOpenRouterBackendState === 'function') loadOpenRouterBackendState();
 
-  // Auto-detect OPEN_ROUTER_API_KEY from server env and pre-fill if available
+  // Fetch server env: terminal token + OpenRouter key availability flag.
+  // The actual API key is never sent to the browser; the server proxies via /api/openrouter.
   try {
     fetch('/api/env')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.OPEN_ROUTER_API_KEY && !openrouterBackend.apiKey) {
-          openrouterBackend.apiKey = data.OPEN_ROUTER_API_KEY;
-          localStorage.setItem('agent_openrouter_api_key', data.OPEN_ROUTER_API_KEY);
-          const input = document.getElementById('openrouter-api-key');
-          if (input) input.value = data.OPEN_ROUTER_API_KEY;
-          updateOpenRouterStatus();
-          console.log('[Agent] Auto-loaded OPEN_ROUTER_API_KEY from server env');
+        if (!data) return;
+        // Store terminal auth token for use in /api/terminal requests
+        if (data.terminalToken) {
+          window.__terminalToken = data.terminalToken;
+        }
+        // If server has OpenRouter key, activate proxy mode (no local key needed)
+        if (data.hasOpenRouterKey && !openrouterBackend.apiKey) {
+          window.__serverHasOpenRouterKey = true;
+          // Enable openrouter backend pointing at the local proxy
+          if (!openrouterBackend.enabled) {
+            openrouterBackend.enabled = true;
+            openrouterBackend.apiKey = '__proxy__'; // sentinel — not a real key
+          }
+          updateOpenRouterStatus?.();
+          console.log('[Agent] Server has OpenRouter key; using /api/openrouter proxy');
         }
       })
       .catch(() => {});
   } catch {}
+
+  // Discover and register MCP server tools (non-blocking; failures are logged only)
+  window.AgentMcpBridge?.discoverAndRegisterMcpTools?.().catch(() => {});
 
   if (!window.chatSessions.length) createSession();
   if (!getActiveSession()) window.activeSessionId = window.chatSessions[0]?.id || createSession().id;

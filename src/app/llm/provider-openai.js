@@ -62,8 +62,33 @@ async function callOpenAiCloud(msgs, signal, options = {}, initialModel = '') {
   }
 
   if (useStream && res.body) {
-    const streamedContent = await window.AgentLLMUtils?.readStreamingResponse?.(res);
-    if (streamedContent !== null) return streamedContent;
+    const streamedContent = await window.AgentLLMUtils?.readStreamingResponse?.(res, window.AgentLLMUtils?.streamingCallback);
+    if (streamedContent !== null && streamedContent !== '') return streamedContent;
+    // Stream exhausted without content — body already consumed, fall through to non-stream path
+    // Need a fresh request since body was consumed by stream reader
+    const nonStreamBody = { ...body, stream: false };
+    const retryRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(nonStreamBody),
+      signal
+    });
+    if (!retryRes.ok) {
+      const retryText = await retryRes.text();
+      const retryError = new Error(`OpenAI ${retryRes.status}: ${retryText.slice(0, 300)}`);
+      retryError.status = retryRes.status;
+      throw retryError;
+    }
+    const retryData = JSON.parse(await retryRes.text());
+    const retryToolCalls = retryData?.choices?.[0]?.message?.tool_calls;
+    if (Array.isArray(retryToolCalls) && retryToolCalls.length) {
+      const xml = window.AgentLLMUtils?.normalizeFunctionCallsToXml(retryToolCalls);
+      if (xml) return xml;
+    }
+    return retryData?.choices?.[0]?.message?.content || retryData?.choices?.[0]?.text || '';
   }
 
   const text = await res.text();

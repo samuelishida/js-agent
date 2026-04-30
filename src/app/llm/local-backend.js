@@ -5,10 +5,15 @@ const LOCAL_CANDIDATES = [
 ];
 
 function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
-  return Promise.race([
-    fetch(url, options),
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs))
-  ]);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const mergedSignal = options.signal;
+  if (mergedSignal) {
+    if (mergedSignal.aborted) { clearTimeout(timer); return Promise.reject(new Error('Aborted')); }
+    mergedSignal.addEventListener('abort', () => { clearTimeout(timer); controller.abort(); }, { once: true });
+  }
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
 }
 
 window.fetchWithTimeout = fetchWithTimeout;

@@ -46,7 +46,7 @@ function validateTerminalCommand(command) {
 
 function validateFilePath(path) {
   if (!path || typeof path !== 'string') throw new Error('Path is required');
-  if (path.includes('..')) throw new Error('Path traversal not allowed');
+  if (path.replace(/\\/g, '/').includes('..')) throw new Error('Path traversal not allowed');
 }
 
 function validateFileContent(content, maxSize) {
@@ -72,9 +72,11 @@ function truncate(str, maxLen) {
 async function executeTerminalSandbox(args) {
   const { command, cwd } = args || {};
   validateTerminalCommand(command);
+  const headers = { 'Content-Type': 'application/json' };
+  if (self._terminalToken) headers['Authorization'] = `Bearer ${self._terminalToken}`;
   const res = await fetch('/api/terminal', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ command, cwd: cwd || '' })
   });
   const data = await res.json();
@@ -99,7 +101,7 @@ async function executeFileDeleteSandbox(args) {
   const { path, recursive } = args || {};
   validateFilePath(path);
   if (path.includes('*') || path.includes('?')) throw new Error('Glob patterns not allowed');
-  if (path === '/' || /^[A-Za-z]:\/?$/.test(path)) throw new Error('Root directory deletion not allowed');
+  if (path === '/' || /^[A-Za-z]:[/\\]?$/.test(path)) throw new Error('Root directory deletion not allowed');
   const res = await fetch('/api/files/delete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -110,6 +112,13 @@ async function executeFileDeleteSandbox(args) {
 
 self.onmessage = async function(event) {
   const msg = event.data;
+
+  // Handle config messages from the main thread
+  if (msg && msg.type === '__config') {
+    if (msg.terminalToken) self._terminalToken = msg.terminalToken;
+    return;
+  }
+
   const valid = validateMessage(msg);
   if (!valid.valid) {
     self.postMessage({ type: 'error', error: valid.error });

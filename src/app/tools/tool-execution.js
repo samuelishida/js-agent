@@ -100,14 +100,15 @@
     if (tool !== 'web_search') return getToolCallSignature(call);
 
     const rawQuery = String(call?.args?.query || '').trim();
-    const stopwords = window.CONSTANTS?.WEB_SEARCH_STOPWORDS || new Set(['de','da','do','das','dos','para','por','com','na','no','nas','nos','em','e','a','o']);
+    // Language-agnostic normalization: strip diacritics, lowercase, remove punctuation,
+    // drop tokens ≤2 chars (common articles/prepositions in most languages), sort for stability.
     const normalized = rawQuery
-      .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
       .replace(/[^\w\s]/g, ' ')
-      .replace(new RegExp(`\\b(${ [...stopwords].join('|') })\\b`, 'g'), ' ')
       .replace(/\s{2,}/g, ' ').trim();
 
-    const tokens = [...new Set(normalized.split(/\s+/).filter(Boolean))].sort();
+    const tokens = [...new Set(normalized.split(/\s+/).filter(t => t.length > 2))].sort();
     return `${tool}:${tokens.join(' ') || normalized || rawQuery.toLowerCase()}`;
   }
 
@@ -185,6 +186,14 @@
     if (runPendingConfirmations.has(toolSignature)) {
       runPendingConfirmations.delete(toolSignature);
       runRiskApprovals.set(toolSignature, true);
+      return true;
+    }
+    return false;
+  }
+
+  function rejectConfirmation(toolSignature) {
+    if (runPendingConfirmations.has(toolSignature)) {
+      runPendingConfirmations.delete(toolSignature);
       return true;
     }
     return false;
@@ -285,6 +294,7 @@
 
   window.AgentConfirmation = {
     approve: approveConfirmation,
+    reject: rejectConfirmation,
     pending: () => Array.from(runPendingConfirmations.values()),
     clearPending: () => runPendingConfirmations.clear()
   };

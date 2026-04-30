@@ -82,7 +82,8 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
   const finishReason = data.candidates[0]?.finishReason;
   if (finishReason && finishReason !== 'STOP' && finishReason !== 'FINISH_REASON_UNSPECIFIED') {
     const error = new Error(`Gemini response blocked: ${finishReason}`);
-    error.code = `GEMINI_${finishReason}`;
+    error.code = 'GEMINI_NONSTOP';
+    error.status = 500;
     throw error;
   }
   return data.candidates[0]?.content?.parts?.[0]?.text || '';

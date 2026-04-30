@@ -7,6 +7,7 @@ let activeLlmController = null;
 const LLM_RATE_LIMIT_MS = {
   local: 250,
   ollama: 250,
+  openrouter: 1200,
   cloud: 1200
 };
 
@@ -14,6 +15,7 @@ const LLM_TIMEOUT_MS = {
   local: (window.CONSTANTS?.DEFAULT_TIMEOUT_MS_LOCAL || 120000),
   cloud: (window.CONSTANTS?.DEFAULT_TIMEOUT_MS_CLOUD || 45000),
   ollama: (window.CONSTANTS?.DEFAULT_TIMEOUT_MS_LOCAL || 120000),
+  openrouter: (window.CONSTANTS?.DEFAULT_TIMEOUT_MS_LOCAL || 120000),
   control: 20000
 };
 
@@ -24,12 +26,51 @@ const laneState = {
   ollama: { chain: Promise.resolve(), nextAt: 0 }
 };
 
+// Half-open circuit breaker: after THRESHOLD consecutive failures a lane goes OPEN
+// for RESET_MS, then allows one probe. Resets fully on success.
+const CIRCUIT_THRESHOLD = 3;
+const CIRCUIT_RESET_MS = 30000;
+const circuitBreaker = {
+  local:      { failures: 0, openUntil: 0 },
+  cloud:      { failures: 0, openUntil: 0 },
+  openrouter: { failures: 0, openUntil: 0 },
+  ollama:     { failures: 0, openUntil: 0 }
+};
+
+function isCircuitOpen(lane) {
+  const cb = circuitBreaker[lane];
+  if (!cb) return false;
+  if (cb.openUntil > Date.now()) return true;
+  if (cb.openUntil > 0) { cb.openUntil = 0; cb.failures = 0; } // half-open probe
+  return false;
+}
+function recordCircuitSuccess(lane) {
+  const cb = circuitBreaker[lane];
+  if (cb) { cb.failures = 0; cb.openUntil = 0; }
+}
+function recordCircuitFailure(lane) {
+  const cb = circuitBreaker[lane];
+  if (!cb) return;
+  cb.failures++;
+  if (cb.failures >= CIRCUIT_THRESHOLD) {
+    cb.openUntil = Date.now() + CIRCUIT_RESET_MS;
+    console.warn(`[LLM Circuit] Lane '${lane}' OPEN until ${new Date(cb.openUntil).toISOString()}`);
+  }
+}
+
 function executeLane(lane, msgs, options, outerSignal) {
+  if (isCircuitOpen(lane)) {
+    const err = new Error(`LLM lane '${lane}' temporarily unavailable (circuit open, resets in ${Math.ceil((circuitBreaker[lane]?.openUntil - Date.now()) / 1000)}s)`);
+    err.code = 'CIRCUIT_OPEN';
+    err.status = 503;
+    return Promise.reject(err);
+  }
+
   const timeoutMs = getTimeoutMs(lane, options);
   const minIntervalMs = getRateLimitMs(lane, options);
   const retries = Number.isInteger(options.retries)
     ? Math.max(0, options.retries)
-    : (lane === 'local' ? 1 : 2);
+    : (lane === 'local' || lane === 'ollama' ? 1 : 2);
 
   return scheduleLaneExecution(lane, minIntervalMs, outerSignal, async () => {
     return retryWithBackoff(async () => {
@@ -50,6 +91,14 @@ function executeLane(lane, msgs, options, outerSignal) {
         return callCloud(msgs, signal, options);
       }, { timeoutMs, parentSignal: outerSignal, laneLabel: lane });
     }, { retries, signal: outerSignal });
+  }).then(result => {
+    recordCircuitSuccess(lane);
+    return result;
+  }).catch(err => {
+    if (!outerSignal?.aborted && err.name !== 'AbortError' && err.code !== 'CIRCUIT_OPEN' && err.code !== 'OLLAMA_OOM' && err.code !== 'OLLAMA_MODEL_CRASH' && err.code !== 'OLLAMA_INCOMPLETE_OUTPUT' && err.code !== 'LOCAL_INCOMPLETE_OUTPUT' && err.code !== 'GEMINI_NONSTOP') {
+      recordCircuitFailure(lane);
+    }
+    throw err;
   });
 }
 
@@ -132,7 +181,7 @@ function getRateLimitMs(lane, options = {}) {
 function getTimeoutMs(lane, options = {}) {
   const configured = Number(options.timeoutMs);
   if (Number.isFinite(configured) && configured > 0) {
-    return (lane === 'local' || lane === 'ollama') ? Math.max(8000, configured) : Math.max(1000, configured);
+    return (lane === 'local' || lane === 'ollama' || lane === 'openrouter') ? Math.max(8000, configured) : Math.max(1000, configured);
   }
   const maxTokens = Number(options.maxTokens) || 0;
   const isControlCall = maxTokens > 0 && maxTokens <= 300;
@@ -247,9 +296,10 @@ async function callLLM(msgs, options = {}) {
   const inflightKey = window.AgentLLMUtils?.getInflightKey
     ? window.AgentLLMUtils.getInflightKey(msgs, options)
     : `${options.model || 'default'}:${msgs.length}`;
+  const execute = () => executeLane(lane, msgs, options, outerSignal);
   try {
-    return await window.AgentLLMUtils?.dedupInflight?.(inflightKey, () => executeLane(lane, msgs, options, outerSignal))
-      ?? executeLane(lane, msgs, options, outerSignal);
+    const dedupFn = window.AgentLLMUtils?.dedupInflight;
+    return await (dedupFn ? dedupFn(inflightKey, execute) : execute());
   } finally {
     if (activeLlmController?.signal === outerSignal) activeLlmController = null;
   }

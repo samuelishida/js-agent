@@ -364,7 +364,12 @@
   // ── Compat runtime wrappers ──────────────────────────────────────────────
 
   async function callLocalCompatApi(path, payload = {}) {
-    const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const headers = { 'Content-Type': 'application/json' };
+    // Attach terminal auth token for /api/terminal requests
+    if (path === '/api/terminal' && window.__terminalToken) {
+      headers['Authorization'] = `Bearer ${window.__terminalToken}`;
+    }
+    const response = await fetch(path, { method: 'POST', headers, body: JSON.stringify(payload) });
     const text = await response.text();
     if (!response.ok) throw new Error(text || `HTTP ${response.status}`);
     try { return JSON.parse(text); } catch { return { ok: true, result: text }; }

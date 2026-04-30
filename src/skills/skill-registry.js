@@ -25,9 +25,11 @@
   ]);
   const lazyLoaded = new Set();
 
+  // Tracks first invocation of a tool for telemetry (does NOT defer loading —
+  // realRun is already bound at registration time; rename to reflect actual behavior).
   function makeLazyRunner(name, realRun) {
     let invoked = false;
-    return async function lazyRun(args, context) {
+    return async function trackedRun(args, context) {
       if (!invoked) {
         invoked = true;
         lazyLoaded.add(name);
@@ -46,8 +48,9 @@
     }
     skillGroups.runtime_compat.tools.push({ name, signature });
 
-    if (typeof enabledTools === 'object' && enabledTools && !Object.prototype.hasOwnProperty.call(enabledTools, name)) {
-      enabledTools[name] = true;
+    const et = window.AgentState?.getEnabledTools?.() || window.enabledTools;
+    if (typeof et === 'object' && et && !Object.prototype.hasOwnProperty.call(et, name)) {
+      et[name] = true;
     }
   }
 

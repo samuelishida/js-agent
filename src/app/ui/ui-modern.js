@@ -37,18 +37,29 @@ function openConfirmationPanel() {
 
   panel.style.display = 'flex';
   list.innerHTML = pending.map((item, index) => `
-    <div class="confirmation-item">
+    <div class="confirmation-item" data-sig-index="${index}">
       <div class="confirmation-item-icon">⚠️</div>
       <div class="confirmation-item-content">
         <div class="confirmation-item-title">${escHtml(item.tool || 'Unknown tool')}</div>
         <div class="confirmation-item-description">${escHtml(item.message || '')}</div>
         <div class="confirmation-item-actions">
-          <button class="btn btn-approve btn-sm" onclick="approveConfirmation('${item.signature}')">Approve</button>
-          <button class="btn btn-reject btn-sm" onclick="rejectConfirmation('${item.signature}')">Reject</button>
+          <button class="btn btn-approve btn-sm" data-action="approve" data-sig-index="${index}">Approve</button>
+          <button class="btn btn-reject btn-sm" data-action="reject" data-sig-index="${index}">Reject</button>
         </div>
       </div>
     </div>
   `).join('');
+
+  const signatures = pending.map(item => item.signature);
+  list.addEventListener('click', function handler(e) {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const idx = Number(btn.dataset.sigIndex);
+    const sig = signatures[idx];
+    if (sig === undefined) return;
+    if (btn.dataset.action === 'approve') approveConfirmation(sig);
+    else if (btn.dataset.action === 'reject') rejectConfirmation(sig);
+  }, { once: true });
 }
 
 function closeConfirmationPanel() {
@@ -64,9 +75,14 @@ function approveConfirmation(signature) {
 }
 
 function rejectConfirmation(signature) {
-  if (window.AgentConfirmation?.approve) {
-    // For rejection, we don't call approve, just re-render
-    openConfirmationPanel();
+  if (window.AgentConfirmation?.reject) {
+    window.AgentConfirmation.reject(signature);
+    const remaining = window.AgentConfirmation.pending?.() || [];
+    if (remaining.length) {
+      openConfirmationPanel();
+    } else {
+      closeConfirmationPanel();
+    }
   }
 }
 
@@ -94,7 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
     rejectAllBtn.addEventListener('click', () => {
       const pending = window.AgentConfirmation?.pending?.() || [];
       for (const item of pending) {
-        // Rejection is implicit - just don't approve
+        window.AgentConfirmation?.reject?.(item.signature);
       }
       closeConfirmationPanel();
     });

@@ -149,8 +149,9 @@ async function tryRepairToolCalls({ userMessage, rawReply, reply, parsedReply, m
 function handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionRounds, messages }) {
   const cfg = window.CONSTANTS || {};
   const cleanReply = reply.replace(getToolCallCleanupRegex(), '').trim();
+  const reasoningText = (window.AgentReplyAnalysis?.extractThinkingBlocks?.(rawReply || '') || []).join('\n').trim();
 
-  if (!cleanReply) {
+  if (!cleanReply && !reasoningText) {
     const nextConsecutive = consecutiveNonActionRounds + 1;
     if (nextConsecutive >= (cfg.MAX_CONSECUTIVE_NON_ACTION_ROUNDS || 6)) {
       return {
@@ -163,6 +164,24 @@ function handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionRounds,
     const updated = [...messages,
       { role: 'assistant', content: rawReply || reply },
       { role: 'user', content: 'No valid tool call or final answer was returned. Continue now: call one or more tools with complete args, or provide a complete final answer.' }
+    ];
+    return { finalAnswer: false, messages: updated, consecutiveNonActionRounds: nextConsecutive, shouldContinue: true };
+  }
+
+  // Reasoning-only output (no visible content, no tool calls) — nudge the model to continue
+  if (!cleanReply && reasoningText) {
+    const nextConsecutive = consecutiveNonActionRounds + 1;
+    if (nextConsecutive >= (cfg.MAX_CONSECUTIVE_NON_ACTION_ROUNDS || 6)) {
+      return {
+        finalAnswer: true,
+        finalText: reasoningText,
+        messages,
+        consecutiveNonActionRounds: nextConsecutive
+      };
+    }
+    const updated = [...messages,
+      { role: 'assistant', content: rawReply || reply },
+      { role: 'user', content: 'You produced only reasoning/thinking with no visible answer or tool calls. Based on your reasoning, continue now: call one or more tools with complete args, or provide a complete final answer.' }
     ];
     return { finalAnswer: false, messages: updated, consecutiveNonActionRounds: nextConsecutive, shouldContinue: true };
   }

@@ -69,7 +69,7 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
             ? window.AgentLLMUtils.collapseConsecutiveSameRole(messages)
             : messages,
           stream: shouldStream,
-          options: { temperature, num_predict: maxTokens, num_ctx: Math.min(getCtxLimit(), 256000) }
+          options: { temperature, num_predict: maxTokens, num_ctx: Math.min(typeof getCtxLimit === 'function' ? getCtxLimit() : 4096, 256000) }
         }
       : {
           model,
@@ -106,6 +106,12 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
         authError.status = res.status;
         throw authError;
       }
+      if (res.status === 500 && /memory layout cannot be allocated/i.test(errText)) {
+        const oomError = new Error('Ollama ran out of GPU/CPU memory (memory layout cannot be allocated). Free up VRAM or use a smaller model.');
+        oomError.status = 500;
+        oomError.code = 'OLLAMA_OOM';
+        throw oomError;
+      }
       if (res.status === 500 && endpoints.indexOf(ep) < endpoints.length - 1) {
         console.warn(`[Ollama] ${endpointUrl} returned HTTP ${res.status}, trying next endpoint`);
         lastError = new Error(`Ollama returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
@@ -133,7 +139,7 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
         if (isNative) {
           streamResult = await window.AgentLLMUtils?.readOllamaNativeStream?.(res, window.AgentLLMUtils?.streamingCallback);
         } else {
-          streamResult = await window.AgentLLMUtils?.readStreamingResponse?.(res);
+          streamResult = await window.AgentLLMUtils?.readStreamingResponse?.(res, window.AgentLLMUtils?.streamingCallback);
         }
       } catch (streamErr) {
         if (signal?.aborted || streamErr?.name === 'AbortError') throw streamErr;
@@ -166,9 +172,12 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
       const errMsg = String(data.error?.message || data.error || 'Ollama API error').slice(0, 200);
       if (/^EOF$/i.test(errMsg.trim())) {
         const eofReasoning = isNative
-          ? (data.message?.reasoning || data.message?.reasoning_content || '')
-          : (data.choices?.[0]?.message?.reasoning || data.choices?.[0]?.message?.reasoning_content || '');
-        if (!eofReasoning?.trim()) {
+          ? (data.message?.reasoning || data.message?.reasoning_content || data.message?.thinking || '')
+          : (data.choices?.[0]?.message?.reasoning || data.choices?.[0]?.message?.reasoning_content || data.choices?.[0]?.message?.thinking || '');
+        const eofContent = isNative
+          ? (data.message?.content || '')
+          : (data.choices?.[0]?.message?.content || '');
+        if (!eofReasoning?.trim() && !eofContent?.trim()) {
           const eofError = new Error('Ollama model crashed (EOF). Try a smaller model or reduce context size.');
           eofError.status = 500;
           eofError.code = 'OLLAMA_MODEL_CRASH';
@@ -176,7 +185,11 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
           lastError = eofError;
           continue;
         }
-        return '\u003cthink\u003e\n' + eofReasoning + '\n\u003c/think\u003e';
+        let eofResult = '';
+        if (eofReasoning?.trim()) eofResult += '\u003cthink\u003e\n' + eofReasoning + '\n\u003c/think\u003e';
+        if (eofResult && eofContent?.trim()) eofResult += '\n';
+        if (eofContent?.trim()) eofResult += eofContent;
+        return eofResult;
       }
       lastError = new Error(errMsg);
       if (endpoints.indexOf(ep) === endpoints.length - 1) throw lastError;
@@ -188,11 +201,13 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
       : (data.choices?.[0]?.message?.content || data.choices?.[0]?.text || data.message?.content || data.response || '');
 
     const rawReasoning = isNative
-      ? (data.message?.reasoning || data.message?.reasoning_content || '')
-      : (data.choices?.[0]?.message?.reasoning || data.choices?.[0]?.message?.reasoning_content || data.choices?.[0]?.reasoning || data.choices?.[0]?.reasoning_content || '');
+      ? (data.message?.reasoning || data.message?.reasoning_content || data.message?.thinking || '')
+      : (data.choices?.[0]?.message?.reasoning || data.choices?.[0]?.message?.reasoning_content || data.choices?.[0]?.message?.thinking || data.choices?.[0]?.reasoning || data.choices?.[0]?.reasoning_content || '');
 
-    if (!rawContent && rawReasoning && rawReasoning.trim()) {
-      return '\u003cthink\u003e\n' + rawReasoning + '\n\u003c/think\u003e';
+    if (rawReasoning && rawReasoning.trim()) {
+      let combined = '\u003cthink\u003e\n' + rawReasoning + '\n\u003c/think\u003e';
+      if (rawContent) combined += '\n' + rawContent;
+      return combined;
     }
 
     const finishReason = isNative

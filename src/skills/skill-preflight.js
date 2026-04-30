@@ -204,7 +204,9 @@
       try { await task(); } catch {}
     })());
 
-    await Promise.race([Promise.allSettled(pending), new Promise(r => setTimeout(r, 1400))]);
+    let prefetchTimer;
+    await Promise.race([Promise.allSettled(pending), new Promise(r => { prefetchTimer = setTimeout(r, 1400); })]);
+    clearTimeout(prefetchTimer);
     return blocks;
   }
 

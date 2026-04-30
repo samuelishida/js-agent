@@ -5,15 +5,48 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { URL } from 'node:url';
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 
 const PORT = Number(process.env.PORT || 5500);
 const ROOT = process.cwd();
 const OLLAMA_BASE = 'https://ollama.com';
-const API_PREFIX = '/api/ollama/v1';const GNEWS_PREFIX = '/api/gnews';
-const GNEWS_BASE = 'https://news.google.com';const TERMINAL_PREFIX = '/api/terminal';
+const OPENROUTER_BASE = 'https://openrouter.ai';
+const API_PREFIX = '/api/ollama/v1';
+const OPENROUTER_PREFIX = '/api/openrouter';
+const GNEWS_PREFIX = '/api/gnews';
+const GNEWS_BASE = 'https://news.google.com';
+const TERMINAL_PREFIX = '/api/terminal';
 const DIAGNOSTICS_PREFIX = '/api/diagnostics';
 const HEALTH_PREFIX = '/api/health';
 const ENV_PREFIX = '/api/env';
+const MCP_PROXY_PREFIX = '/api/mcp-proxy';
+
+// One-time terminal auth token — generated at startup, passed to the browser via /api/env.
+// Prevents non-browser callers from running terminal commands even if they know the URL.
+const TERMINAL_TOKEN = randomBytes(24).toString('hex');
+
+// Dangerous command patterns blocked server-side (defence-in-depth; client also filters).
+const DANGEROUS_CMD_PATTERNS = [
+  /\brm\s+(-[rRf]+\s+\/|\/\s+-[rRf]+)/,   // rm -rf /
+  /:\s*\(\s*\)\s*\{\s*:\s*\|/,              // fork bomb  :(){ :|:& };:
+  /\bdd\b.+\bof\s*=\s*\/dev\//i,            // dd to raw disk
+  /\bmkfs\b/i,                              // format filesystem
+  /\bformat\s+[a-z]:\s*$/i,                // Windows format drive
+  /\b(shutdown|reboot|halt|poweroff)\b/i,  // system shutdown
+  />\s*\/dev\/(sda|hda|nvme)/i             // overwrite block device
+];
+
+function isDangerousCommand(cmd) {
+  const s = String(cmd || '');
+  return DANGEROUS_CMD_PATTERNS.some(re => re.test(s));
+}
+
+// Check whether the request originates from localhost (same machine as the server).
+function isLocalhostOrigin(req) {
+  const origin = String(req.headers.origin || '').trim();
+  if (!origin) return true; // no origin = same-origin or non-browser
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -141,7 +174,8 @@ function readJsonBody(req) {
   return readRequestBody(req).then(buffer => {
     const text = String(buffer || '').trim();
     if (!text) return {};
-    return JSON.parse(text);
+    try { return JSON.parse(text); }
+    catch { throw new Error('Request body is not valid JSON'); }
   });
 }
 
@@ -215,11 +249,36 @@ async function handleTerminal(req, res) {
     return;
   }
 
+  // Enforce terminal auth token
+  const authHeader = String(req.headers['authorization'] || '');
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (token !== TERMINAL_TOKEN) {
+    send(res, 401, JSON.stringify({ error: 'Unauthorized: invalid or missing terminal token' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
   try {
     const body = await readJsonBody(req);
     const command = String(body.command || '').trim();
     if (!command) {
       send(res, 400, JSON.stringify({ error: 'command is required' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+    if (command.length > 4096) {
+      send(res, 400, JSON.stringify({ error: 'Command too long (max 4096 chars)' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+    if (isDangerousCommand(command)) {
+      send(res, 400, JSON.stringify({ error: 'Command blocked: matches dangerous pattern' }), {
         'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Origin': '*'
       });
@@ -353,6 +412,160 @@ function serveStatic(req, res, parsedUrl) {
   });
 }
 
+async function proxyOpenRouter(req, res, parsedUrl) {
+  if (req.method === 'OPTIONS') {
+    send(res, 204, '', {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'authorization,content-type',
+      'Access-Control-Max-Age': '86400'
+    });
+    return;
+  }
+
+  if (!process.env.OPEN_ROUTER_API_KEY) {
+    send(res, 503, JSON.stringify({ error: 'OpenRouter API key not configured on server' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  const suffix = parsedUrl.pathname.slice(OPENROUTER_PREFIX.length) || '';
+  const upstreamPath = `/api/v1${suffix}${parsedUrl.search || ''}`;
+  const upstreamUrl = new URL(upstreamPath, OPENROUTER_BASE);
+  const method = String(req.method || 'POST').toUpperCase();
+  const body = method === 'GET' || method === 'HEAD' ? null : await readRequestBody(req);
+  const headers = sanitizeHeaders(req.headers);
+
+  // Inject server-side key — client never sees the raw key
+  headers.authorization = `Bearer ${process.env.OPEN_ROUTER_API_KEY}`;
+  headers['http-referer'] = `http://localhost:${PORT}`;
+  headers['x-title'] = 'JS Agent';
+  if (body) headers['content-length'] = String(body.length);
+
+  const options = {
+    protocol: upstreamUrl.protocol,
+    hostname: upstreamUrl.hostname,
+    port: upstreamUrl.port || 443,
+    path: upstreamUrl.pathname + upstreamUrl.search,
+    method,
+    headers
+  };
+
+  const upstreamReq = https.request(options, upstreamRes => {
+    const passHeaders = {};
+    const contentType = upstreamRes.headers['content-type'];
+    if (contentType) passHeaders['Content-Type'] = contentType;
+    passHeaders['Cache-Control'] = 'no-store';
+    passHeaders['Access-Control-Allow-Origin'] = '*';
+    res.writeHead(upstreamRes.statusCode || 502, passHeaders);
+    upstreamRes.pipe(res);
+  });
+
+  upstreamReq.on('error', err => {
+    send(res, 502, JSON.stringify({ error: `OpenRouter proxy error: ${err.message}` }), {
+      'Content-Type': 'application/json; charset=utf-8'
+    });
+  });
+
+  if (body) upstreamReq.write(body);
+  upstreamReq.end();
+}
+
+async function handleMcpProxy(req, res) {
+  if (req.method === 'OPTIONS') {
+    send(res, 204, '', {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST,OPTIONS',
+      'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type',
+      'Access-Control-Max-Age': '86400'
+    });
+    return;
+  }
+  if (req.method !== 'POST') {
+    send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  if (!isLocalhostOrigin(req)) {
+    send(res, 403, JSON.stringify({ error: 'Forbidden' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  try {
+    const body = await readJsonBody(req);
+    const serverUrl = String(body.serverUrl || '').trim();
+    const method = String(body.method || '').trim();
+    const params = body.params || {};
+    const authHeader = String(body.authHeader || '').trim();
+
+    if (!serverUrl || !method) {
+      send(res, 400, JSON.stringify({ error: 'serverUrl and method are required' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+
+    const parsed = new URL(serverUrl);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      send(res, 400, JSON.stringify({ error: 'serverUrl must use http or https' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+
+    const rpcBody = JSON.stringify({ jsonrpc: '2.0', id: 1, method, params });
+    const headers = {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(rpcBody).toString()
+    };
+    if (authHeader) headers['Authorization'] = authHeader;
+
+    const upstreamModule = parsed.protocol === 'https:' ? https : http;
+    const upstreamReq = upstreamModule.request({
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      headers,
+      timeout: 15000
+    }, upstreamRes => {
+      let data = '';
+      upstreamRes.on('data', chunk => { data += chunk.toString(); });
+      upstreamRes.on('end', () => {
+        send(res, 200, data, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'Access-Control-Allow-Origin': '*'
+        });
+      });
+    });
+
+    upstreamReq.on('error', err => {
+      send(res, 502, JSON.stringify({ error: `MCP proxy error: ${err.message}` }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+    });
+    upstreamReq.write(rpcBody);
+    upstreamReq.end();
+  } catch (error) {
+    send(res, 500, JSON.stringify({ error: `MCP proxy error: ${error.message}` }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+  }
+}
+
 async function proxyGoogleNews(req, res, parsedUrl) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
@@ -429,13 +642,24 @@ async function handleEnv(req, res) {
     });
     return;
   }
+  // Restrict sensitive env data to localhost origins only.
+  // External pages (DNS rebinding, malicious sites) cannot read the token or key presence.
+  if (!isLocalhostOrigin(req)) {
+    send(res, 403, JSON.stringify({ error: 'Forbidden' }), {
+      'Content-Type': 'application/json; charset=utf-8'
+    });
+    return;
+  }
   const env = {
-    OPEN_ROUTER_API_KEY: process.env.OPEN_ROUTER_API_KEY || ''
+    hasOpenRouterKey: !!process.env.OPEN_ROUTER_API_KEY,
+    terminalToken: TERMINAL_TOKEN
   };
+  const corsOrigin = req.headers.origin || `http://localhost:${PORT}`;
   send(res, 200, JSON.stringify(env), {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
-    'Access-Control-Allow-Origin': '*'
+    'Access-Control-Allow-Origin': corsOrigin,
+    'Vary': 'Origin'
   });
 }
 
@@ -453,6 +677,14 @@ const server = http.createServer(async (req, res) => {
     const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || `127.0.0.1:${PORT}`}`);
     if (parsedUrl.pathname.startsWith(API_PREFIX)) {
       await proxyOllama(req, res, parsedUrl);
+      return;
+    }
+    if (parsedUrl.pathname.startsWith(OPENROUTER_PREFIX)) {
+      await proxyOpenRouter(req, res, parsedUrl);
+      return;
+    }
+    if (parsedUrl.pathname === MCP_PROXY_PREFIX) {
+      await handleMcpProxy(req, res);
       return;
     }
     if (parsedUrl.pathname.startsWith(GNEWS_PREFIX)) {
@@ -490,6 +722,7 @@ server.listen(PORT, () => {
     console.log('[dev-server] no OLLAMA_API_KEY env var detected; browser Authorization header will be forwarded if provided.');
   }
   if (process.env.OPEN_ROUTER_API_KEY) {
-    console.log('[dev-server] OPEN_ROUTER_API_KEY detected; will be served to browser on /api/env');
+    console.log('[dev-server] OPEN_ROUTER_API_KEY detected; proxying via /api/openrouter (key never sent to browser)');
   }
+  console.log(`[dev-server] terminal auth token generated (shared via /api/env to localhost only)`);
 });

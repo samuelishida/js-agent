@@ -116,7 +116,7 @@ Scripts load with `defer`; execution order is declaration order — no bundler n
 
 - **Web:** `web_search`, `web_fetch`, `read_page`, `http_fetch`, `extract_links`, `page_metadata`
 - **Device/browser:** datetime, geolocation, weather, clipboard, storage, notifications, tab messaging
-- **Filesystem:** list, read, write, search, tree, walk, stat, copy, move, delete, rename (File System Access API)
+- **Filesystem:** list, read, write, append, search, tree, walk, stat, copy, move, delete, rename (File System Access API)
 - **Data/planning:** parse JSON/CSV, todos, tasks, `ask_user`, `tool_search`, `memory_write/search/list`
 
 Tools carry execution metadata (`readOnly`, `concurrencySafe`, `risk`). Read-only concurrent tools run in parallel; risky or write tools run sequentially.
@@ -296,84 +296,6 @@ node --check src/app/app-init.js
 npm run build:snapshot      # regenerate src/tools/generated/snapshot-data.js
 ```
 
-## Bug Fixes (Code Review)
-
-Round 1 — 14 bugs:
-
-| File | Bug | Fix |
-|------|-----|-----|
-| `tool-execution.js:149` | `containsVulnerableUncPathLight` checked `startsWith('\}')` instead of `startsWith('\\\\')` — UNC path detection broken | Fixed to `startsWith('\\\\')` |
-| `compaction.js:129-134` | Head/tail overlap when text < 2×effectivePreview produced negative `omitted` count | Added overlap guard; returns original text when omitted ≤ 0 |
-| `compaction.js:28-30` | `ctxTokenEstimate` passed array `content` to `estimateTokens`, returned 0 silently | `estimateTokens` now handles array content |
-| `rate-limiter.js:42-58` | `remaining` off-by-one: computed before recording the call | Return `remaining - 1` |
-| `steering.js:25-26` | Null dereference when `steering-input` DOM element missing | Added `if (!input) return` guard |
-| `state.js:681` | `C()` not in scope — only defined in `agent.js` | Changed to `(typeof C === 'function' ? C() : window.CONSTANTS)?.DEFAULT_CTX_LIMIT_CHARS` |
-| `agent.js:805` | Forced answer pushed raw `finalReply` (with think/tool remnants) | Changed to push `finalMarkdown` |
-| `orchestrator.js:415-416` | `when` condition failure consumed retry attempts instead of breaking | Changed `throw` to `break` |
-| `orchestrator.js:522-524` | `normalizeToolCall` prefix too aggressive (`"r"` → `runtime_readFile`) | Added minimum-length guard: `requested.length >= Math.min(4, normalized.length)` |
-| `llm.js:731-748` | `extractThinkingBlocks` duplicated content for nested blocks | Push only leaf blocks |
-| `llm.js:731+` | Regex `/<think[\s\S]*?<\/think>/gi` captured `>` as content | Fixed to `/<think(?:\s[^>]*)?>[\s\S]*?<\/think>/gi` |
-| `llm.js:1529` | Dead `shouldStream && !res.body` branch after body consumed | Removed dead branch; stream exhaustion continues to next endpoint |
-| `llm.js:1814-1821` | `res.json()` on already-consumed streaming body | Added `continue` after stream exhaustion; separate `!res.body` guard |
-| `tool-execution.js:559` | Sandbox fallback on non-string `result` produced `[object Object]` | Added type check + `JSON.stringify` |
-
-Round 2 — 12 bugs:
-
-| File | Bug | Fix |
-|------|-----|-----|
-| `compaction.js` | `microcompactToolResultMessages` only matched `role:'user'` with XML wrapper, missed `role:'tool'` | Match `role:'tool'` natively; use raw text for tool-role replacement |
-| `compaction.js` | `getCallSignature` used semantic merge (different args → same sig) | Use exact signature + stable key ordering |
-| `compaction.js` | `applyContextManagementPipeline` marked `async` with no `await` | Dropped `async` |
-| `runtime-memory.js` | `onTurnComplete` never exported — auto-extraction never fired | Added to `AgentMemory` export |
-| `runtime-memory.js` | `saveRuntimeCacheStore` unguarded `QuotaExceededError` | Wrapped in try-catch |
-| `runtime-memory.js` | Write-every-read on cache hits | Debounced to every 10th hit |
-| `runtime-memory.js` | `touchMemoryEntries` didn't invalidate `memory_retrieval` cache | Added `clearRuntimeScope('memory_retrieval')` after mutation |
-| `state.js` | Non-atomic swap of `ollamaInstalledModels` during probe | Atomic swap via temp set + bare name support |
-| `state.js` | Failed `/api/show` cached 8K fallback | No longer caches on failure; cloud models default to 32K |
-| `state.js` | `getModelContextLength` returned Ollama heuristic for cloud models | Returns `DEFAULT_CTX_LIMIT_CHARS` (32K) for cloud |
-| `state.js` | `deleteSession` skipped UI updates when active session deleted | Added `updateStats`, `updateCtxBar`, `setStatus` |
-| `llm.js` | Ollama `OLLAMA_MODEL_CRASH` not retried | Added continuation prompt retry on crash |
-
-Round 3 — gpt-oss:120b tool-call + reasoning leak:
-
-| File | Bug | Fix |
-|------|-----|-----|
-| `regex.js` | `TOOL_BLOCK` regex required `>` on open tag — models omitting `>` produced no match, triggering repair pass; when `>` present, capture group included it, breaking JSON parse | Changed to `/<tool_call(?:\s[^>]*>|>?)\s*([\s\S]*?)\s*<\/tool_call>/` — makes `>` optional |
-| `tool-execution.js` | Block match regex same `>` issue | Updated block match regex to match |
-| `agent.js` | Tool-call cleanup regex same `>` issue | Updated cleanup regex to match |
-| `regex.js` | `looksLikeReasoningLeak` missed model meta-commentary patterns | Added "We need to...", "We will call...", "I will call...", "Let's call..." |
-| `agent.js` | Model reasoning leaks ("We need to output tool calls only") shown to user | Added `stripModelMetaCommentary()` — strips steering sentences from visible output |
-| `llm.js` | Model monologue leaks into content without `<think>` tags | `normalizeVisibleModelText()` detects reasoning-prefixed long text, extracts answer after delimiter |
-
-Round 4 — `AgentSkills` → `AgentTools` refactoring:
-
-| File | Bug | Fix |
-|------|-----|-----|
-| `orchestrator.js` | All references to `AgentSkills`, `executeSkill`, `BUILTIN_SKILL_DESCRIPTIONS`, `SNAPSHOT_SKILL_LIMIT` were stale after rename | Updated to `AgentTools`, `executeTool`, `BUILTIN_TOOL_DESCRIPTIONS`, `SNAPSHOT_TOOL_LIMIT` |
-| `tool-execution.js` | `AgentSkills.getToolExecutionMeta`, `AgentSkillCore.toolMeta`, `orchestrator.executeSkill` were stale | Updated to `AgentTools`, `AgentToolCore`, `orchestrator.executeTool` |
-| `session-lifecycle.js` | `AgentSkills.abortAllTabListeners` stale | Updated to `AgentTools.abortAllTabListeners` |
-| `agent.js` | `tools.buildInitialContext` referenced via stale `skills` variable from `getRuntimeModules()` | Fixed variable name to `tools` throughout |
-| `test-smoke.mjs` | `runtime.skillGroups` check stale after rename | Changed to `runtime.toolGroups` |
-| `test-tools-smoke.mjs` | `runtime.skillGroups` check stale | Changed to `runtime.toolGroups` |
-
-Round 5 — runtime `ReferenceError` + filesystem guard:
-
-| File | Bug | Fix |
-|------|-----|-----|
-| `round-controller.js` | `Perm` used in `executeRound()` but only declared inside `executeToolBatches()` — ReferenceError at runtime | Added `const Perm = window.AgentPermissions \|\| {};` to `executeRound()` |
-| `filesystem-guards.js` | `hasSuspiciousWindowsPathPattern` blocked `.` and `..` (valid relative paths) via `/[.\s]+$/` regex | Added exemption: skip check when trailing segment is 1–2 dots only |
-
-Round 6 — confirmation loop, browser downloads, dead entries:
-
-| File | Bug | Fix |
-|------|-----|-----|
-| `agent.js` | Agent loop skipped past pending confirmation gates — loop continued immediately to next round instead of pausing | Added polling wait loop after `executeRound()` returns `pending-confirmations`: polls `AgentConfirmation.pending()` every 300 ms with `throwIfStopRequested()` for interruptibility |
-| `ui-modern.js` | `openConfirmationPanel` / `closeConfirmationPanel` were local functions, inaccessible from `agent.js` | Exposed both on `window` |
-| `filesystem-runtime.js` | `fs_download_file` called `resolveFile(path)` even when `content` arg was provided — failed without an authorized File System Access API root | Added early-exit branch: when `content` is set, create blob directly and skip `resolveFile` entirely |
-| `prompts/system.md` | No guidance on when to prefer browser downloads vs writing files | Added rule 14: prefer `fs_download_file` with `content` for exports/reports; only use `fs_write_file` when saving to local folder |
-| `state.js` | `runtime_fileDiff` missing from `enabledTools` init despite being registered | Added `runtime_fileDiff: true` |
-| `tool-execution.js` | Risk map contained `runtime_deleteFile`, `runtime_renamePath`, `runtime_makeDirectory` — tool names that don't exist in the registry | Removed dead entries |
-| `tools/groups/filesystem.js` | Fallback tool list had stale names from pre-refactor (`fs_request_root`, `fs_delete`, `fs_rename`, `fs_search`, `fs_find`) | Replaced with actual registry names |
 
 ## Documentation
 

@@ -14,6 +14,7 @@
       { name: 'fs_walk', signature: 'fs_walk(path?, maxDepth?, maxResults?, includeFiles?, includeDirectories?, includeHidden?, excludeNames?)' },
       { name: 'fs_read_file', signature: 'fs_read_file(path)' },
       { name: 'fs_write_file', signature: 'fs_write_file(path, content)' },
+      { name: 'fs_append_file', signature: 'fs_append_file(path, content)' },
       { name: 'fs_mkdir', signature: 'fs_mkdir(path)' },
       { name: 'fs_touch', signature: 'fs_touch(path)' },
       { name: 'fs_delete_path', signature: 'fs_delete_path(path, recursive?)' },

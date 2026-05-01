@@ -425,7 +425,7 @@
   <a href="#tools">Tool Execution</a>
   <a href="#context">Context Manager</a>
   <div class="nav-group">Features</div>
-  <a href="#skills">Skills Runtime</a>
+  <a href="#skills">Tool Runtime</a>
   <a href="#routing">Model Routing</a>
   <a href="#memory">Memory + Cache</a>
   <a href="#rendering">UI Rendering</a>
@@ -467,8 +467,8 @@
     </div>
     <p class="sec-desc">
       The runtime executes an explicit, bounded loop with deterministic state transitions. Every phase has
-      a clear contract. Implemented in <code>src/app/agent.js</code>, with preflight built in
-      <code>src/skills/shared.js</code>.
+      a clear contract. Implemented in <code>src/app/agent/agent.js</code>, with preflight built in
+      <code>src/tools/shared.js</code>.
     </p>
     <div class="mmd-wrap">
       <pre class="mermaid">flowchart TD
@@ -508,7 +508,7 @@
           </div>
           <div class="card-det">
             <div class="cb">
-              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/skills/shared.js</span></div>
+              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/tools/shared.js</span></div>
               <pre><span class="cm">// Fail-open: if planner times out, loop continues without hints</span>
 <span class="kw">const</span> <span class="op">preflight</span> = <span class="kw">await</span> <span class="fn">buildPreflightContext</span>(userMessage, {
   <span class="pr">useQueryPlan</span>:    <span class="kw">true</span>,   <span class="cm">// short planner LLM call</span>
@@ -570,7 +570,7 @@
           </div>
           <div class="card-det">
             <div class="cb">
-              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/app/agent.js</span></div>
+              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/app/agent/agent.js</span></div>
               <pre><span class="kw">let</span> <span class="op">calls</span> = <span class="fn">parseToolCalls</span>(reply);       <span class="cm">// regex.js</span>
 <span class="kw">if</span> (calls.<span class="pr">hasMalformed</span>) {
   calls = <span class="kw">await</span> <span class="fn">repairToolCalls</span>(reply);  <span class="cm">// repair.md prompt</span>
@@ -639,7 +639,7 @@
       <span style="color:var(--line)">→</span>
       <span style="color:var(--dim)">Core Prompt</span>
       <span style="color:var(--line)">→</span>
-      <span style="color:var(--dim)">Skills Assembly</span>
+      <span style="color:var(--dim)">Tools Assembly</span>
       <span style="color:var(--line)">→</span>
       <span style="color:var(--dim)">Runtime Modules</span>
       <span style="color:var(--line)">→</span>
@@ -676,7 +676,7 @@
               running agent once all lower layers are ready.
             </p>
             <div class="lcard-rows">
-              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>window.AgentOrchestrator</code>, <code>window.AgentSkills</code>, <code>window.AgentMemory</code>, <code>window.AgentRuntimeCache</code></span></div>
+              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>window.AgentOrchestrator</code>, <code>window.AgentTools</code>, <code>window.AgentMemory</code>, <code>window.AgentRuntimeCache</code></span></div>
               <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v">Nothing — top of the dependency stack, no lower layer consumes it</span></div>
               <div class="ir"><span class="ir-k">Bootstrap note</span><span class="ir-v">All prior layers must be fully initialized before the UI binds event listeners</span></div>
             </div>
@@ -729,17 +729,17 @@
               multi-scope TTL cache. <code>ui-modern.js</code> binds the settings panel.
             </p>
             <div class="lcard-rows">
-              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>AgentOrchestrator</code>, <code>AgentSkills</code>, <code>AgentRegex</code>, <code>AgentPrompts</code></span></div>
+              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>AgentOrchestrator</code>, <code>AgentTools</code>, <code>AgentRegex</code>, <code>AgentPrompts</code></span></div>
               <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v"><code>window.CONSTANTS</code>, <code>window.AgentPermissions</code>, <code>window.AgentCompaction</code>, <code>window.AgentSteering</code>, <code>window.AgentToolExecution</code>, <code>window.AgentLLMControl</code>, <code>window.AgentMemory</code>, <code>window.AgentRuntimeCache</code></span></div>
               <div class="ir"><span class="ir-k">Internal load order</span><span class="ir-v"><code>state.js</code> → <code>constants.js</code> → <code>runtime-memory.js</code> → <code>permissions.js</code> → <code>compaction.js</code> → <code>steering.js</code> → <code>rate-limiter.js</code> → <code>local-backend.js</code> → <code>tools.js</code> → <code>tool-execution.js</code> → <code>llm.js</code> → <code>agent.js</code> → <code>worker-manager.js</code> → <code>ui-modern.js</code></span></div>
               <div class="ir"><span class="ir-k">LLM lanes</span><span class="ir-v">Three lanes: <code>local</code> (LM Studio / custom Ollama), <code>ollama</code> (Ollama Cloud via proxy), <code>cloud</code> (Gemini, OpenAI, Claude, Azure). Local → cloud fallback automatic.</span></div>
             </div>
             <div class="cb">
-              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/app/agent.js — loop skeleton</span></div>
+              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/app/agent/agent.js — loop skeleton</span></div>
               <pre><span class="kw">async function</span> <span class="fn">runAgentLoop</span>(userMessage) {
-  <span class="kw">const</span> <span class="op">preflight</span>     = <span class="kw">await</span> AgentSkills.<span class="fn">preflight</span>(userMessage, opts);
+  <span class="kw">const</span> <span class="op">preflight</span>     = <span class="kw">await</span> AgentTools.<span class="fn">preflight</span>(userMessage, opts);
   <span class="kw">const</span> <span class="op">systemPrompt</span>  = AgentOrchestrator.<span class="fn">buildSystemPrompt</span>({
-    <span class="pr">tools</span>:  AgentSkills.<span class="fn">describe</span>(),
+    <span class="pr">tools</span>:  AgentTools.<span class="fn">describe</span>(),
     <span class="pr">memory</span>: <span class="kw">await</span> AgentMemory.<span class="fn">search</span>(userMessage),
     <span class="pr">hints</span>:  preflight.<span class="pr">hints</span>,
   });
@@ -784,15 +784,15 @@
               Split across two bootstrap steps. <code>regex.js</code> and <code>prompt-loader.js</code> are
               pure stateless utilities — they load in <strong>step 1</strong> because every other layer
               depends on them. <code>orchestrator.js</code> loads in <strong>step 5</strong>, after skills
-              assembly, because <code>buildSystemPrompt()</code> calls <code>AgentSkills.describe()</code>
+              assembly, because <code>buildSystemPrompt()</code> calls <code>AgentTools.describe()</code>
               to embed live tool documentation. All prompt templates are <code>.md</code> files fetched
               and cached by the loader; embedded fallbacks are included in the loader itself.
             </p>
             <div class="lcard-rows">
               <div class="ir"><span class="ir-k">regex.js</span><span class="ir-v">Loads step 1 — publishes <code>window.AgentRegex</code>: parseToolCalls, normalizeCall, stripReasoning, hasInjectionSignal</span></div>
               <div class="ir"><span class="ir-k">prompt-loader.js</span><span class="ir-v">Loads step 1 — publishes <code>window.AgentPromptLoader</code>: async fetch + cache of <code>prompts/*.md</code></span></div>
-              <div class="ir"><span class="ir-k">orchestrator.js</span><span class="ir-v">Loads step 5 (after skills) — publishes <code>window.AgentOrchestrator</code>: buildSystemPrompt + buildRuntimeContinuationPrompt</span></div>
-              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>AgentSkills.describe()</code> for live tool documentation embedded in system prompt</span></div>
+              <div class="ir"><span class="ir-k">orchestrator.js</span><span class="ir-v">Loads step 5 (after tools) — publishes <code>window.AgentOrchestrator</code>: buildSystemPrompt + buildRuntimeContinuationPrompt</span></div>
+              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>AgentTools.describe()</code> for live tool documentation embedded in system prompt</span></div>
             </div>
             <div class="cb">
               <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/core/orchestrator.js — published surface</span></div>
@@ -820,12 +820,12 @@
 
       <div class="lstack-arr">↓ depends on</div>
 
-      <!-- Layer 4: Skills Assembly -->
+      <!-- Layer 4: Tools Assembly -->
       <div class="lcard" onclick="tog(this)">
         <div class="lcard-hd">
           <div class="lcard-n" style="background:rgba(255,210,122,0.14);color:var(--amber);border:1px solid rgba(255,210,122,0.3)">4</div>
           <div class="lcard-info">
-            <div class="lcard-name">Skills Assembly</div>
+            <div class="lcard-name">Tools Assembly</div>
             <div class="lcard-sub">Registry composition · preflight planning · query_plan · memory-aware helpers · source aliases</div>
           </div>
           <div class="lcard-files">
@@ -834,7 +834,7 @@
             <span class="fp">index.js</span>
           </div>
           <div class="lcard-bts">
-            <span class="lbadge lbadge-pub">window.AgentSkills</span>
+            <span class="lbadge lbadge-pub">window.AgentTools</span>
             <span class="lbadge lbadge-load">loads step 4</span>
           </div>
           <button class="card-tog">▼</button>
@@ -847,16 +847,16 @@
               generates <code>query_plan</code> hints, adds memory-aware helper wrappers, and
               source-compatible aliases for file/search operations across different tool naming conventions.
               <code>groups/*.js</code> expose grouped UI metadata consumed by the settings panel.
-              <code>index.js</code> finalizes the <code>window.AgentSkills</code> surface.
+              <code>index.js</code> finalizes the <code>window.AgentTools</code> surface.
             </p>
             <div class="lcard-rows">
-              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>window.AgentSkillModules</code> — the factory map registered by layer 5 runtime modules</span></div>
-              <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v"><code>window.AgentSkills</code> — registry, preflight, execute, describe, describeGrouped</span></div>
+              <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v"><code>window.AgentToolModules</code> — the factory map registered by layer 5 runtime modules</span></div>
+              <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v"><code>window.AgentTools</code> — registry, preflight, execute, describe, describeGrouped</span></div>
               <div class="ir"><span class="ir-k">Planner LLM</span><span class="ir-v">Short-timeout, fail-open: if it times out the loop continues without query_plan hints</span></div>
             </div>
             <div class="cb">
-              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/skills/shared.js — published surface</span></div>
-              <pre>window.<span class="pr">AgentSkills</span> = {
+              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/tools/shared.js — published surface</span></div>
+              <pre>window.<span class="pr">AgentTools</span> = {
   <span class="pr">registry</span>:  <span class="fn">buildRegistry</span>(modules),  <span class="cm">// all tools keyed by name</span>
   <span class="fn">preflight</span>: <span class="kw">async</span> (msg, opts) => { <span class="cm">/* heuristic + optional planner LLM */</span> },
   <span class="fn">execute</span>:   <span class="kw">async</span> (call)       => { <span class="cm">/* dispatch to registry + cache check */</span> },
@@ -874,7 +874,7 @@
         <div class="lcard-hd">
           <div class="lcard-n" style="background:rgba(248,113,113,0.14);color:var(--red);border:1px solid rgba(248,113,113,0.3)">5</div>
           <div class="lcard-info">
-            <div class="lcard-name">Skills Runtime Modules</div>
+            <div class="lcard-name">Tool Runtime Modules</div>
             <div class="lcard-sub">Tool implementation factories — web searches, filesystem, data parsing, device APIs</div>
           </div>
           <div class="lcard-files">
@@ -884,7 +884,7 @@
             <span class="fp">registry-runtime.js</span>
           </div>
           <div class="lcard-bts">
-            <span class="lbadge lbadge-pub">AgentSkillModules factories</span>
+            <span class="lbadge lbadge-pub">AgentToolModules factories</span>
             <span class="lbadge lbadge-load">loads step 3</span>
           </div>
           <button class="card-tog">▼</button>
@@ -892,23 +892,23 @@
         <div class="lcard-bd">
           <div class="lcard-bd-inner">
             <p class="lcard-desc">
-              Each file registers a factory function on <code>window.AgentSkillModules</code>.
-              Factories are <strong>not</strong> called at load time — they are invoked during skill
+              Each file registers a factory function on <code>window.AgentToolModules</code>.
+              Factories are <strong>not</strong> called at load time — they are invoked during tool
               assembly (step 4). This isolation means any module can be swapped or extended without
               touching anything else. Each module uses browser APIs directly with no cross-module imports.
             </p>
             <div class="lcard-rows">
               <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v">Nothing from <code>window</code> — self-contained, browser APIs only</span></div>
-              <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v">Factories on <code>window.AgentSkillModules</code> (object created if missing)</span></div>
+              <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v">Factories on <code>window.AgentToolModules</code> (object created if missing)</span></div>
               <div class="ir"><span class="ir-k">web-runtime.js</span><span class="ir-v"><code>web_search</code>, <code>web_fetch</code>, <code>read_page</code>, <code>http_fetch</code>, <code>extract_links</code>, <code>page_metadata</code></span></div>
-              <div class="ir"><span class="ir-k">filesystem-runtime.js</span><span class="ir-v"><code>fs_roots</code>, <code>fs_read</code>, <code>fs_write</code>, <code>fs_tree</code>, <code>fs_search</code>, <code>fs_stat</code>, <code>fs_copy</code>, <code>fs_move</code>, <code>fs_delete</code>, <code>fs_walk</code></span></div>
-              <div class="ir"><span class="ir-k">data-runtime.js</span><span class="ir-v"><code>parse_json</code>, <code>parse_csv</code>, <code>todo_list/add/complete</code>, <code>ask_user</code>, <code>tool_search</code></span></div>
-              <div class="ir"><span class="ir-k">registry-runtime.js</span><span class="ir-v"><code>get_datetime</code>, <code>get_location</code>, <code>get_weather</code>, <code>clipboard_read/write</code>, <code>storage_get/set</code>, <code>notify</code></span></div>
+              <div class="ir"><span class="ir-k">filesystem-runtime.js</span><span class="ir-v"><code>fs_list_roots</code>, <code>fs_read_file</code>, <code>fs_write_file</code>, <code>fs_tree</code>, <code>fs_search_content</code>, <code>fs_stat</code>, <code>fs_copy_file</code>, <code>fs_move_file</code>, <code>fs_delete_path</code>, <code>fs_walk</code>, <code>fs_download_file</code></span></div>
+              <div class="ir"><span class="ir-k">data-runtime.js</span><span class="ir-v"><code>parse_json</code>, <code>parse_csv</code>, <code>todo_write</code>, <code>ask_user_question</code>, <code>tool_search</code>, <code>memory_write/search/list</code></span></div>
+              <div class="ir"><span class="ir-k">registry-runtime.js</span><span class="ir-v"><code>datetime</code>, <code>geo_current_location</code>, <code>weather_current</code>, <code>clipboard_read/write</code>, <code>storage_get/set</code>, <code>notification_send</code>, <code>tab_broadcast</code></span></div>
             </div>
             <div class="cb">
               <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">factory registration pattern</span></div>
               <pre><span class="cm">// Lazy factory — tools are NOT live until assembly calls this</span>
-(window.<span class="pr">AgentSkillModules</span> ??= {}).<span class="fn">register</span>(<span class="st">'web'</span>, () => ({
+(window.<span class="pr">AgentToolModules</span> ??= {}).<span class="fn">register</span>(<span class="st">'web'</span>, () => ({
   <span class="fn">web_search</span>:    <span class="kw">async</span> ({ query })  => { <span class="cm">/* provider routing + dedup */</span> },
   <span class="fn">web_fetch</span>:     <span class="kw">async</span> ({ url })    => { <span class="cm">/* DOM strip + size budget */</span> },
   <span class="fn">read_page</span>:     <span class="kw">async</span> ({ url })    => { <span class="cm">/* Readability extraction */</span> },
@@ -922,12 +922,12 @@
 
       <div class="lstack-arr">↓ depends on</div>
 
-      <!-- Layer 6: Skills Core + Snapshot -->
+      <!-- Layer 6: Tools Core + Snapshot -->
       <div class="lcard" onclick="tog(this)">
         <div class="lcard-hd">
           <div class="lcard-n" style="background:rgba(97,212,164,0.14);color:var(--green);border:1px solid rgba(97,212,164,0.3)">6</div>
           <div class="lcard-info">
-            <div class="lcard-name">Skills Core + Snapshot</div>
+            <div class="lcard-name">Tools Core + Snapshot</div>
             <div class="lcard-sub">Foundation layer — intent metadata · per-tool execution flags · pre-built prompt snippets</div>
           </div>
           <div class="lcard-files">
@@ -959,16 +959,16 @@
             <div class="lcard-rows">
               <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v">Nothing — foundation layer, no <code>window.*</code> dependencies at all</span></div>
               <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v"><code>window.AgentIntents</code>, <code>window.AgentToolMeta</code>, <code>window.AgentSnapshot</code></span></div>
-              <div class="ir"><span class="ir-k">snapshot-data.js</span><span class="ir-v">Auto-generated by <code>npm run build:snapshot</code> — do not edit; verify with <code>npm run test:skills-smoke</code></span></div>
+              <div class="ir"><span class="ir-k">snapshot-data.js</span><span class="ir-v">Auto-generated by <code>npm run build:snapshot</code> — do not edit; verify with <code>npm run test:tools-smoke</code></span></div>
             </div>
             <div class="cb">
-              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/skills/core/tool-meta.js — example entries</span></div>
-              <pre><span class="cm">// Consumed by agent.js executeBatch() for dispatch decisions</span>
+              <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">src/tools/core/tool-meta.js — example entries</span></div>
+              <pre><span class="cm">// Consumed by round-controller.js executeBatch() for dispatch decisions</span>
 <span class="kw">const</span> <span class="op">TOOL_META</span> = {
   <span class="pr">web_search</span>:  { <span class="pr">readOnly</span>: <span class="kw">true</span>,  <span class="pr">concurrencySafe</span>: <span class="kw">true</span>,  <span class="pr">risk</span>: <span class="st">'low'</span>,    <span class="pr">cacheable</span>: <span class="kw">true</span>  },
   <span class="pr">read_page</span>:   { <span class="pr">readOnly</span>: <span class="kw">true</span>,  <span class="pr">concurrencySafe</span>: <span class="kw">true</span>,  <span class="pr">risk</span>: <span class="st">'low'</span>,    <span class="pr">cacheable</span>: <span class="kw">true</span>  },
-  <span class="pr">fs_write</span>:    { <span class="pr">readOnly</span>: <span class="kw">false</span>, <span class="pr">concurrencySafe</span>: <span class="kw">false</span>, <span class="pr">risk</span>: <span class="st">'medium'</span>               },
-  <span class="pr">fs_delete</span>:   { <span class="pr">readOnly</span>: <span class="kw">false</span>, <span class="pr">concurrencySafe</span>: <span class="kw">false</span>, <span class="pr">risk</span>: <span class="st">'high'</span>                 },
+  <span class="pr">fs_write_file</span>: { <span class="pr">readOnly</span>: <span class="kw">false</span>, <span class="pr">concurrencySafe</span>: <span class="kw">false</span>, <span class="pr">risk</span>: <span class="st">'medium'</span>             },
+  <span class="pr">fs_delete_path</span>: { <span class="pr">readOnly</span>: <span class="kw">false</span>, <span class="pr">concurrencySafe</span>: <span class="kw">false</span>, <span class="pr">risk</span>: <span class="st">'high'</span>               },
 };</pre>
             </div>
           </div>
@@ -1018,10 +1018,10 @@
             Generated via <code>npm run build:snapshot</code>.
           </div>
           <div class="card-det">
-            <div class="ir"><span class="ir-k">source</span><span class="ir-v"><code>src/skills/generated/snapshot-data.js</code> — do not edit by hand</span></div>
+            <div class="ir"><span class="ir-k">source</span><span class="ir-v"><code>src/tools/generated/snapshot-data.js</code> — do not edit by hand</span></div>
             <div class="ir"><span class="ir-k">build</span><span class="ir-v"><code>scripts/build-snapshot.mjs</code> transpiles + extracts prompt fragments</span></div>
             <div class="ir"><span class="ir-k">purpose</span><span class="ir-v">Avoids runtime parsing of skill source on every page load</span></div>
-            <div class="ir"><span class="ir-k">verify</span><span class="ir-v"><code>npm run test:skills-smoke</code> checks snapshot still assembles correctly</span></div>
+            <div class="ir"><span class="ir-k">verify</span><span class="ir-v"><code>npm run test:tools-smoke</code> checks snapshot still assembles correctly</span></div>
           </div>
         </div>
       </div>
@@ -1243,14 +1243,14 @@
 
   <div class="div"></div>
 
-  <!-- ── SKILLS RUNTIME ── -->
+  <!-- ── TOOLS RUNTIME ── -->
   <section id="skills" class="rv">
     <div class="sec-hd">
       <div class="sec-icon">🧩</div>
-      <h2>Skills Runtime</h2>
+      <h2>Tool Runtime</h2>
     </div>
     <p class="sec-desc">
-      Four runtime families, each isolated in its own module. <code>window.AgentSkills.registry</code>
+      Four runtime families, each isolated in its own module. <code>window.AgentTools.registry</code>
       composes them all. Click a card to see the full tool list.
     </p>
     <div class="card-grid">
@@ -1890,21 +1890,21 @@ node proxy/dev-server.js
               <pre><span class="cm"># Comprehensive smoke test (all runtime layers)</span>
 npm run test:smoke
 
-<span class="cm"># Focused skills / snapshot / memory smoke test</span>
-npm run test:skills-smoke
+<span class="cm"># Focused tools / snapshot / memory smoke test</span>
+npm run test:tools-smoke
 
 <span class="cm"># Rebuild snapshot after skill changes</span>
 npm run build:snapshot
 
 <span class="cm"># Syntax checks on key files</span>
 node --check src/core/orchestrator.js
-node --check src/app/agent.js
-node --check src/app/llm.js
-node --check src/app/constants.js
-node --check src/app/permissions.js
-node --check src/app/compaction.js
-node --check src/app/steering.js
-node --check src/app/tool-execution.js</pre>
+node --check src/app/agent/agent.js
+node --check src/app/llm/llm.js
+node --check src/app/core/constants.js
+node --check src/app/core/permissions.js
+node --check src/app/context/compaction.js
+node --check src/app/context/steering.js
+node --check src/app/tools/tool-execution.js</pre>
             </div>
           </div>
         </div>

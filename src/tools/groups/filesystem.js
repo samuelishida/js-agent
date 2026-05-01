@@ -28,7 +28,7 @@
       { name: 'fs_glob', signature: 'fs_glob(path?, pattern, maxResults?)' },
       { name: 'fs_grep', signature: 'fs_grep(query, path?, glob?, contextLines?)' },
       { name: 'fs_tree', signature: 'fs_tree(path, maxDepth?)' },
-      { name: 'fs_download_file', signature: 'fs_download_file(path?, content?, filename?)' },
+      { name: 'fs_download_file', signature: 'fs_download_file(filename, content?, path?)' },
       { name: 'fs_upload_pick', signature: 'fs_upload_pick()' },
       { name: 'fs_preview_file', signature: 'fs_preview_file(path)' }
     ]

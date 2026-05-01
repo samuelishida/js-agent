@@ -90,10 +90,10 @@
         const required = [];
         for (const arg of args.split(',').filter(a => a.trim())) {
           const clean = arg.trim().split('=').shift()?.split(':').shift() || '';
-          const p = clean.trim();
-          if (p.startsWith('...')) continue;
+          const p = clean.trim().replace(/\?$/, '');
+          if (!p || p.startsWith('...')) continue;
           params[p] = { type: 'string' };
-          required.push(p);
+          if (!clean.trim().endsWith('?')) required.push(p);
         }
         return {
           type: 'function',

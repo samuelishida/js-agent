@@ -278,7 +278,7 @@
           defineTool({
             name: 'fs_download_file',
             signature: 'fs_download_file(filename, content?, path?)',
-            description: 'Triggers a browser download from content or a local file path; use this when direct filesystem access is unavailable or when the user asks to export/download a file.',
+            description: 'Triggers a browser download. Provide filename + content (text or base64) to download without filesystem access. Provide filename + path to download a local file. No directory root needed when content is provided.',
             run: handlers.fs_download_file
           }),
           defineTool({

@@ -243,6 +243,24 @@
       return map[ext] || 'text/plain;charset=utf-8';
     }
 
+    function base64ToUint8Array(b64) {
+      try {
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return bytes;
+      } catch { return null; }
+    }
+
+    function isLikelyBase64(str) {
+      if (typeof str !== 'string') return false;
+      const s = str.trim();
+      if (!s) return false;
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(s)) return false;
+      if (s.length % 4 !== 0) return false;
+      return s.length > 40;
+    }
+
     async function downloadFile({ path, content = '', filename = '' }) {
       let blob;
       let resolvedName = filename;
@@ -250,7 +268,17 @@
       if (content) {
         // Content provided — trigger browser download directly without needing an authorized root
         resolvedName = resolvedName || (path ? String(path).split(/[\\/]/).pop() : 'download.txt');
-        blob = new Blob([String(content)], { type: detectDownloadMime(resolvedName) });
+        const raw = String(content);
+        if (isLikelyBase64(raw)) {
+          const bytes = base64ToUint8Array(raw);
+          if (bytes) {
+            blob = new Blob([bytes], { type: detectDownloadMime(resolvedName) });
+          } else {
+            blob = new Blob([raw], { type: detectDownloadMime(resolvedName) });
+          }
+        } else {
+          blob = new Blob([raw], { type: detectDownloadMime(resolvedName) });
+        }
       } else if (path) {
         const { handle, fileName } = await resolveFile(path, false);
         const file = await handle.getFile();

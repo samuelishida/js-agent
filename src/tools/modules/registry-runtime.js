@@ -300,6 +300,12 @@
             run: handlers.fs_write_file
           }),
           defineTool({
+            name: 'fs_append_file',
+            signature: 'fs_append_file(path, content)',
+            description: 'Appends content to an existing local text file. Use this to build large files incrementally when content would otherwise exceed model output limits.',
+            run: handlers.fs_append_file
+          }),
+          defineTool({
             name: 'fs_copy_file',
             signature: 'fs_copy_file(sourcePath, destinationPath)',
             description: 'Copies a local file from one path to another.',

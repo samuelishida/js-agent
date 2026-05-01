@@ -661,6 +661,30 @@
       return formatToolResult('fs_write_file', `Wrote file: ${path}`);
     }
 
+    async function appendTextFile({ path, content, text }) {
+      content = content ?? text;
+      if (content === undefined || content === null) {
+        return formatToolResult('fs_append_file', 'ERROR: content argument missing — likely caused by JSON truncation while generating large file content. Split the content into smaller chunks and retry.');
+      }
+      if (!supportsFsAccess()) {
+        return formatToolResult('fs_append_file', 'ERROR: File System Access API not available. Use fs_write_file with a small content chunk, or use fs_download_file with content= to trigger a browser download.');
+      }
+
+      const { rootId } = parseVirtualPath(path);
+      const root = state.roots.get(rootId || state.defaultRootId);
+      if (root) {
+        const perm = await root.queryPermission({ mode: 'readwrite' });
+        if (perm !== 'granted') {
+          return formatToolResult('fs_append_file', 'ERROR: Write permission not granted. Ask the user to re-authorize using "Authorize Folder".');
+        }
+      }
+
+      const { handle } = await resolveFile(path, true);
+      const existing = await readFileAsText(handle);
+      await writeFile(handle, existing + String(content || ''));
+      return formatToolResult('fs_append_file', `Appended ${String(content || '').length} chars to: ${path}`);
+    }
+
     async function copyFile({ sourcePath, destinationPath }) {
       const source = await resolveFile(sourcePath, false);
       const destination = await resolveFile(destinationPath, true);
@@ -912,6 +936,7 @@
       editLocalFile,
       multiEditFiles,
       writeTextFile,
+      appendTextFile,
       copyFile,
       deletePath,
       moveFile,

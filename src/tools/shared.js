@@ -64,6 +64,7 @@
         fs_mkdir: args => Executor.makeDirectory(args),
         fs_touch: args => Executor.touchFile(args),
         fs_write_file: args => Executor.writeTextFile(args),
+        fs_append_file: args => Executor.appendTextFile(args),
         fs_copy_file: args => Executor.copyFile(args),
         fs_move_file: args => Executor.moveFile(args),
         fs_delete_path: args => Executor.deletePath(args),

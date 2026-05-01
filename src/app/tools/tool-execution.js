@@ -490,7 +490,7 @@
     const confirmationMsg = injectConfirmationGate(call);
     if (confirmationMsg) return confirmationMsg;
 
-    const sandboxTools = new Set(['runtime_runTerminal', 'runtime_writeFile', 'runtime_editFile', 'fs_write_file', 'fs_delete_path']);
+    const sandboxTools = new Set(['runtime_runTerminal', 'runtime_writeFile', 'runtime_editFile', 'fs_write_file', 'fs_append_file', 'fs_delete_path']);
     const useSandbox = sandboxTools.has(tool) && window.AgentWorkers?.getSandboxWorker;
     let result;
 

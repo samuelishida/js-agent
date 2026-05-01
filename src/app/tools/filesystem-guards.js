@@ -45,7 +45,7 @@
 
   function getFilesystemOperationType(toolName) {
     var tool = String(toolName || '').trim();
-    var writeTools = new Set(['fs_write_file','file_write','write_file','file_edit','edit_file','fs_copy_file','fs_move_file','fs_delete_path','fs_rename_path','fs_mkdir','fs_touch','fs_save_upload']);
+    var writeTools = new Set(['fs_write_file','file_write','write_file','file_edit','edit_file','fs_copy_file','fs_move_file','fs_delete_path','fs_rename_path','fs_mkdir','fs_touch','fs_save_upload','fs_append_file']);
     if (writeTools.has(tool)) return 'write';
     if (tool === 'fs_download_file') return 'create';
     if (tool.startsWith('fs_') || tool === 'file_read' || tool === 'read_file' || tool === 'glob' || tool === 'grep') return 'read';

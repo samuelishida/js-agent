@@ -345,6 +345,7 @@
   const grepPaths = fsRuntime.grepPaths || missingFsRuntime('grepPaths');
   const editLocalFile = fsRuntime.editLocalFile || missingFsRuntime('editLocalFile');
   const writeTextFile = fsRuntime.writeTextFile || missingFsRuntime('writeTextFile');
+  const appendTextFile = fsRuntime.appendTextFile || missingFsRuntime('appendTextFile');
   const copyFile = fsRuntime.copyFile || missingFsRuntime('copyFile');
   const deletePath = fsRuntime.deletePath || missingFsRuntime('deletePath');
   const moveFile = fsRuntime.moveFile || missingFsRuntime('moveFile');
@@ -377,6 +378,7 @@
 
   async function runtimeReadFile(args = {}, context = {}) { return readLocalFile(deriveFilesystemPathArg(args, context, 'read_file')); }
   async function runtimeWriteFile(args = {}) { return writeTextFile({ path: args.path, content: args.content }); }
+  async function runtimeAppendFile(args = {}) { return appendTextFile({ path: args.path, content: args.content }); }
   async function runtimeEditFile(args = {}) { return editLocalFile({ path: args.path, oldText: args.oldString ?? args.oldText, newText: args.newString ?? args.newText, replaceAll: args.replaceAll === true }); }
   async function runtimeMultiEdit(args = {}) { return multiEditFiles({ edits: Array.isArray(args.edits) ? args.edits : [] }); }
   async function runtimeListDir(args = {}, context = {}) { return listDirectory(deriveFilesystemPathArg(args, context, 'list_dir')); }

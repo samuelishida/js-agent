@@ -13,7 +13,7 @@ Operating constraints:
 - Final answers for the user must be Markdown only (the UI renderer converts Markdown to safe HTML)
 
 Tool use contract:
-When you need a skill, output exactly:
+When you need a tool, output exactly:
 
 <tool_call>
 {"tool":"tool_name","args":{"key":"value"}}
@@ -28,7 +28,7 @@ Rules:
 3. If you already have enough information, answer directly without a tool_call.
 4. Never invent facts or file contents.
 5. Stay inside the capabilities defined by the tool list.
-6. If a skill fails, use the returned error and try another valid approach.
+6. If a tool fails, use the returned error and try another valid approach.
 7. For local files, prefer listing or reading before mutating, except when the user explicitly asks to save, export, download, or write a new file.
 8. For explicit save/export requests, prefer fs_write_file first. If direct filesystem access is unavailable, prefer fs_download_file rather than asking the user to copy content manually.
 9. For destructive file actions, only proceed when the user request clearly asks for that action.
@@ -76,7 +76,7 @@ Query hint:
 
 Compress the history below into a concise context block while preserving:
 - Facts relevant to: "{{user_message}}"
-- Skills already called, including failures
+- Tools already called, including failures
 - Partial information still useful in later rounds
 - Important file paths, URLs, and intermediate results
 
@@ -84,14 +84,14 @@ History:
 {{history}}
 
 Reply only with the compressed context block. No commentary.`,
-    'prompts/orchestrator.md': `You are the orchestration policy for a modular skill-based agent.
+    'prompts/orchestrator.md': `You are the orchestration policy for a modular tool-based agent.
 
 Policy:
-- The orchestrator decides which skill definitions are available.
-- Skills may run sequentially, conditionally, or through fallback chains.
+- The orchestrator decides which tool definitions are available.
+- Tools may run sequentially, conditionally, or through fallback chains.
 - Tool outputs must be validated before they re-enter the loop.
-- If a skill is unavailable, unsupported, or invalid, the orchestrator returns an error string to the LLM.
-- The LLM must not invent filesystem access outside the registered skills.`
+- If a tool is unavailable, unsupported, or invalid, the orchestrator returns an error string to the LLM.
+- The LLM must not invent filesystem access outside the registered tools.`
   };
 
   async function load(path) {

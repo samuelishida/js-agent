@@ -1,0 +1,3 @@
+(() => {
+  window.AgentToolGroups = window.AgentToolGroups || {};
+})();

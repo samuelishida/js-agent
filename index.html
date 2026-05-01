@@ -487,9 +487,10 @@
   them in declaration order after HTML parsing. Do NOT reorder.
 
   1. Core parser + prompt loader  → window.AgentRegex, window.AgentPrompts
-  2. Skill metadata + snapshot    → window.AgentSnapshotData, window.AgentClawdSnapshot
-  3. Runtime module factories     → window.AgentSkillModules.*
-  4. Skill assembly               → window.AgentSkills, window.AgentSkillGroups
+  2. Tool metadata + snapshot    → window.AgentSnapshotData, window.AgentClawdSnapshot
+  3. Runtime module factories     → window.AgentToolModules.*
+  4. Tool assembly               → window.AgentTools, window.AgentToolGroups
+  4b. Skills loader              → window.AgentSkillLoader
   5. Orchestrator                 → window.AgentOrchestrator
   6. App state + cache            → window.CONSTANTS, window.AgentRuntimeCache, window.AgentMemory
   7. Modular subsystems           → window.AgentPermissions, window.AgentCompaction, window.AgentSteering
@@ -504,36 +505,39 @@
 <script src="src/core/regex.js" defer></script>
 <script src="src/core/prompt-loader.js" defer></script>
 
-<!-- ── 2. Skill metadata and generated snapshot ────────────────────────── -->
-<script src="src/skills/core/intents.js" defer></script>
-<script src="src/skills/core/tool-meta.js" defer></script>
-<script src="src/skills/generated/snapshot-data.js" defer></script>
-<script src="src/skills/snapshot-adapter.js" defer></script>
+<!-- ── 2. Tool metadata and generated snapshot ────────────────────────── -->
+<script src="src/tools/core/intents.js" defer></script>
+<script src="src/tools/core/tool-meta.js" defer></script>
+<script src="src/tools/generated/snapshot-data.js" defer></script>
+<script src="src/tools/snapshot-adapter.js" defer></script>
 
 <!-- ── 3. Runtime module factories ────────────────────────────────────── -->
-<script src="src/skills/modules/filesystem-runtime.js" defer></script>
-<script src="src/skills/modules/data-runtime.js" defer></script>
-<script src="src/skills/modules/registry-runtime.js" defer></script>
-<script src="src/skills/modules/web-runtime.js" defer></script>
-<script src="src/skills/modules/github-runtime.js" defer></script>
+<script src="src/tools/modules/filesystem-runtime.js" defer></script>
+<script src="src/tools/modules/data-runtime.js" defer></script>
+<script src="src/tools/modules/registry-runtime.js" defer></script>
+<script src="src/tools/modules/web-runtime.js" defer></script>
+<script src="src/tools/modules/github-runtime.js" defer></script>
 
-<!-- ── 4. Skill modules (must load before shared.js) ─────────────────────── -->
-<script src="src/skills/skill-broadcast.js" defer></script>
-<script src="src/skills/skill-planner.js" defer></script>
-<script src="src/skills/skill-preflight.js" defer></script>
-<script src="src/skills/skill-executor.js" defer></script>
-<script src="src/skills/skill-memory.js" defer></script>
-<script src="src/skills/skill-registry.js" defer></script>
+<!-- ── 4. Tool modules (must load before shared.js) ─────────────────────── -->
+<script src="src/tools/tool-broadcast.js" defer></script>
+<script src="src/tools/tool-planner.js" defer></script>
+<script src="src/tools/tool-preflight.js" defer></script>
+<script src="src/tools/tool-executor.js" defer></script>
+<script src="src/tools/tool-memory.js" defer></script>
+<script src="src/tools/tool-registry.js" defer></script>
 
-<!-- ── 5. Skill assembly hub ──────────────────────────────────────────────── -->
-<script src="src/skills/shared.js" defer></script>
-<script src="src/skills/groups/web.js" defer></script>
-<script src="src/skills/groups/device.js" defer></script>
-<script src="src/skills/groups/data.js" defer></script>
-<script src="src/skills/groups/filesystem.js" defer></script>
-<script src="src/skills/groups/github.js" defer></script>
-<script src="src/skills/mcp-bridge.js" defer></script>
-<script src="src/skills/index.js" defer></script>
+<!-- ── 5. Tool assembly hub ──────────────────────────────────────────────── -->
+<script src="src/tools/shared.js" defer></script>
+<script src="src/tools/groups/web.js" defer></script>
+<script src="src/tools/groups/device.js" defer></script>
+<script src="src/tools/groups/data.js" defer></script>
+<script src="src/tools/groups/filesystem.js" defer></script>
+<script src="src/tools/groups/github.js" defer></script>
+<script src="src/tools/mcp-bridge.js" defer></script>
+<script src="src/tools/index.js" defer></script>
+
+<!-- ── 4b. Skills loader (methodology/expertise .md files) ──────────────── -->
+<script src="src/skills/skill-loader.js" defer></script>
 
 <!-- ── 5. Orchestrator ─────────────────────────────────────────────────── -->
 <script src="src/core/orchestrator.js" defer></script>

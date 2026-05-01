@@ -1,8 +1,8 @@
-﻿function renderToolGroups() {
+function renderToolGroups() {
   const host = document.getElementById('tool-groups');
   if (!host) return;
 
-  const groups = Object.values(window.AgentSkillGroups || {});
+  const groups = Object.values(window.AgentToolGroups || {});
   host.innerHTML = groups.map(group => `
     <div class="tool-group">
       <div class="tool-group-label">${escHtml(group.label)}</div>

@@ -12,7 +12,7 @@ function requestStop() {
   const inputStatus = document.getElementById('input-status');
   if (inputStatus) inputStatus.textContent = 'stopping…';
   window.AgentLLMControl?.abortActiveLlmRequest?.();
-  window.AgentSkills?.abortAllTabListeners?.('Run stopped by user.');
+  window.AgentTools?.abortAllTabListeners?.('Run stopped by user.');
 }
 
 function throwIfStopRequested() {

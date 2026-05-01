@@ -256,29 +256,29 @@ async function loadAll(scripts) {
 
 // ── Boot sequence (mirrors index.html defer order) ───────────────────────────
 
-const SKILL_SCRIPTS = [
+const TOOL_SCRIPTS = [
   'src/core/regex.js',
   'src/core/prompt-loader.js',
-  'src/skills/core/intents.js',
-  'src/skills/core/tool-meta.js',
-  'src/skills/generated/snapshot-data.js',
-  'src/skills/snapshot-adapter.js',
-  'src/skills/modules/filesystem-runtime.js',
-  'src/skills/modules/data-runtime.js',
-  'src/skills/modules/registry-runtime.js',
-  'src/skills/modules/web-runtime.js',
-  'src/skills/skill-broadcast.js',
-  'src/skills/skill-planner.js',
-  'src/skills/skill-preflight.js',
-  'src/skills/skill-executor.js',
-  'src/skills/skill-memory.js',
-  'src/skills/skill-registry.js',
-  'src/skills/shared.js',
-  'src/skills/groups/web.js',
-  'src/skills/groups/device.js',
-  'src/skills/groups/data.js',
-  'src/skills/groups/filesystem.js',
-  'src/skills/index.js',
+  'src/tools/core/intents.js',
+  'src/tools/core/tool-meta.js',
+  'src/tools/generated/snapshot-data.js',
+  'src/tools/snapshot-adapter.js',
+  'src/tools/modules/filesystem-runtime.js',
+  'src/tools/modules/data-runtime.js',
+  'src/tools/modules/registry-runtime.js',
+  'src/tools/modules/web-runtime.js',
+  'src/tools/tool-broadcast.js',
+  'src/tools/tool-planner.js',
+  'src/tools/tool-preflight.js',
+  'src/tools/tool-executor.js',
+  'src/tools/tool-memory.js',
+  'src/tools/tool-registry.js',
+  'src/tools/shared.js',
+  'src/tools/groups/web.js',
+  'src/tools/groups/device.js',
+  'src/tools/groups/data.js',
+  'src/tools/groups/filesystem.js',
+  'src/tools/index.js',
   'src/core/orchestrator.js',
   'src/app/core/session-manager.js',
   'src/app/core/tool-cache.js',
@@ -378,7 +378,7 @@ async function main() {
 
   // ── Load all scripts ────────────────────────────────────────────────────────
   try {
-    await loadAll(SKILL_SCRIPTS);
+    await loadAll(TOOL_SCRIPTS);
   } catch (err) {
     console.error(`\nFATAL: script load failed — ${err.message}`);
     process.exit(1);
@@ -422,52 +422,52 @@ async function main() {
   // ────────────────────────────────────────────────────────────────────────────
   // Group B — Skills runtime
   // ────────────────────────────────────────────────────────────────────────────
-  console.log('\n[B] Skills runtime');
+  console.log('\n[B] Tools runtime');
 
-  await group('AgentSkills runtime initialized', () => {
-    assert.ok(globalThis.window.AgentSkills, 'AgentSkills not set');
-    assert.ok(globalThis.window.AgentSkills.registry, 'registry missing');
-    assert.ok(globalThis.window.AgentSkills.skillGroups, 'skillGroups missing');
+  await group('AgentTools runtime initialized', () => {
+    assert.ok(globalThis.window.AgentTools, 'AgentTools not set');
+    assert.ok(globalThis.window.AgentTools.registry, 'registry missing');
+    assert.ok(globalThis.window.AgentTools.toolGroups, 'toolGroups missing');
   });
 
   await group('Registry has ≥80 tools', () => {
-    const count = Object.keys(globalThis.window.AgentSkills.registry).length;
+    const count = Object.keys(globalThis.window.AgentTools.registry).length;
     assert.ok(count >= 80, `only ${count} tools registered`);
   });
 
   await group('Snapshot manifest has bundled skills', () => {
     const manifest = globalThis.window.AgentClawdSnapshot?.getManifest?.();
     assert.ok(manifest, 'snapshot manifest missing');
-    assert.ok(Number(manifest?.stats?.bundledSkills || 0) > 0, 'no bundled skills in manifest');
+    assert.ok(Number(manifest?.stats?.bundledTools || 0) > 0, 'no bundled skills in manifest');
   });
 
   await group('Core registry tools present', () => {
-    const reg = globalThis.window.AgentSkills.registry;
-    for (const name of ['snapshot_skill_catalog', 'tool_search', 'memory_write', 'memory_search', 'memory_list']) {
+    const reg = globalThis.window.AgentTools.registry;
+    for (const name of ['snapshot_tool_catalog', 'tool_search', 'memory_write', 'memory_search', 'memory_list']) {
       assert.ok(reg[name], `tool '${name}' not registered`);
     }
   });
 
-  await group('snapshot_skill_catalog query returns results', async () => {
-    const result = await globalThis.window.AgentSkills.registry.snapshot_skill_catalog.run({ query: 'loop', limit: 5 });
-    assert.match(result, /snapshot_skill_catalog/i, 'unexpected catalog format');
+  await group('snapshot_tool_catalog query returns results', async () => {
+    const result = await globalThis.window.AgentTools.registry.snapshot_tool_catalog.run({ query: 'loop', limit: 5 });
+    assert.match(result, /snapshot_tool_catalog/i, 'unexpected catalog format');
   });
 
   await group('tool_search returns snapshot-enriched results', async () => {
-    const result = await globalThis.window.AgentSkills.registry.tool_search.run({ query: 'loop', limit: 20 });
+    const result = await globalThis.window.AgentTools.registry.tool_search.run({ query: 'loop', limit: 20 });
     assert.match(result, /snapshot:loop/i, 'tool_search did not return snapshot-enriched results');
   });
 
-  await group('snapshot_skill_* pseudo-tools registered', () => {
-    const keys = Object.keys(globalThis.window.AgentSkills.registry).filter(n => n.startsWith('snapshot_skill_') && n !== 'snapshot_skill_catalog');
-    assert.ok(keys.length > 0, 'no snapshot_skill_* tools registered');
+  await group('snapshot_tool_* pseudo-tools registered', () => {
+    const keys = Object.keys(globalThis.window.AgentTools.registry).filter(n => n.startsWith('snapshot_tool_') && n !== 'snapshot_tool_catalog');
+    assert.ok(keys.length > 0, 'no snapshot_tool_* tools registered');
   });
 
   await group('sample snapshot pseudo-tool executes', async () => {
-    const reg = globalThis.window.AgentSkills.registry;
-    const key = Object.keys(reg).find(n => n.startsWith('snapshot_skill_') && n !== 'snapshot_skill_catalog');
+    const reg = globalThis.window.AgentTools.registry;
+    const key = Object.keys(reg).find(n => n.startsWith('snapshot_tool_') && n !== 'snapshot_tool_catalog');
     const result = await reg[key].run({ include_prompt: false });
-    assert.match(result, /Imported skill:/, 'snapshot pseudo-tool execution format unexpected');
+    assert.match(result, /Imported tool:/, 'snapshot pseudo-tool execution format unexpected');
   });
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -508,7 +508,7 @@ async function main() {
     const prompt = await globalThis.window.AgentOrchestrator.buildSystemPrompt({
       maxRounds: 50,
       ctxLimit: 32000,
-      enabledTools: Object.keys(globalThis.window.AgentSkills.registry).slice(0, 5),
+      enabledTools: Object.keys(globalThis.window.AgentTools.registry).slice(0, 5),
       queryHint: ''
     });
     assert.ok(typeof prompt === 'string' && prompt.length > 100, 'system prompt is empty or too short');
@@ -959,6 +959,12 @@ async function main() {
     const ATE = globalThis.window.AgentToolExecution;
     const result = ATE.validateFilesystemCallGuard({ tool: 'fs_read_file', args: { path: '/home/user/file.js' } });
     assert.equal(result.allowed, true, 'valid path should be allowed');
+  });
+
+  await group('validateFilesystemCallGuard allows fs_download_file with content (no path)', () => {
+    const ATE = globalThis.window.AgentToolExecution;
+    const result = ATE.validateFilesystemCallGuard({ tool: 'fs_download_file', args: { filename: 'data.json', content: '[{"id":1}]' } });
+    assert.equal(result.allowed, true, 'fs_download_file with content= should bypass FS guard');
   });
 
   await group('partitionToolCallBatches separates read-only from writes', () => {
@@ -1534,8 +1540,8 @@ async function main() {
   }
 
   // Registry and snapshot counts for informational output
-  const regCount = Object.keys(globalThis.window.AgentSkills?.registry || {}).length;
-  const snapshotCount = globalThis.window.AgentClawdSnapshot?.getManifest?.()?.stats?.bundledSkills || 0;
+  const regCount = Object.keys(globalThis.window.AgentTools?.registry || {}).length;
+  const snapshotCount = globalThis.window.AgentClawdSnapshot?.getManifest?.()?.stats?.bundledTools || 0;
   console.log(`\nRegistry tools: ${regCount}  |  Snapshot skills: ${snapshotCount}`);
   console.log(`──────────────────────────────────────────\n`);
 

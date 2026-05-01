@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node proxy/dev-server.js",
     "build:snapshot": "node scripts/build-snapshot.mjs",
-    "test:skills-smoke": "node scripts/test-skills-smoke.mjs",
+    "test:tools-smoke": "node scripts/test-tools-smoke.mjs",
     "test:smoke": "node scripts/test-smoke.mjs",
     "test:security": "node scripts/test-security.mjs",
     "check:js": "node --check src/app/agent/agent.js && node --check src/app/llm/llm.js && node --check src/core/orchestrator.js && node --check src/app/core/constants.js && node --check src/app/core/permissions.js && node --check src/app/context/compaction.js && node --check src/app/context/steering.js && node --check src/app/tools/tool-execution.js",
@@ -19,6 +19,7 @@
     "esbuild": "^0.25.12"
   },
   "dependencies": {
+    "docx": "^9.6.1",
     "openclaude": "^0.0.1"
   }
 }

@@ -4,7 +4,7 @@
   <img src="assets/logo.svg" alt="js-agent logo" width="320">
 </p>
 
-Browser-first multi-step AI agent. No bundler. Local or cloud LLM. Modular skill runtime with 80+ tools. Runs from a single dev server command.
+Browser-first multi-step AI agent. No bundler. Local or cloud LLM. Modular tool runtime with 80+ tools. Runs from a single dev server command.
 
 ## Running
 
@@ -56,17 +56,17 @@ Agent/
 ├── assets/                 # CSS
 ├── prompts/                # system.md, orchestrator.md, repair.md, summarize.md, safety_guidelines.md
 ├── proxy/dev-server.js     # static server + Ollama Cloud proxy
-├── scripts/                # build-snapshot.mjs, test-smoke.mjs, test-skills-smoke.mjs
+├── scripts/                # build-snapshot.mjs, test-smoke.mjs, test-tools-smoke.mjs
 ├── docs/
 │   └── agentic-search-arch.html
 └── src/
     ├── core/
     │   ├── regex.js          → window.AgentRegex       (tool-call parser)
     │   ├── prompt-loader.js  → window.AgentPrompts     (markdown prompt loader)
-    │   └── orchestrator.js   → window.AgentOrchestrator (prompt builder, skill executor)
-    ├── skills/
+    │   └── orchestrator.js   → window.AgentOrchestrator (prompt builder, tool executor)
+    ├── tools/
     │   ├── core/intents.js, tool-meta.js               (intent + tool metadata)
-    │   ├── generated/snapshot-data.js                  (prebuilt skill catalog)
+    │   ├── generated/snapshot-data.js                  (prebuilt tool catalog)
     │   ├── snapshot-adapter.js → window.AgentSnapshot
     │   ├── modules/                                   (runtime factories)
     │   │   ├── web-runtime.js
@@ -74,8 +74,12 @@ Agent/
     │   │   ├── data-runtime.js
     │   │   └── registry-runtime.js
     │   ├── groups/web.js, device.js, data.js, filesystem.js   (UI descriptors)
-    │   ├── shared.js   → window.AgentSkills            (preflight + registry wiring)
-│   └── index.js                                    (finalizes skill surface)
+    │   ├── shared.js   → window.AgentTools            (preflight + registry wiring)
+    │   └── index.js                                    (finalizes tool surface)
+    ├── skills/
+    │   ├── skill-loader.js   → window.AgentSkillLoader (methodology/expertise loader)
+    │   ├── skills-manifest.json                        (built-in skill catalog)
+    │   └── algorithmic-art/, pdf/, xlsx/, ...          (16 .md skill dirs)
      │   └── app/
      │       ├── core/                # state.js, constants.js, permissions.js, provider-state.js
      │       ├── agent/              # agent.js, round-controller.js, session-lifecycle.js, error-recovery.js, tool-call-repair.js
@@ -93,9 +97,10 @@ Scripts load with `defer`; execution order is declaration order — no bundler n
 | Step | Scripts | Publishes |
 |------|---------|-----------|
 | 1. Core | `regex.js`, `prompt-loader.js` | `AgentRegex`, `AgentPrompts` |
-| 2. Skill metadata | `core/intents.js`, `core/tool-meta.js`, `generated/snapshot-data.js`, `snapshot-adapter.js` | `AgentSnapshot` |
-| 3. Runtime factories | `modules/filesystem-runtime.js`, `data-runtime.js`, `registry-runtime.js`, `web-runtime.js` | registers onto `AgentSkillModules` |
-| 4. Skill assembly | `shared.js`, `groups/*.js`, `index.js` | `AgentSkills` |
+| 2. Tool metadata | `core/intents.js`, `core/tool-meta.js`, `generated/snapshot-data.js`, `snapshot-adapter.js` | `AgentSnapshot` |
+| 3. Runtime factories | `modules/filesystem-runtime.js`, `data-runtime.js`, `registry-runtime.js`, `web-runtime.js` | registers onto `AgentToolModules` |
+| 4. Tool assembly | `shared.js`, `groups/*.js`, `index.js` | `AgentTools`, `AgentToolGroups` |
+| 4b. Skills loader | `skill-loader.js` | `AgentSkillLoader` |
 | 5. Orchestrator | `orchestrator.js` | `AgentOrchestrator` |
 | 6. App state | `state.js`, `constants.js`, `runtime-memory.js` | `CONSTANTS`, `AgentRuntimeCache`, `AgentMemory` |
 | 7. App subsystems | `permissions.js`, `compaction.js`, `filesystem-guards.js`, `steering.js` | `AgentPermissions`, `AgentCompaction`, `AgentFilesystemGuards`, `AgentSteering` |
@@ -103,11 +108,11 @@ Scripts load with `defer`; execution order is declaration order — no bundler n
 | 9. UI layer | `ui-render.js`, `reply-analysis.js` | `AgentUIRender`, `AgentReplyAnalysis` |
 | 10. LLM + loop | `llm.js`, `child-agent.js`, `agent.js`, `app-init.js`, `ui-modern.js` | `AgentLLMControl`, `AgentChildAgent`, inline-handler globals |
 
-`constants.js` must precede all modules that read `window.CONSTANTS`. Skills must be assembled before the orchestrator describes available tools.
+`constants.js` must precede all modules that read `window.CONSTANTS`. Tools must be assembled before the orchestrator describes available tools.
 
-## Skills
+## Tools
 
-`window.AgentSkills.registry` is composed from four runtime module families:
+`window.AgentTools.registry` is composed from four runtime module families:
 
 - **Web:** `web_search`, `web_fetch`, `read_page`, `http_fetch`, `extract_links`, `page_metadata`
 - **Device/browser:** datetime, geolocation, weather, clipboard, storage, notifications, tab messaging
@@ -115,6 +120,37 @@ Scripts load with `defer`; execution order is declaration order — no bundler n
 - **Data/planning:** parse JSON/CSV, todos, tasks, `ask_user`, `tool_search`, `memory_write/search/list`
 
 Tools carry execution metadata (`readOnly`, `concurrencySafe`, `risk`). Read-only concurrent tools run in parallel; risky or write tools run sequentially.
+
+## Skills
+
+Skills are **methodology and expertise** — not executable tools. They are `.md` files loaded at runtime that provide domain knowledge, workflows, and guidelines the LLM follows when relevant.
+
+| Resource | Function | Who Controls? | Example |
+|----------|----------|---------------|---------|
+| **Tools** | Actions / Execution | Model (active call) | `create_jira_issue(title, desc)` |
+| **Skills** | Expertise / Methodology | Model (as needed) | "How to review security code" |
+| **MCP** | Standardization / Connection | Infrastructure | Connect Slack to Claude |
+
+`window.AgentSkillLoader` auto-loads 16 built-in skills from `src/skills/`:
+
+- **algorithmic-art** — p5.js generative art with seeded randomness
+- **brand-guidelines** — Brand colors and typography styling
+- **canvas-design** — Visual art in .png/.pdf
+- **doc-coauthoring** — Structured documentation co-authoring
+- **docx** — Word document creation/editing
+- **frontend-design** — Production-grade frontend UI
+- **internal-comms** — Company communication formats
+- **mcp-builder** — MCP server creation guide
+- **pdf** — PDF manipulation (merge, split, OCR, forms)
+- **pptx** — PowerPoint creation/editing
+- **skill-creator** — Create and improve skills
+- **slack-gif-creator** — Animated GIFs for Slack
+- **theme-factory** — 10 pre-set themes for styling
+- **web-artifacts-builder** — React + Tailwind + shadcn/ui artifacts
+- **webapp-testing** — Playwright-based web testing
+- **xlsx** — Spreadsheet creation and analysis
+
+Skills are matched to user messages via keyword detection and injected into the system prompt as context blocks.
 
 ## 🚀 Deploy to Production (Render.com — Free Tier)
 
@@ -125,7 +161,7 @@ Tools carry execution metadata (`readOnly`, `concurrencySafe`, `risk`). Read-onl
 Every push to `main` triggers:
 - JS syntax check (`npm run check:js`)
 - Smoke tests (`npm run test:smoke`)
-- Skills smoke tests (`npm run test:skills-smoke`)
+- Tools smoke tests (`npm run test:tools-smoke`)
 - Matrix across Node 18, 20, 22
 
 ### One-click deploy
@@ -237,27 +273,27 @@ Tool outputs are untrusted. The loop detects prompt-injection patterns in tool r
 ## Verification
 
 ```bash
-npm run test:smoke          # 114 checks — runtime, LLM utils, context, all modules
-npm run test:skills-smoke   # skills, snapshot, memory
+npm run test:smoke          # 118 checks — runtime, LLM utils, context, all modules
+npm run test:tools-smoke   # tools, snapshot, memory
 
-node --check src/app/agent.js
-node --check src/app/llm.js
+node --check src/app/agent/agent.js
+node --check src/app/llm/llm.js
 node --check src/core/orchestrator.js
-node --check src/app/constants.js
-node --check src/app/state.js
-node --check src/app/permissions.js
-node --check src/app/compaction.js
-node --check src/app/steering.js
-node --check src/app/tool-execution.js
-node --check src/app/filesystem-guards.js
+node --check src/app/core/constants.js
+node --check src/app/core/state.js
+node --check src/app/core/permissions.js
+node --check src/app/context/compaction.js
+node --check src/app/context/steering.js
+node --check src/app/tools/tool-execution.js
+node --check src/app/tools/filesystem-guards.js
 node --check src/app/reply-analysis.js
-node --check src/app/ui-render.js
-node --check src/app/child-agent.js
+node --check src/app/ui/ui-render.js
+node --check src/app/llm/child-agent.js
 node --check src/app/app-init.js
 ```
 
 ```bash
-npm run build:snapshot      # regenerate src/skills/generated/snapshot-data.js
+npm run build:snapshot      # regenerate src/tools/generated/snapshot-data.js
 ```
 
 ## Bug Fixes (Code Review)
@@ -308,6 +344,36 @@ Round 3 — gpt-oss:120b tool-call + reasoning leak:
 | `regex.js` | `looksLikeReasoningLeak` missed model meta-commentary patterns | Added "We need to...", "We will call...", "I will call...", "Let's call..." |
 | `agent.js` | Model reasoning leaks ("We need to output tool calls only") shown to user | Added `stripModelMetaCommentary()` — strips steering sentences from visible output |
 | `llm.js` | Model monologue leaks into content without `<think>` tags | `normalizeVisibleModelText()` detects reasoning-prefixed long text, extracts answer after delimiter |
+
+Round 4 — `AgentSkills` → `AgentTools` refactoring:
+
+| File | Bug | Fix |
+|------|-----|-----|
+| `orchestrator.js` | All references to `AgentSkills`, `executeSkill`, `BUILTIN_SKILL_DESCRIPTIONS`, `SNAPSHOT_SKILL_LIMIT` were stale after rename | Updated to `AgentTools`, `executeTool`, `BUILTIN_TOOL_DESCRIPTIONS`, `SNAPSHOT_TOOL_LIMIT` |
+| `tool-execution.js` | `AgentSkills.getToolExecutionMeta`, `AgentSkillCore.toolMeta`, `orchestrator.executeSkill` were stale | Updated to `AgentTools`, `AgentToolCore`, `orchestrator.executeTool` |
+| `session-lifecycle.js` | `AgentSkills.abortAllTabListeners` stale | Updated to `AgentTools.abortAllTabListeners` |
+| `agent.js` | `tools.buildInitialContext` referenced via stale `skills` variable from `getRuntimeModules()` | Fixed variable name to `tools` throughout |
+| `test-smoke.mjs` | `runtime.skillGroups` check stale after rename | Changed to `runtime.toolGroups` |
+| `test-tools-smoke.mjs` | `runtime.skillGroups` check stale | Changed to `runtime.toolGroups` |
+
+Round 5 — runtime `ReferenceError` + filesystem guard:
+
+| File | Bug | Fix |
+|------|-----|-----|
+| `round-controller.js` | `Perm` used in `executeRound()` but only declared inside `executeToolBatches()` — ReferenceError at runtime | Added `const Perm = window.AgentPermissions \|\| {};` to `executeRound()` |
+| `filesystem-guards.js` | `hasSuspiciousWindowsPathPattern` blocked `.` and `..` (valid relative paths) via `/[.\s]+$/` regex | Added exemption: skip check when trailing segment is 1–2 dots only |
+
+Round 6 — confirmation loop, browser downloads, dead entries:
+
+| File | Bug | Fix |
+|------|-----|-----|
+| `agent.js` | Agent loop skipped past pending confirmation gates — loop continued immediately to next round instead of pausing | Added polling wait loop after `executeRound()` returns `pending-confirmations`: polls `AgentConfirmation.pending()` every 300 ms with `throwIfStopRequested()` for interruptibility |
+| `ui-modern.js` | `openConfirmationPanel` / `closeConfirmationPanel` were local functions, inaccessible from `agent.js` | Exposed both on `window` |
+| `filesystem-runtime.js` | `fs_download_file` called `resolveFile(path)` even when `content` arg was provided — failed without an authorized File System Access API root | Added early-exit branch: when `content` is set, create blob directly and skip `resolveFile` entirely |
+| `prompts/system.md` | No guidance on when to prefer browser downloads vs writing files | Added rule 14: prefer `fs_download_file` with `content` for exports/reports; only use `fs_write_file` when saving to local folder |
+| `state.js` | `runtime_fileDiff` missing from `enabledTools` init despite being registered | Added `runtime_fileDiff: true` |
+| `tool-execution.js` | Risk map contained `runtime_deleteFile`, `runtime_renamePath`, `runtime_makeDirectory` — tool names that don't exist in the registry | Removed dead entries |
+| `tools/groups/filesystem.js` | Fallback tool list had stale names from pre-refactor (`fs_request_root`, `fs_delete`, `fs_rename`, `fs_search`, `fs_find`) | Replaced with actual registry names |
 
 ## Documentation
 

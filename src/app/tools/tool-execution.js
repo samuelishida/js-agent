@@ -149,7 +149,7 @@
 
   // P3.1: Blast-radius confirmation gate
   function getToolRisk(tool) {
-    const riskMap = { runtime_writeFile:'irreversible', runtime_editFile:'irreversible', runtime_multiEdit:'irreversible', runtime_deleteFile:'irreversible', runtime_renamePath:'irreversible', runtime_makeDirectory:'reversible', runtime_runTerminal:'shared', runtime_spawnAgent:'shared' };
+    const riskMap = { runtime_writeFile:'irreversible', runtime_editFile:'irreversible', runtime_multiEdit:'irreversible', runtime_spawnAgent:'shared' };
     return riskMap[tool] || 'safe';
   }
 
@@ -164,6 +164,8 @@
   function needsUserConfirmation(call) {
     const { tool } = call;
     if (!requiresConfirmation(tool)) return false;
+    // Blanket approval: once any call for a shared-risk tool is approved this run, skip all future ones
+    if (getToolRisk(tool) === 'shared' && runRiskApprovals.has('blanket:' + tool)) return false;
     const sig = getToolCallSignature(call);
     if (runRiskApprovals.has(sig)) return false;
     return true;
@@ -176,7 +178,7 @@
     if (needsUserConfirmation(call)) {
       const toolDesc = risk === 'irreversible' ? 'destructive (irreversible, affects files)' : 'shared resource (may affect other systems)';
       const msg = `[CONFIRMATION_REQUIRED] Tool '${tool}' is ${toolDesc}. Approve or reject before proceeding.\nArgs: ${JSON.stringify(args).slice(0, 200)}`;
-      runPendingConfirmations.set(sig, { tool, args, risk, message: msg });
+      runPendingConfirmations.set(sig, { tool, args, risk, message: msg, signature: sig });
       return msg;
     }
     return '';
@@ -184,8 +186,11 @@
 
   function approveConfirmation(toolSignature) {
     if (runPendingConfirmations.has(toolSignature)) {
+      const item = runPendingConfirmations.get(toolSignature);
       runPendingConfirmations.delete(toolSignature);
       runRiskApprovals.set(toolSignature, true);
+      // Blanket-approve all future calls to this tool in the current run (shared risk only)
+      if (item.risk === 'shared') runRiskApprovals.set('blanket:' + item.tool, true);
       return true;
     }
     return false;
@@ -204,8 +209,8 @@
   // ── Tool execution metadata ──
 
   function getToolExecutionMeta(toolName) {
-    const metaFromSkills = window.AgentSkills?.getToolExecutionMeta?.(toolName);
-    if (metaFromSkills) return metaFromSkills;
+    const metaFromTools = window.AgentTools?.getToolExecutionMeta?.(toolName);
+    if (metaFromTools) return metaFromTools;
     const name = String(toolName || '').trim();
     if (name === 'calc' || name === 'datetime') return { readOnly: true, concurrencySafe: true, destructive: false, riskLevel: 'normal' };
     return { readOnly: false, concurrencySafe: false, destructive: false, riskLevel: 'normal' };
@@ -219,7 +224,7 @@
 
   function getToolPaths(call) {
     const { tool, args } = call;
-    const dep = window.AgentSkillCore?.toolMeta?.TOOL_DEPENDENCY_META?.[tool];
+    const dep = window.AgentToolCore?.toolMeta?.TOOL_DEPENDENCY_META?.[tool];
     if (!dep) {
       const reads = new Set();
       const writes = new Set();
@@ -502,7 +507,7 @@
         result = typeof sandboxResult === 'string' ? sandboxResult : JSON.stringify(sandboxResult);
         result += '\n[sandboxed execution]';
       } catch (sandboxErr) {
-        result = await orchestrator.executeSkill(call, {
+        result = await orchestrator.executeTool(call, {
           localBackend: window.localBackend,
           enabledTools: window.enabledTools,
           messages: window.messages,
@@ -513,7 +518,7 @@
         result = (typeof result === 'string' ? result : JSON.stringify(result)) + '\n[sandbox unavailable, executed in-process]';
       }
     } else {
-      result = await orchestrator.executeSkill(call, {
+      result = await orchestrator.executeTool(call, {
         localBackend: window.localBackend,
         enabledTools: window.enabledTools,
         messages: window.messages,

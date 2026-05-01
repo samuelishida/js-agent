@@ -22,7 +22,7 @@
     }
     if (/~\d/.test(text)) return true;
     if (text.startsWith('\\\\?\\') || text.startsWith('\\\\.\\') || text.startsWith('//?/') || text.startsWith('//./')) return true;
-    if (/[.\s]+$/.test(text)) return true;
+    if (/[.\s]+$/.test(text) && !/^\.{1,2}$/.test(text.replace(/.*[\\/]/, ''))) return true;
     if (/\.(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(text)) return true;
     if (/(^|\/|\\)\.{3,}(\/|\\|$)/.test(text)) return true;
     return false;
@@ -78,6 +78,11 @@
   function validateFilesystemCallGuard(call) {
     var operationType = getFilesystemOperationType(call && call.tool);
     if (operationType === 'none') return { allowed: true };
+    // fs_download_file with content= is a pure browser Blob download — no FS auth needed
+    if (String(call && call.tool || '') === 'fs_download_file') {
+      var dlArgs = (call && call.args) || {};
+      if (dlArgs.content && !dlArgs.path) return { allowed: true };
+    }
     var paths = extractFilesystemPathsFromArgs(call && call.tool, call && call.args);
     if (!paths.length && operationType !== 'read') {
       return { allowed: false, reason: 'A valid filesystem path is required for this write operation.' };

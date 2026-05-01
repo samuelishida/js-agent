@@ -22,6 +22,8 @@ function closeSettings() {
 
 window.openSettings = openSettings;
 window.closeSettings = closeSettings;
+window.openConfirmationPanel = openConfirmationPanel;
+window.closeConfirmationPanel = closeConfirmationPanel;
 
 // Confirmation Panel Handlers
 function openConfirmationPanel() {
@@ -35,7 +37,7 @@ function openConfirmationPanel() {
     return;
   }
 
-  panel.style.display = 'flex';
+  panel.classList.remove('hidden');
   list.innerHTML = pending.map((item, index) => `
     <div class="confirmation-item" data-sig-index="${index}">
       <div class="confirmation-item-icon">⚠️</div>
@@ -64,7 +66,7 @@ function openConfirmationPanel() {
 
 function closeConfirmationPanel() {
   const panel = document.getElementById('confirmation-panel');
-  if (panel) panel.style.display = 'none';
+  if (panel) panel.classList.add('hidden');
 }
 
 function approveConfirmation(signature) {

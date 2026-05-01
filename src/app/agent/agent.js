@@ -12,7 +12,7 @@ function maybeExtractLongTermMemory(userMessage, assistantMessage) {
 async function agentLoop(userMessage) {
   assertRuntimeReady();
   throwIfStopRequested();
-  const { skills, orchestrator } = getRuntimeModules();
+  const { tools, orchestrator } = getRuntimeModules();
   const cfg = C();
   const MAX_ROUNDS = getMaxRounds();
   const CTX_LIMIT = getCtxLimit();
@@ -32,7 +32,7 @@ async function agentLoop(userMessage) {
 
   const Comp = window.AgentCompaction;
   Comp?.armTimeBasedMicrocompactForTurn?.();
-  const enrichedMessage = await skills.buildInitialContext(userMessage, { messages: window.messages });
+  const enrichedMessage = await tools.buildInitialContext(userMessage, { messages: window.messages });
   const memoryContextBlock = window.AgentMemory?.buildContextBlock?.(userMessage, window.messages) || '';
   const turnInputMessage = memoryContextBlock ? `${memoryContextBlock}\n\n${enrichedMessage}` : enrichedMessage;
   throwIfStopRequested();
@@ -67,6 +67,18 @@ async function agentLoop(userMessage) {
       delay: getDelay(),
       consecutiveNonActionRounds
     });
+
+    if (roundResult.actions?.includes('pending-confirmations')) {
+      window.messages = roundResult.messages;
+      if (typeof window.openConfirmationPanel === 'function') window.openConfirmationPanel();
+      setStatus('busy', 'waiting for confirmation…');
+      while ((window.AgentConfirmation?.pending?.() || []).length > 0) {
+        throwIfStopRequested();
+        await sleep(300);
+      }
+      if (typeof window.closeConfirmationPanel === 'function') window.closeConfirmationPanel();
+      continue;
+    }
 
     if (roundResult.finalAnswer) {
       const finalMarkdown = roundResult.finalText;

@@ -55,12 +55,25 @@ declare interface Window {
   AgentPrompts: any;
   AgentOrchestrator: any;
 
-  // Skills
-  AgentSkills: any;
+  // Tools
+  AgentTools: any;
   AgentSnapshot: any;
-  AgentSkillModules: Record<string, any>;
-  AgentSkillGroups: Record<string, any>;
-  AgentSkillCore: { intents: any; toolMeta: any };
+  AgentToolModules: Record<string, any>;
+  AgentToolGroups: Record<string, any>;
+  AgentToolCore: { intents: any; toolMeta: any };
+
+  // Skills (methodology/expertise)
+  AgentSkillLoader: {
+    registerSkill: (markdown: string, source?: string) => any;
+    registerSkillFromUrl: (url: string) => Promise<any>;
+    registerSkillsFromManifest: (manifestUrl: string) => Promise<any[]>;
+    getSkill: (name: string) => any;
+    listSkills: () => any[];
+    getSkillNames: () => string[];
+    buildSkillContextBlock: (enabledSkillNames?: string[] | null) => string;
+    matchSkills: (userMessage: string) => any[];
+    clearSkills: () => void;
+  };
 
   // App state
   messages: SessionMessage[];

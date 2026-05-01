@@ -1,4 +1,4 @@
-﻿(() => {
+(() => {
   const TOOL_BLOCK = /<tool_call(?:\s[^>]*>|>?)\s*([\s\S]*?)\s*<\/tool_call>/i;
   const TOOL_BLOCK_GLOBAL = /<tool_call(?:\s[^>]*>|>?)\s*([\s\S]*?)\s*<\/tool_call>/gi;
 
@@ -122,6 +122,16 @@
       || extractBalancedObjectAfterKey(raw, 'input')
       || extractBalancedObjectAfterKey(raw, 'arguments');
     const args = argsRaw ? (parseJsonSafely(argsRaw) || {}) : {};
+    // Salvage common fields when args JSON is truncated/unbalanced
+    if (!Object.keys(args).length) {
+      const src = argsRaw || raw;
+      const p = extractJsonString(src, 'path');        if (p) args.path = p;
+      const c = extractJsonString(src, 'content');     if (c) args.content = c;
+      const f = extractJsonString(src, 'filename');    if (f) args.filename = f;
+      const q = extractJsonString(src, 'query');       if (q) args.query = q;
+      const u = extractJsonString(src, 'url');         if (u) args.url = u;
+      const cmd = extractJsonString(src, 'command');   if (cmd) args.command = cmd;
+    }
     return { tool, args };
   }
 
@@ -380,7 +390,7 @@
     ].some(pattern => pattern.test(value));
   }
 
-  function validateSkillOutput(text) {
+  function validateToolOutput(text) {
     const value = String(text || '');
     const issues = [];
 
@@ -398,6 +408,6 @@
     hasUnprocessedToolCall,
     isBareToolCallOutput,
     looksLikeReasoningLeak,
-    validateSkillOutput
+    validateToolOutput
   };
 })();

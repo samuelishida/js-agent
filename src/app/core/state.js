@@ -39,9 +39,9 @@ let enabledTools = {
   runtime_writeFile:true, runtime_editFile:true, runtime_multiEdit:true,
   runtime_listDir:true, runtime_glob:true, runtime_searchCode:true,
   runtime_runTerminal:true, runtime_webFetch:true, runtime_getDiagnostics:true,
-  runtime_todoWrite:true, runtime_memoryRead:true, runtime_memoryWrite:true,
+  runtime_fileDiff:true, runtime_todoWrite:true, runtime_memoryRead:true, runtime_memoryWrite:true,
   runtime_lsp:true, runtime_spawnAgent:true, tool_search:true,
-  snapshot_skill_catalog:true
+  snapshot_tool_catalog:true
 };
 
 let localBackend = {
@@ -111,7 +111,7 @@ bindWindowStateProperty('activeSessionId', () => activeSessionId, value => { act
 
 function getRuntimeModules() {
   return {
-    skills: window.AgentSkills,
+    tools: window.AgentTools,
     regex: window.AgentRegex,
     orchestrator: window.AgentOrchestrator,
     prompts: window.AgentPrompts
@@ -120,7 +120,7 @@ function getRuntimeModules() {
 
 function runtimeReady() {
   const modules = getRuntimeModules();
-  return !!(modules.skills && modules.regex && modules.orchestrator && modules.prompts);
+  return !!(modules.tools && modules.regex && modules.orchestrator && modules.prompts);
 }
 
 function assertRuntimeReady() {
@@ -131,7 +131,7 @@ function assertRuntimeReady() {
 function updateFileAccessStatus() {
   const el = document.getElementById('file-access-status');
   if (!el) return;
-  const roots = [...(window.AgentSkills?.state?.roots?.keys?.() || [])];
+  const roots = [...(window.AgentTools?.state?.roots?.keys?.() || [])];
   el.textContent = roots.length ? `authorized: ${roots.join(', ')}` : 'no folder authorized';
 }
 
@@ -139,7 +139,7 @@ async function requestDirectoryAccess() {
   if (!runtimeReady()) return;
   try {
     setStatus('busy', 'authorizing folder');
-    const result = await window.AgentSkills.registry.fs_pick_directory.run();
+    const result = await window.AgentTools.registry.fs_pick_directory.run();
     clearToolCache(key => key.startsWith('fs_'));
     addNotice(result.replace(/^##\s*fs_pick_directory\s*/i, '').trim());
     updateFileAccessStatus();

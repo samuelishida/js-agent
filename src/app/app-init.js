@@ -86,6 +86,18 @@ document.addEventListener('DOMContentLoaded', () => {
   // Discover and register MCP server tools (non-blocking; failures are logged only)
   window.AgentMcpBridge?.discoverAndRegisterMcpTools?.().catch(() => {});
 
+  // Auto-load built-in skills (methodology/expertise .md files)
+  if (window.AgentSkillLoader) {
+    window.AgentSkillLoader.registerSkillsFromManifest('src/skills/skills-manifest.json')
+      .then(results => {
+        const loaded = results.filter(Boolean);
+        if (loaded.length) {
+          console.log(`[Agent] Loaded ${loaded.length} skills: ${loaded.map(s => s.name).join(', ')}`);
+        }
+      })
+      .catch(() => {});
+  }
+
   if (!window.chatSessions.length) createSession();
   if (!getActiveSession()) window.activeSessionId = window.chatSessions[0]?.id || createSession().id;
   renderSessionList();

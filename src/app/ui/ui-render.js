@@ -329,6 +329,7 @@
       if (hiddenThinking && hiddenThinking.length) {
         var details = document.createElement('details');
         details.className = 'thinking-details';
+        details.open = true;
         var summary = document.createElement('summary');
         summary.textContent = 'Thinking (' + hiddenThinking.length + ')';
         details.appendChild(summary);

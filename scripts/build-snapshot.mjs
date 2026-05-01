@@ -12,7 +12,7 @@ const manifestPath = path.join(distRoot, 'adapter', 'runtime-snapshot-manifest.j
 const generatedRuntimePath = path.join(
   repoRoot,
   'src',
-  'skills',
+  'tools',
   'generated',
   'runtime-snapshot-data.js',
 );
@@ -360,11 +360,11 @@ async function transpileSourceFile(inputFile, outputFile) {
   return { transpiled: true };
 }
 
-function buildBundledSkillsManifest(files) {
+function buildBundledToolsManifest(files) {
   return files
     .map(file => {
       const fileName = path.basename(file.path);
-      const objectBlock = extractObjectLiteralAfterCall(file.content, 'registerBundledSkill');
+      const objectBlock = extractObjectLiteralAfterCall(file.content, 'registerBundledTool');
       if (!objectBlock) return null;
 
       const name = extractFieldFromObject(objectBlock, 'name');
@@ -386,7 +386,7 @@ function buildBundledSkillsManifest(files) {
         argumentHint: sanitizeVendorMentions(argumentHint || ''),
         userInvocable: String(userInvocable) === 'true',
         disableModelInvocation: String(disableModelInvocation) === 'true',
-        file: sanitizeVendorMentions(`src/skills/bundled/${fileName}`),
+        file: sanitizeVendorMentions(`src/tools/bundled/${fileName}`),
         promptTemplate: sanitizeVendorMentions(promptFromBuilder || ''),
         usage: sanitizeVendorMentions(usageMessage || ''),
       };
@@ -467,11 +467,11 @@ async function main() {
     else copiedCount += 1;
   }
 
-  const bundledSkillDir = path.join(sourceRoot, 'skills', 'bundled');
-  const bundledFiles = await walkFiles(bundledSkillDir);
-  const bundledSkillSources = [];
+  const bundledToolDir = path.join(sourceRoot, 'tools', 'bundled');
+  const bundledFiles = await walkFiles(bundledToolDir);
+  const bundledToolSources = [];
   for (const filePath of bundledFiles.filter(file => path.extname(file) === '.ts')) {
-    bundledSkillSources.push({
+    bundledToolSources.push({
       path: filePath,
       content: await readFile(filePath, 'utf8'),
     });
@@ -480,7 +480,7 @@ async function main() {
   const promptsSource = await readFile(path.join(sourceRoot, 'constants', 'prompts.ts'), 'utf8');
   const systemSource = await readFile(path.join(sourceRoot, 'constants', 'system.ts'), 'utf8');
 
-  const bundledSkills = buildBundledSkillsManifest(bundledSkillSources);
+  const bundledTools = buildBundledToolsManifest(bundledToolSources);
   const promptSnippets = buildPromptSnippetManifest(promptsSource, systemSource);
 
   const manifest = {
@@ -490,9 +490,9 @@ async function main() {
     stats: {
       transpiledFiles: transpiledCount,
       copiedFiles: copiedCount,
-      bundledSkills: bundledSkills.length,
+      bundledTools: bundledTools.length,
     },
-    bundledSkills,
+    bundledTools,
     promptSnippets,
     notes: [
       'Snapshot transpiled from TypeScript/TSX to JS with import extension rewrite.',
@@ -511,7 +511,7 @@ async function main() {
     `Built Runtime snapshot dist.\n` +
       `- Transpiled: ${transpiledCount}\n` +
       `- Copied assets: ${copiedCount}\n` +
-      `- Bundled skills cataloged: ${bundledSkills.length}\n` +
+      `- Bundled tools cataloged: ${bundledTools.length}\n` +
       `- Manifest: ${toPosix(path.relative(repoRoot, manifestPath))}\n` +
       `- Runtime data: ${toPosix(path.relative(repoRoot, generatedRuntimePath))}\n`,
   );

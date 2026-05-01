@@ -437,6 +437,7 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
 
   // 3. Parse / repair tool calls
   const TE = window.AgentToolExecution;
+  const Perm = window.AgentPermissions || {};
   let toolCalls = TE?.resolveToolCallsFromModelReply ? TE.resolveToolCallsFromModelReply(reply, rawReply) : [];
 
   if (!toolCalls.length) {
@@ -479,7 +480,7 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   // 6. Execute batches
   const toolContent = stripModelMetaCommentary(String(reply || '').replace(/\u003ctool_call(?:\s[^\u003e]*\u003e|\u003e?)\s*[\s\S]*?\u003c\/tool_call\u003e/gi, ''));
   if (toolContent) {
-    addMessage('agent', toolContent, round, false, false, []);
+    addMessage('agent', toolContent, round, false, false, parsedReply.thinkingBlocks || []);
   }
 
   messages.push({ role: 'assistant', content: rawReply || reply });

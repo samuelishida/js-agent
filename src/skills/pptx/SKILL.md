@@ -31,7 +31,7 @@ pres.writeFile({ fileName: 'out.pptx' }).then(() => {
 });
 ```
 
-Then: `runtime_generateFile(path="generate.js", content="...")` → capture base64 → `fs_download_file(filename="slides.pptx", content="BASE64")`.
+Then: `runtime_generateFile(path="generate.js", content="...", command="node generate.js")` → capture base64 → `fs_download_file(filename="slides.pptx", content="BASE64")`.
 
 Keep scripts under 4KB. Build data incrementally with `fs_append_file` if needed.
 

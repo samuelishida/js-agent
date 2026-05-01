@@ -449,7 +449,9 @@
     const filesystemGuard = validateFilesystemCallGuard(call);
     if (!filesystemGuard.allowed) {
       if (perms.registerPermissionDenial) perms.registerPermissionDenial(call, filesystemGuard);
-      runDisabledToolCalls.add(callSignature);
+      // Do NOT add to runDisabledToolCalls for guard denials — let the failure tracker
+      // handle repeats. This allows the model to retry with corrected args (e.g. after
+      // a guard fix or slight argument change).
       return `ERROR: PERMISSION_DENIED: ${filesystemGuard.reason}`;
     }
 

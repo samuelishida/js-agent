@@ -78,10 +78,12 @@
   function validateFilesystemCallGuard(call) {
     var operationType = getFilesystemOperationType(call && call.tool);
     if (operationType === 'none') return { allowed: true };
-    // fs_download_file with content= is a pure browser Blob download — no FS auth needed
+    // fs_download_file without a path is a pure browser Blob download — no FS auth needed
     if (String(call && call.tool || '') === 'fs_download_file') {
       var dlArgs = (call && call.args) || {};
-      if (dlArgs.content && !dlArgs.path) return { allowed: true };
+      // Content-based or bare-filename downloads don't touch the filesystem
+      if (!dlArgs.path) return { allowed: true };
+      // If path is provided, fall through to normal path validation below
     }
     var paths = extractFilesystemPathsFromArgs(call && call.tool, call && call.args);
     if (!paths.length && operationType !== 'read') {

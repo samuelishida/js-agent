@@ -387,10 +387,19 @@
     if (!scriptPath) throw new Error('runtime_generateFile requires path.');
     if (!scriptContent) throw new Error('runtime_generateFile requires content.');
     const runCmd = command || `node "${scriptPath}"`;
+    // Encode script content as UTF-8 bytes → base64, so Unicode survives btoa
+    let contentB64;
+    if (typeof TextEncoder !== 'undefined') {
+      const bytes = new TextEncoder().encode(scriptContent);
+      contentB64 = btoa(String.fromCharCode(...bytes));
+    } else {
+      // Fallback for very old browsers
+      contentB64 = btoa(encodeURIComponent(scriptContent).replace(/%([0-9A-F]{2})/g, (_, p1) => String.fromCharCode(parseInt(p1, 16))));
+    }
     const payload = {
       command: runCmd,
       cwd,
-      files: [{ path: scriptPath, content: btoa(scriptContent), mode: 0o644 }]
+      files: [{ path: scriptPath, content: contentB64, mode: 0o644 }]
     };
     const result = await callLocalCompatApi('/api/terminal-files', payload);
     const rawOutput = String(result?.result || result?.output || '');

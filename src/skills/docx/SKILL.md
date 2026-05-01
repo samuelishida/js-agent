@@ -82,11 +82,11 @@ Packer.toBuffer(doc).then(buffer => {
 });
 ```
 
-Then call:
-1. `runtime_generateFile(path="generate_report.js", content="...script above...", cwd=".")` — runs the script server-side and returns the base64 string
+Then:
+1. `runtime_generateFile(path="generate_docx.js", content="...script above...", command="node generate_docx.js")` — runs the script server-side and returns the base64 string
 2. `fs_download_file(filename="report.docx", content="BASE64_OUTPUT_HERE")` — triggers a browser download with the decoded binary
 
-Keep scripts under 4KB. For large documents, use `fs_append_file` to build helper functions or JSON data incrementally, then have the script `require('./helpers.js')`.
+Keep scripts under 4KB. For large documents, use `fs_append_file` to build helper functions or JSON data incrementally.
 
 ### Local Setup
 

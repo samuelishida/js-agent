@@ -10,6 +10,30 @@ license: Proprietary. LICENSE.txt has complete terms
 
 This guide covers essential PDF processing operations using Python libraries and command-line tools. For advanced features, JavaScript libraries, and detailed examples, see REFERENCE.md. If you need to fill out a PDF form, read FORMS.md and follow its instructions.
 
+## Browser-Agent Workflow (No Direct Filesystem Access)
+
+When running in a browser without direct filesystem access, generate PDFs server-side using `runtime_generateFile` and then download them with `fs_download_file`:
+
+```python
+import base64
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+
+c = canvas.Canvas("out.pdf", pagesize=letter)
+width, height = letter
+c.drawString(100, height - 100, "Hello World")
+c.save()
+
+with open("out.pdf", "rb") as f:
+    print(base64.b64encode(f.read()).decode())
+```
+
+Then call:
+1. `runtime_generateFile(path="generate_pdf.py", content="...script above...", command="python generate_pdf.py")` — runs the script server-side and returns the base64 string
+2. `fs_download_file(filename="report.pdf", content="BASE64_OUTPUT_HERE")` — triggers a browser download with the decoded binary
+
+Keep scripts under 4KB. For large documents, use `fs_append_file` to build helper functions or JSON data incrementally.
+
 ## Quick Start
 
 ```python

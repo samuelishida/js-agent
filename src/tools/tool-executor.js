@@ -367,7 +367,7 @@
   async function callLocalCompatApi(path, payload = {}) {
     const headers = { 'Content-Type': 'application/json' };
     // Attach terminal auth token for /api/terminal requests
-    if (path === '/api/terminal' && window.__terminalToken) {
+    if ((path === '/api/terminal' || path === '/api/terminal-files') && window.__terminalToken) {
       headers['Authorization'] = `Bearer ${window.__terminalToken}`;
     }
     const response = await fetch(path, { method: 'POST', headers, body: JSON.stringify(payload) });
@@ -379,6 +379,29 @@
   async function runtimeReadFile(args = {}, context = {}) { return readLocalFile(deriveFilesystemPathArg(args, context, 'read_file')); }
   async function runtimeWriteFile(args = {}) { return writeTextFile({ path: args.path, content: args.content }); }
   async function runtimeAppendFile(args = {}) { return appendTextFile({ path: args.path, content: args.content }); }
+  async function runtimeGenerateFile(args = {}) {
+    const scriptPath = String(args.path || '').trim();
+    const scriptContent = String(args.content || '');
+    const cwd = String(args.cwd || '');
+    const command = String(args.command || '').trim();
+    if (!scriptPath) throw new Error('runtime_generateFile requires path.');
+    if (!scriptContent) throw new Error('runtime_generateFile requires content.');
+    const runCmd = command || `node "${scriptPath}"`;
+    const payload = {
+      command: runCmd,
+      cwd,
+      files: [{ path: scriptPath, content: btoa(scriptContent), mode: 0o644 }]
+    };
+    const result = await callLocalCompatApi('/api/terminal-files', payload);
+    const rawOutput = String(result?.result || result?.output || '');
+    // Extract base64 from last non-empty line if present
+    const lines = rawOutput.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const lastLine = lines[lines.length - 1] || '';
+    if (lastLine.length > 40 && /^[A-Za-z0-9+/]+={0,2}$/.test(lastLine)) {
+      return formatToolResult('runtime_generateFile', `base64:${lastLine}`);
+    }
+    return formatToolResult('runtime_generateFile', rawOutput || 'Script executed.');
+  }
   async function runtimeEditFile(args = {}) { return editLocalFile({ path: args.path, oldText: args.oldString ?? args.oldText, newText: args.newString ?? args.newText, replaceAll: args.replaceAll === true }); }
   async function runtimeMultiEdit(args = {}) { return multiEditFiles({ edits: Array.isArray(args.edits) ? args.edits : [] }); }
   async function runtimeListDir(args = {}, context = {}) { return listDirectory(deriveFilesystemPathArg(args, context, 'list_dir')); }
@@ -498,6 +521,8 @@
     callLocalCompatApi,
     runtimeReadFile,
     runtimeWriteFile,
+    runtimeAppendFile,
+    runtimeGenerateFile,
     runtimeEditFile,
     runtimeMultiEdit,
     runtimeListDir,

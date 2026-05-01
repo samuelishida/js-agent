@@ -55,6 +55,41 @@ python scripts/accept_changes.py input.docx output.docx
 
 ## Creating New Documents
 
+### Browser-Agent Workflow (No Direct Filesystem Access)
+
+When running in a browser without direct filesystem access, generate DOCX files server-side using `runtime_generateFile` and then download them with `fs_download_file`:
+
+```javascript
+const fs = require('fs');
+const { Document, Packer, Paragraph, TextRun } = require('docx');
+
+const doc = new Document({
+  sections: [{
+    properties: {
+      page: {
+        size: { width: 12240, height: 15840 },
+        margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
+      }
+    },
+    children: [
+      new Paragraph({ children: [new TextRun("Hello World")] })
+    ]
+  }]
+});
+
+Packer.toBuffer(doc).then(buffer => {
+  console.log(buffer.toString('base64'));
+});
+```
+
+Then call:
+1. `runtime_generateFile(path="generate_report.js", content="...script above...", cwd=".")` — runs the script server-side and returns the base64 string
+2. `fs_download_file(filename="report.docx", content="BASE64_OUTPUT_HERE")` — triggers a browser download with the decoded binary
+
+Keep scripts under 4KB. For large documents, use `fs_append_file` to build helper functions or JSON data incrementally, then have the script `require('./helpers.js')`.
+
+### Local Setup
+
 Generate .docx files with JavaScript, then validate. Install: `npm install -g docx`
 
 ### Setup

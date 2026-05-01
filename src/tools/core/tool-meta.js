@@ -75,6 +75,7 @@
     'runtime_editFile',
     'runtime_multiEdit',
     'runtime_runTerminal',
+    'runtime_generateFile',
     'runtime_todoWrite',
     'runtime_memoryWrite',
     'runtime_spawnAgent'
@@ -108,6 +109,7 @@
     'runtime_multiEdit',
     'runtime_fileDiff',
     'runtime_runTerminal',
+    'runtime_generateFile',
     'runtime_todoWrite',
     'runtime_memoryWrite',
     'runtime_spawnAgent'
@@ -123,6 +125,7 @@
     'runtime_glob': { reads: ['$glob'], writes: [] },
     'runtime_searchCode': { reads: ['$query'], writes: [] },
     'runtime_runTerminal': { reads: ['$cwd'], writes: ['$cwd'] },
+    'runtime_generateFile': { reads: ['$cwd'], writes: ['$path'] },
     'runtime_webFetch': { reads: [], writes: [] },
     'runtime_getDiagnostics': { reads: ['$root'], writes: [] },
     'runtime_memoryRead': { reads: [], writes: [] },

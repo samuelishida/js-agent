@@ -16,6 +16,27 @@ license: Proprietary. LICENSE.txt has complete terms
 
 ---
 
+## Browser-Agent Workflow (No Direct Filesystem Access)
+
+When running in a browser without direct filesystem access, use `runtime_generateFile` to run scripts server-side and `fs_download_file` to deliver the resulting file:
+
+```javascript
+const fs = require('fs'), pptxgen = require('pptxgenjs');
+let pres = new pptxgen();
+pres.addSlide().addText('Hello', { x: 1, y: 1, fontSize: 24 });
+// base64 output to stdout for capture
+pres.writeFile({ fileName: 'out.pptx' }).then(() => {
+  fs.writeFileSync('out.pptx', fs.readFileSync('out.pptx'));
+  console.log(fs.readFileSync('out.pptx').toString('base64'));
+});
+```
+
+Then: `runtime_generateFile(path="generate.js", content="...")` → capture base64 → `fs_download_file(filename="slides.pptx", content="BASE64")`.
+
+Keep scripts under 4KB. Build data incrementally with `fs_append_file` if needed.
+
+---
+
 ## Reading Content
 
 ```bash

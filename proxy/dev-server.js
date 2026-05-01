@@ -304,6 +304,101 @@ async function handleTerminal(req, res) {
   }
 }
 
+async function handleTerminalMultipart(req, res) {
+  if (req.method === 'OPTIONS') {
+    send(res, 204, '', {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST,OPTIONS',
+      'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type',
+      'Access-Control-Max-Age': '86400'
+    });
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  // Enforce terminal auth token
+  const authHeader = String(req.headers['authorization'] || '');
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (token !== TERMINAL_TOKEN) {
+    send(res, 401, JSON.stringify({ error: 'Unauthorized: invalid or missing terminal token' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  try {
+    const body = await readJsonBody(req);
+    const command = String(body.command || '').trim();
+    if (!command) {
+      send(res, 400, JSON.stringify({ error: 'command is required' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+    if (command.length > 4096) {
+      send(res, 400, JSON.stringify({ error: 'Command too long (max 4096 chars)' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+    if (isDangerousCommand(command)) {
+      send(res, 400, JSON.stringify({ error: 'Command blocked: matches dangerous pattern' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+
+    // Handle inline files array: [{path, content: base64, mode}]
+    const files = body.files;
+    if (Array.isArray(files) && files.length > 0) {
+      for (const file of files) {
+        const filePath = String(file.path || '').trim();
+        const content = String(file.content || '');
+        const fileMode = parseInt(String(file.mode || '0644'), 8);
+        if (!filePath || !content) continue;
+        const absPath = path.resolve(ROOT, filePath);
+        if (!absPath.startsWith(path.resolve(ROOT))) continue;
+        // content is base64
+        try {
+          const buffer = Buffer.from(content, 'base64');
+          const dir = path.dirname(absPath);
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(absPath, buffer);
+          if (fileMode) fs.chmodSync(absPath, fileMode);
+        } catch (e) { /* skip failed file write */ }
+      }
+    }
+
+    const cwd = resolveSafeCwd(body.cwd);
+    const result = await runCommand(command, cwd, 60000);
+    send(res, result.ok ? 200 : 200, JSON.stringify({
+      ok: result.ok,
+      code: result.code,
+      result: `$ ${command}\nCWD: ${cwd}\n\n${result.output}`
+    }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Access-Control-Allow-Origin': '*'
+    });
+  } catch (error) {
+    send(res, 500, JSON.stringify({ error: `Terminal error: ${error.message}` }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+  }
+}
+
 async function handleDiagnostics(req, res) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
@@ -693,6 +788,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (parsedUrl.pathname === TERMINAL_PREFIX) {
       await handleTerminal(req, res);
+      return;
+    }
+    if (parsedUrl.pathname === TERMINAL_PREFIX + '-files') {
+      await handleTerminalMultipart(req, res);
       return;
     }
     if (parsedUrl.pathname === DIAGNOSTICS_PREFIX) {

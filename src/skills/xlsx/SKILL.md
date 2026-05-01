@@ -129,6 +129,28 @@ sheet['D20'] = '=AVERAGE(D2:D19)'
 
 This applies to ALL calculations - totals, percentages, ratios, differences, etc. The spreadsheet should be able to recalculate when source data changes.
 
+## Browser-Agent Workflow (No Direct Filesystem Access)
+
+When running in a browser without direct filesystem access, use `runtime_generateFile` with a Python script to build XLSX files server-side, then download with `fs_download_file`:
+
+```python
+import base64
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+
+wb = Workbook()
+ws = wb.active
+ws['A1'] = 'Hello'
+ws['A1'].font = Font(bold=True)
+wb.save('out.xlsx')
+with open('out.xlsx', 'rb') as f:
+    print(base64.b64encode(f.read()).decode())
+```
+
+Then: `runtime_generateFile(path="generate_xlsx.py", content="...", command="python generate_xlsx.py")` → capture base64 → `fs_download_file(filename="output.xlsx", content="BASE64")`.
+
+Keep scripts under 4KB. Build large datasets incrementally with `fs_append_file` if needed.
+
 ## Common Workflow
 1. **Choose tool**: pandas for data, openpyxl for formulas/formatting
 2. **Create/Load**: Create new workbook or load existing file

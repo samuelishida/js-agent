@@ -9,17 +9,25 @@
     "test:tools-smoke": "node scripts/test-tools-smoke.mjs",
     "test:smoke": "node scripts/test-smoke.mjs",
     "test:security": "node scripts/test-security.mjs",
+    "test:skills-smoke": "node scripts/test-skills-smoke.mjs",
     "check:js": "node --check src/app/agent/agent.js && node --check src/app/llm/llm.js && node --check src/core/orchestrator.js && node --check src/app/core/constants.js && node --check src/app/core/permissions.js && node --check src/app/context/compaction.js && node --check src/app/context/steering.js && node --check src/app/tools/tool-execution.js",
+    "check:skills-scripts": "node --check src/skills/pdf/scripts/check_fillable_fields.js && node --check src/skills/pdf/scripts/extract_form_field_info.js && node --check src/skills/pdf/scripts/fill_fillable_fields.js && node --check src/skills/pdf/scripts/check_bounding_boxes.js && node --check src/skills/pdf/scripts/extract_form_structure.js && node --check src/skills/pdf/scripts/fill_pdf_form_with_annotations.js && node --check src/skills/pdf/scripts/convert_pdf_to_images.js && node --check src/skills/pdf/scripts/create_validation_image.js && node --check src/skills/xlsx/scripts/recalc.js && node --check src/skills/skill-creator/scripts/utils.js && node --check src/skills/skill-creator/scripts/quick_validate.js && node --check src/skills/skill-creator/scripts/package_skill.js && node --check src/skills/skill-creator/scripts/improve_description.js && node --check src/skills/skill-creator/scripts/run_loop.js && node --check src/skills/skill-creator/scripts/generate_report.js && node --check src/skills/skill-creator/scripts/aggregate_benchmark.js && node --check src/skills/skill-creator/scripts/run_eval.js && node --check src/skills/skill-creator/eval-viewer/generate_review.js && node --check src/skills/mcp-builder/scripts/connections.js && node --check src/skills/mcp-builder/scripts/evaluation.js && node --check src/skills/webapp-testing/scripts/with_server.js && node --check src/skills/webapp-testing/examples/console_logging.js && node --check src/skills/webapp-testing/examples/element_discovery.js && node --check src/skills/webapp-testing/examples/static_html_automation.js",
     "lint": "eslint src/"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "devDependencies": {
-    "esbuild": "^0.25.12"
+    "esbuild": "^0.25.12",
+    "pkg": "^5.8.1"
   },
   "dependencies": {
     "docx": "^9.6.1",
-    "openclaude": "^0.0.1"
+    "openclaude": "^0.0.1",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38",
+    "pdfkit": "^0.15.0",
+    "pptxgenjs": "^3.12.0",
+    "xlsx": "^0.18.5"
   }
 }

@@ -382,25 +382,31 @@
   async function runtimeGenerateFile(args = {}) {
     const scriptPath = String(args.path || '').trim();
     const scriptContent = String(args.content || '');
+    const storageKey = String(args.storageKey || '').trim();
     const cwd = String(args.cwd || '');
     const command = String(args.command || '').trim();
     if (!scriptPath) throw new Error('runtime_generateFile requires path.');
-    if (!scriptContent) throw new Error('runtime_generateFile requires content.');
-    const runCmd = command || `node "${scriptPath}"`;
-    // Encode script content as UTF-8 bytes → base64, so Unicode survives btoa
-    let contentB64;
-    if (typeof TextEncoder !== 'undefined') {
-      const bytes = new TextEncoder().encode(scriptContent);
-      contentB64 = btoa(String.fromCharCode(...bytes));
-    } else {
-      // Fallback for very old browsers
-      contentB64 = btoa(encodeURIComponent(scriptContent).replace(/%([0-9A-F]{2})/g, (_, p1) => String.fromCharCode(parseInt(p1, 16))));
+    // Resolve content: explicit content > storageKey > no content (script on disk)
+    let resolvedContent = scriptContent;
+    if (!resolvedContent && storageKey) {
+      try {
+        const stored = localStorage.getItem(storageKey);
+        if (stored) resolvedContent = stored;
+      } catch { /* localStorage unavailable — fall through */ }
     }
-    const payload = {
-      command: runCmd,
-      cwd,
-      files: [{ path: scriptPath, content: contentB64, mode: 0o644 }]
-    };
+    const runCmd = command || `node "${scriptPath}"`;
+    const payload = { command: runCmd, cwd, files: [] };
+    if (resolvedContent) {
+      // Encode script content as UTF-8 bytes → base64, so Unicode survives btoa
+      let contentB64;
+      if (typeof TextEncoder !== 'undefined') {
+        const bytes = new TextEncoder().encode(resolvedContent);
+        contentB64 = btoa(String.fromCharCode(...bytes));
+      } else {
+        contentB64 = btoa(encodeURIComponent(resolvedContent).replace(/%([0-9A-F]{2})/g, (_, p1) => String.fromCharCode(parseInt(p1, 16))));
+      }
+      payload.files.push({ path: scriptPath, content: contentB64, mode: 0o644 });
+    }
     const result = await callLocalCompatApi('/api/terminal-files', payload);
     const rawOutput = String(result?.result || result?.output || '');
     // Extract base64 from last non-empty line if present

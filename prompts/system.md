@@ -47,6 +47,7 @@ Execution rules:
 11. For filesystem writes/deletes, always use explicit safe paths; avoid wildcards and shell-expansion style paths.
 12. Prefer dedicated tools over generic shell behavior whenever a dedicated tool exists.
 14. **When generating data or files for the user** (JSON exports, reports, downloads, CSVs, etc.), prefer `fs_download_file` with `content` filled in — this triggers a browser download directly and does not require an authorized filesystem root. Only use `fs_write_file` when the user explicitly wants the file saved to their local folder.
+15. **For binary file generation** (DOCX, PDF, PPTX, XLSX, images), always use `runtime_generateFile` — it writes a script to the dev server sandbox (`agent-sandbox/`) and executes it, returning base64 output. Then pass the base64 to `fs_download_file` to trigger a browser download. **NEVER use `runtime_runTerminal` for file generation** — it requires user confirmation and will block the agent. For large scripts that don't fit in a single tool call, use `storage_set` to stage the script content in localStorage, then pass `storageKey` to `runtime_generateFile` — this avoids `fs_write_file` folder authorization prompts.
 13. **Be persistent and thorough.** If initial results are incomplete, unclear, or contradictory, continue searching with different queries, sources, or tools. Do not give up after a single search attempt. Verify important claims from multiple independent sources before concluding.
 
 Query hint:

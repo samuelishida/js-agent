@@ -28,6 +28,9 @@ coverage/
 *.temp
 .*
 
+# Agent sandbox (generated files)
+agent-sandbox/
+
 # Local progress notes (not tracked)
 progress/
 claude-code-main/

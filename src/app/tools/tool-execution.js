@@ -358,26 +358,22 @@
 
   let runDisabledToolCalls = new Set();
   let runDisabledSemanticToolCalls = new Set();
-  let runToolFailureCounts = new Map();
   let runFsRootExplored = false;
   let runSuccessfulToolCount = 0;
   let runLocalTimeoutStreak = 0;
   let runLastToolCallSignature = '';
   let runRepeatedToolCallCount = 0;
-  let runToolCallTotalCounts = new Map();
   let runQueryTracking = null;
   let runToolCallRepairAttempts = new Set();
 
   function resetRunToolState() {
     runDisabledToolCalls = new Set();
     runDisabledSemanticToolCalls = new Set();
-    runToolFailureCounts.clear();
     runFsRootExplored = false;
     runSuccessfulToolCount = 0;
     runLocalTimeoutStreak = 0;
     runLastToolCallSignature = '';
     runRepeatedToolCallCount = 0;
-    runToolCallTotalCounts = new Map();
     runToolCallRepairAttempts = new Set();
     runQueryTracking = null;
     resetReadBeforeWriteState();
@@ -532,6 +528,11 @@
 
     trackReadPaths(call);
 
+    // Track semantic signature for near-duplicate detection (web_search dedup)
+    if (call?.tool === 'web_search' && !/^ERROR\b/i.test(String(result || ''))) {
+      runDisabledSemanticToolCalls.add(semanticSignature);
+    }
+
     // Sanitize file content output (prevent accidental code execution injection)
     const outputFileTools = new Set([
       'runtime_readFile', 'fs_read_file', 'file_read', 'read_file', 'fs_preview_file',
@@ -559,7 +560,6 @@
     // exported state accessors
     get runDisabledToolCalls() { return runDisabledToolCalls; },
     get runDisabledSemanticToolCalls() { return runDisabledSemanticToolCalls; },
-    get runToolFailureCounts() { return runToolFailureCounts; },
     get runFsRootExplored() { return runFsRootExplored; },
     set runFsRootExplored(v) { runFsRootExplored = v; },
     get runSuccessfulToolCount() { return runSuccessfulToolCount; },
@@ -570,7 +570,6 @@
     set runLastToolCallSignature(v) { runLastToolCallSignature = v; },
     get runRepeatedToolCallCount() { return runRepeatedToolCallCount; },
     set runRepeatedToolCallCount(v) { runRepeatedToolCallCount = v; },
-    get runToolCallTotalCounts() { return runToolCallTotalCounts; },
     get runQueryTracking() { return runQueryTracking; },
     set runQueryTracking(v) { runQueryTracking = v; },
     get runToolCallRepairAttempts() { return runToolCallRepairAttempts; },

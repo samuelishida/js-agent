@@ -20,8 +20,9 @@
       var secondColon = text.indexOf(':', firstColon + 1);
       if (secondColon !== -1) return true;
     }
-    if (/~\d/.test(text)) return true;
     if (text.startsWith('\\\\?\\') || text.startsWith('\\\\.\\') || text.startsWith('//?/') || text.startsWith('//./')) return true;
+    // Windows 8.3 short names: ~1, ~2, etc. (hex digits after tilde)
+    if (/~[\dA-Fa-f]{1,4}(?=[\\/]|$)/.test(text)) return true;
     if (/[.\s]+$/.test(text) && !/^\.{1,2}$/.test(text.replace(/.*[\\/]/, ''))) return true;
     if (/\.(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(text)) return true;
     if (/(^|\/|\\)\.{3,}(\/|\\|$)/.test(text)) return true;

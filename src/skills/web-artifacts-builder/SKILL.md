@@ -6,6 +6,8 @@ license: Complete terms in LICENSE.txt
 
 # Web Artifacts Builder
 
+> **Browser compatibility note**: The `bash scripts/...` commands below require the **dev server** (`node proxy/dev-server.js`) which provides the `runtime_generateFile` sandbox. In a pure browser environment without the sandbox, use `runtime_generateFile` to execute shell scripts if the dev server is running, or **fall back to creating single-file HTML artifacts directly** using inline CSS/JS.
+
 To build powerful frontend claude.ai artifacts, follow these steps:
 1. Initialize the frontend repo using `scripts/init-artifact.sh`
 2. Develop your artifact by editing the generated code

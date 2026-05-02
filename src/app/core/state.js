@@ -40,8 +40,8 @@ let enabledTools = {
   runtime_listDir:true, runtime_glob:true, runtime_searchCode:true,
   runtime_runTerminal:true, runtime_webFetch:true, runtime_getDiagnostics:true,
   runtime_fileDiff:true, runtime_todoWrite:true, runtime_memoryRead:true, runtime_memoryWrite:true,
-  runtime_lsp:true, runtime_spawnAgent:true, tool_search:true,
-  snapshot_tool_catalog:true
+  runtime_lsp:true, runtime_spawnAgent:true, runtime_generateFile:true, tool_search:true,
+  snapshot_tool_catalog:true, fs_append_file:true
 };
 
 let localBackend = {

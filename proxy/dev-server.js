@@ -9,6 +9,10 @@ import { randomBytes } from 'node:crypto';
 
 const PORT = Number(process.env.PORT || 5500);
 const ROOT = process.cwd();
+const SANDBOX_DIR = path.join(ROOT, 'agent-sandbox');
+
+// Ensure sandbox directory exists for runtime_generateFile output
+try { fs.mkdirSync(SANDBOX_DIR, { recursive: true }); } catch {}
 const OLLAMA_BASE = 'https://ollama.com';
 const OPENROUTER_BASE = 'https://openrouter.ai';
 const API_PREFIX = '/api/ollama/v1';
@@ -21,9 +25,16 @@ const HEALTH_PREFIX = '/api/health';
 const ENV_PREFIX = '/api/env';
 const MCP_PROXY_PREFIX = '/api/mcp-proxy';
 
-// One-time terminal auth token — generated at startup, passed to the browser via /api/env.
+// Terminal auth token — persisted across restarts so browser sessions survive server reloads.
 // Prevents non-browser callers from running terminal commands even if they know the URL.
-const TERMINAL_TOKEN = randomBytes(24).toString('hex');
+const TOKEN_FILE = path.join(ROOT, '.terminal-token');
+let TERMINAL_TOKEN;
+try {
+  TERMINAL_TOKEN = fs.readFileSync(TOKEN_FILE, 'utf-8').trim();
+} catch {
+  TERMINAL_TOKEN = randomBytes(24).toString('hex');
+  fs.writeFileSync(TOKEN_FILE, TERMINAL_TOKEN, 'utf-8');
+}
 
 // Dangerous command patterns blocked server-side (defence-in-depth; client also filters).
 const DANGEROUS_CMD_PATTERNS = [

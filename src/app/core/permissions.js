@@ -11,11 +11,11 @@
 
   function normalizeDecision(decision) {
     if (!decision || typeof decision !== 'object') {
-      return { allowed: true, decided: false, reason: '' };
+      return { allowed: false, decided: true, reason: 'Invalid permission decision format.' };
     }
 
     return {
-      allowed: decision.allowed !== false,
+      allowed: decision.allowed === true,
       decided: !!decision.decided,
       reason: String(decision.reason || '')
     };

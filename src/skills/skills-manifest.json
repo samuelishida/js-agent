@@ -4,17 +4,17 @@
     { "name": "brand-guidelines", "url": "src/skills/brand-guidelines/SKILL.md", "description": "Applies brand colors and typography to artifacts needing a specific look-and-feel" },
     { "name": "canvas-design", "url": "src/skills/canvas-design/SKILL.md", "description": "Create beautiful visual art in .png and .pdf documents using design philosophy" },
     { "name": "doc-coauthoring", "url": "src/skills/doc-coauthoring/SKILL.md", "description": "Guide users through structured workflow for co-authoring documentation" },
-    { "name": "docx", "url": "src/skills/docx/SKILL.md", "description": "Create, read, edit, or manipulate Word documents (.docx files)" },
+    { "name": "docx", "url": "src/skills/docx/SKILL.md", "description": "Read/edit existing Word documents. For creating new docs, use file-generation." },
+    { "name": "file-generation", "url": "src/skills/file-generation/SKILL.md", "description": "Generate DOCX, PDF, XLSX, PPTX binary files using Node.js scripts" },
     { "name": "frontend-design", "url": "src/skills/frontend-design/SKILL.md", "description": "Create distinctive, production-grade frontend interfaces with high design quality" },
     { "name": "internal-comms", "url": "src/skills/internal-comms/SKILL.md", "description": "Resources for writing internal communications using company-preferred formats" },
     { "name": "mcp-builder", "url": "src/skills/mcp-builder/SKILL.md", "description": "Guide for creating high-quality MCP servers for LLM integration" },
-    { "name": "pdf", "url": "src/skills/pdf/SKILL.md", "description": "Read, extract, merge, split, rotate, watermark, create, fill forms, encrypt/decrypt, OCR PDF files" },
-    { "name": "pptx", "url": "src/skills/pptx/SKILL.md", "description": "Create, read, edit, combine, split PowerPoint presentations" },
+    { "name": "pdf", "url": "src/skills/pdf/SKILL.md", "description": "Read/process existing PDFs. For creating new PDFs, use file-generation." },
+    { "name": "pptx", "url": "src/skills/pptx/SKILL.md", "description": "Read/edit existing PowerPoint files. For creating new decks, use file-generation." },
     { "name": "skill-creator", "url": "src/skills/skill-creator/SKILL.md", "description": "Create new skills, modify existing skills, and measure skill performance" },
-    { "name": "slack-gif-creator", "url": "src/skills/slack-gif-creator/SKILL.md", "description": "Create animated GIFs optimized for Slack (emoji and message GIFs)" },
     { "name": "theme-factory", "url": "src/skills/theme-factory/SKILL.md", "description": "Toolkit for styling artifacts with a theme — 10 pre-set themes or generate new ones" },
     { "name": "web-artifacts-builder", "url": "src/skills/web-artifacts-builder/SKILL.md", "description": "Suite of tools for creating elaborate, multi-component HTML artifacts using React, Tailwind CSS, and shadcn/ui" },
     { "name": "webapp-testing", "url": "src/skills/webapp-testing/SKILL.md", "description": "Toolkit for interacting with and testing local web applications using Playwright" },
-    { "name": "xlsx", "url": "src/skills/xlsx/SKILL.md", "description": "Create, read, edit, and analyze spreadsheet files (.xlsx, .xlsm, .csv, .tsv)" }
+    { "name": "xlsx", "url": "src/skills/xlsx/SKILL.md", "description": "Read/analyze existing spreadsheets. For creating new spreadsheets, use file-generation." }
   ]
 }

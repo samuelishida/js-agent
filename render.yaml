@@ -3,7 +3,7 @@ services:
     name: js-agent
     runtime: node
     plan: free
-    buildCommand: npm run check:js
+    buildCommand: npm ci && npm run check:js
     startCommand: npm start
     envVars:
       - key: NODE_ENV

@@ -875,13 +875,14 @@
           <div class="lcard-n" style="background:rgba(248,113,113,0.14);color:var(--red);border:1px solid rgba(248,113,113,0.3)">5</div>
           <div class="lcard-info">
             <div class="lcard-name">Tool Runtime Modules</div>
-            <div class="lcard-sub">Tool implementation factories — web searches, filesystem, data parsing, device APIs</div>
+            <div class="lcard-sub">Tool implementation factories — web, filesystem, data/workers, device APIs, GitHub</div>
           </div>
           <div class="lcard-files">
             <span class="fp">web-runtime.js</span>
             <span class="fp">filesystem-runtime.js</span>
             <span class="fp">data-runtime.js</span>
             <span class="fp">registry-runtime.js</span>
+            <span class="fp">github-runtime.js</span>
           </div>
           <div class="lcard-bts">
             <span class="lbadge lbadge-pub">AgentToolModules factories</span>
@@ -900,10 +901,11 @@
             <div class="lcard-rows">
               <div class="ir"><span class="ir-k">Consumes</span><span class="ir-v">Nothing from <code>window</code> — self-contained, browser APIs only</span></div>
               <div class="ir"><span class="ir-k">Publishes</span><span class="ir-v">Factories on <code>window.AgentToolModules</code> (object created if missing)</span></div>
-              <div class="ir"><span class="ir-k">web-runtime.js</span><span class="ir-v"><code>web_search</code>, <code>web_fetch</code>, <code>read_page</code>, <code>http_fetch</code>, <code>extract_links</code>, <code>page_metadata</code></span></div>
-              <div class="ir"><span class="ir-k">filesystem-runtime.js</span><span class="ir-v"><code>fs_list_roots</code>, <code>fs_read_file</code>, <code>fs_write_file</code>, <code>fs_tree</code>, <code>fs_search_content</code>, <code>fs_stat</code>, <code>fs_copy_file</code>, <code>fs_move_file</code>, <code>fs_delete_path</code>, <code>fs_walk</code>, <code>fs_download_file</code></span></div>
-              <div class="ir"><span class="ir-k">data-runtime.js</span><span class="ir-v"><code>parse_json</code>, <code>parse_csv</code>, <code>todo_write</code>, <code>ask_user_question</code>, <code>tool_search</code>, <code>memory_write/search/list</code></span></div>
-              <div class="ir"><span class="ir-k">registry-runtime.js</span><span class="ir-v"><code>datetime</code>, <code>geo_current_location</code>, <code>weather_current</code>, <code>clipboard_read/write</code>, <code>storage_get/set</code>, <code>notification_send</code>, <code>tab_broadcast</code></span></div>
+              <div class="ir"><span class="ir-k">web-runtime.js</span><span class="ir-v"><code>web_search</code>, <code>web_fetch</code>, <code>read_page</code>, <code>http_fetch</code>, <code>extract_links</code>, <code>page_metadata</code>, <code>geo_current_location</code>, <code>weather_current</code></span></div>
+              <div class="ir"><span class="ir-k">filesystem-runtime.js</span><span class="ir-v"><code>fs_list_roots</code>, <code>fs_read_file</code>, <code>fs_write_file</code>, <code>fs_append_file</code>, <code>fs_tree</code>, <code>fs_walk</code>, <code>fs_list_dir</code>, <code>fs_search_content</code>, <code>fs_search_name</code>, <code>fs_glob</code>, <code>fs_grep</code>, <code>fs_stat</code>, <code>fs_exists</code>, <code>fs_copy_file</code>, <code>fs_move_file</code>, <code>fs_delete_path</code>, <code>fs_rename_path</code>, <code>fs_mkdir</code>, <code>fs_download_file</code>, <code>runtime_generateFile</code></span></div>
+              <div class="ir"><span class="ir-k">data-runtime.js</span><span class="ir-v"><code>parse_json</code>, <code>parse_csv</code>, <code>todo_write</code>, <code>task_create/get/list/update</code>, <code>worker_batch/list/get</code>, <code>ask_user_question</code>, <code>memory_write/search/list</code>, <code>tool_search</code>, <code>snapshot_tool_catalog</code></span></div>
+              <div class="ir"><span class="ir-k">registry-runtime.js</span><span class="ir-v"><code>clipboard_read/write</code>, <code>storage_list_keys/get/set</code>, <code>notification_request_permission</code>, <code>notification_send</code>, <code>tab_broadcast</code>, <code>tab_listen</code></span></div>
+              <div class="ir"><span class="ir-k">github-runtime.js</span><span class="ir-v"><code>github_search_code</code>, <code>github_get_pr</code>, <code>github_list_prs</code>, <code>github_create_issue</code>, <code>github_get_file</code>, <code>github_list_issues</code></span></div>
             </div>
             <div class="cb">
               <div class="cb-hd"><span class="cb-lang">JavaScript</span><span class="cb-file">factory registration pattern</span></div>
@@ -1250,7 +1252,7 @@
       <h2>Tool Runtime</h2>
     </div>
     <p class="sec-desc">
-      Four runtime families, each isolated in its own module. <code>window.AgentTools.registry</code>
+      Five runtime families plus compat wrappers, each isolated in its own module. <code>window.AgentTools.registry</code>
       composes them all. Click a card to see the full tool list.
     </p>
     <div class="card-grid">
@@ -1266,16 +1268,18 @@
           <button class="card-tog">▼</button>
         </div>
         <div class="card-bd">
-          <div class="card-desc">Search, fetch, page reading, link extraction, metadata. Multiple search providers with fallback routing.</div>
+          <div class="card-desc">Search, fetch, page reading, link extraction, metadata, geolocation, weather. Multiple search providers with fallback routing.</div>
           <div class="card-det">
             <div class="cb">
               <div class="cb-hd"><span class="cb-lang">Registry tools</span></div>
-              <pre><span class="fn">web_search</span>      <span class="cm">// query + provider routing + deduplication</span>
-<span class="fn">web_fetch</span>       <span class="cm">// raw URL fetch + DOM strip + size budget</span>
-<span class="fn">read_page</span>       <span class="cm">// fetch + Mozilla Readability extraction</span>
-<span class="fn">http_fetch</span>      <span class="cm">// low-level with custom headers + method</span>
-<span class="fn">extract_links</span>   <span class="cm">// hrefs + anchor text from page</span>
-<span class="fn">page_metadata</span>   <span class="cm">// og:title, og:desc, canonical, JSON-LD</span></pre>
+              <pre><span class="fn">web_search</span>           <span class="cm">// query + provider routing + deduplication</span>
+<span class="fn">web_fetch</span>            <span class="cm">// raw URL fetch + DOM strip + size budget</span>
+<span class="fn">read_page</span>            <span class="cm">// fetch + Mozilla Readability extraction</span>
+<span class="fn">http_fetch</span>           <span class="cm">// low-level with custom headers + method</span>
+<span class="fn">extract_links</span>        <span class="cm">// hrefs + anchor text from page</span>
+<span class="fn">page_metadata</span>        <span class="cm">// og:title, og:desc, canonical, JSON-LD</span>
+<span class="fn">geo_current_location</span> <span class="cm">// Geolocation API → lat/lng</span>
+<span class="fn">weather_current</span>      <span class="cm">// current conditions for coords or city</span></pre>
             </div>
           </div>
         </div>
@@ -1293,20 +1297,31 @@
           <button class="card-tog">▼</button>
         </div>
         <div class="card-bd">
-          <div class="card-desc">Full browser File System Access API integration. Root authorization flow, recursive tree walk, full CRUD.</div>
+          <div class="card-desc">Full browser File System Access API. Root authorization, recursive tree walk, full CRUD, glob/grep, chunked append, server-side file generation.</div>
           <div class="card-det">
             <div class="cb">
               <div class="cb-hd"><span class="cb-lang">Registry tools</span></div>
-              <pre><span class="fn">fs_roots</span>        <span class="cm">// list authorized root directory handles</span>
-<span class="fn">fs_tree</span>         <span class="cm">// recursive directory tree (paginated)</span>
-<span class="fn">fs_read</span>         <span class="cm">// read file as text or binary</span>
-<span class="fn">fs_write</span>        <span class="cm">// write / overwrite file</span>
-<span class="fn">fs_search</span>       <span class="cm">// regex search across tree, returns matches</span>
-<span class="fn">fs_stat</span>         <span class="cm">// name, size, lastModified, type</span>
-<span class="fn">fs_copy</span>         <span class="cm">// copy file or directory recursively</span>
-<span class="fn">fs_move</span>         <span class="cm">// move (copy + delete)</span>
-<span class="fn">fs_delete</span>       <span class="cm">// delete — risk:high, requires confirmation</span>
-<span class="fn">fs_walk</span>         <span class="cm">// depth-first walk with yield</span></pre>
+              <pre><span class="fn">fs_list_roots</span>    <span class="cm">// list authorized root directory handles</span>
+<span class="fn">fs_tree</span>          <span class="cm">// recursive directory tree</span>
+<span class="fn">fs_walk</span>          <span class="cm">// depth-first walk with filters</span>
+<span class="fn">fs_list_dir</span>      <span class="cm">// directory listing</span>
+<span class="fn">fs_read_file</span>     <span class="cm">// read file as text or binary</span>
+<span class="fn">fs_preview_file</span>  <span class="cm">// partial read for large files</span>
+<span class="fn">fs_write_file</span>    <span class="cm">// create / overwrite file</span>
+<span class="fn">fs_append_file</span>   <span class="cm">// append chunk — chunked file building</span>
+<span class="fn">fs_search_name</span>   <span class="cm">// find files by name pattern</span>
+<span class="fn">fs_search_content</span> <span class="cm">// regex search across tree</span>
+<span class="fn">fs_glob</span>          <span class="cm">// glob pattern matching</span>
+<span class="fn">fs_grep</span>          <span class="cm">// content grep with context lines</span>
+<span class="fn">fs_stat</span>          <span class="cm">// name, size, lastModified, type</span>
+<span class="fn">fs_exists</span>        <span class="cm">// check path exists</span>
+<span class="fn">fs_copy_file</span>     <span class="cm">// copy file or directory</span>
+<span class="fn">fs_move_file</span>     <span class="cm">// move file</span>
+<span class="fn">fs_delete_path</span>   <span class="cm">// delete — risk:high, requires confirmation</span>
+<span class="fn">fs_rename_path</span>   <span class="cm">// rename in place</span>
+<span class="fn">fs_mkdir</span>         <span class="cm">// create directory</span>
+<span class="fn">fs_download_file</span> <span class="cm">// trigger browser download</span>
+<span class="fn">runtime_generateFile</span> <span class="cm">// write + exec script server-side (binary output)</span></pre>
             </div>
           </div>
         </div>
@@ -1324,17 +1339,26 @@
           <button class="card-tog">▼</button>
         </div>
         <div class="card-bd">
-          <div class="card-desc">JSON/CSV parsing, todo/task management, user question prompts, and registry introspection.</div>
+          <div class="card-desc">JSON/CSV parsing, todos, task lifecycle, parallel worker agents, memory, registry introspection.</div>
           <div class="card-det">
             <div class="cb">
               <div class="cb-hd"><span class="cb-lang">Registry tools</span></div>
-              <pre><span class="fn">parse_json</span>      <span class="cm">// validate + extract by JSONPath</span>
-<span class="fn">parse_csv</span>       <span class="cm">// delimiter-aware → row objects</span>
-<span class="fn">todo_list</span>       <span class="cm">// read persisted todo list</span>
-<span class="fn">todo_add</span>        <span class="cm">// append task to list</span>
-<span class="fn">todo_complete</span>   <span class="cm">// mark task done by id</span>
-<span class="fn">ask_user</span>        <span class="cm">// structured clarification question</span>
-<span class="fn">tool_search</span>     <span class="cm">// search registry by name / description</span></pre>
+              <pre><span class="fn">parse_json</span>          <span class="cm">// validate + extract by JSONPath</span>
+<span class="fn">parse_csv</span>           <span class="cm">// delimiter-aware → row objects</span>
+<span class="fn">todo_write</span>          <span class="cm">// persist structured todo list</span>
+<span class="fn">task_create</span>         <span class="cm">// create tracked task with status</span>
+<span class="fn">task_get</span>            <span class="cm">// read task by id</span>
+<span class="fn">task_list</span>           <span class="cm">// list all tasks</span>
+<span class="fn">task_update</span>         <span class="cm">// update task status / notes</span>
+<span class="fn">worker_batch</span>        <span class="cm">// run parallel sub-agent workers</span>
+<span class="fn">worker_list</span>         <span class="cm">// list past worker runs</span>
+<span class="fn">worker_get</span>          <span class="cm">// inspect worker run outputs</span>
+<span class="fn">ask_user_question</span>   <span class="cm">// structured clarification prompt</span>
+<span class="fn">memory_write</span>        <span class="cm">// write to long-term memory store</span>
+<span class="fn">memory_search</span>       <span class="cm">// keyword search across memory</span>
+<span class="fn">memory_list</span>         <span class="cm">// list all memory entries</span>
+<span class="fn">tool_search</span>         <span class="cm">// search registry by name / description</span>
+<span class="fn">snapshot_tool_catalog</span> <span class="cm">// dump full tool catalog snapshot</span></pre>
             </div>
           </div>
         </div>
@@ -1352,18 +1376,46 @@
           <button class="card-tog">▼</button>
         </div>
         <div class="card-bd">
-          <div class="card-desc">Datetime, geolocation, weather, clipboard, storage, notifications, and cross-tab messaging.</div>
+          <div class="card-desc">Datetime, clipboard, storage, notifications, and cross-tab messaging via BroadcastChannel.</div>
           <div class="card-det">
             <div class="cb">
               <div class="cb-hd"><span class="cb-lang">Registry tools</span></div>
-              <pre><span class="fn">get_datetime</span>    <span class="cm">// ISO timestamp + timezone + locale</span>
-<span class="fn">get_location</span>    <span class="cm">// Geolocation API → lat/lng</span>
-<span class="fn">get_weather</span>     <span class="cm">// current conditions for coords or city</span>
-<span class="fn">clipboard_read</span>  <span class="cm">// read clipboard text</span>
-<span class="fn">clipboard_write</span> <span class="cm">// write text to clipboard</span>
-<span class="fn">storage_get</span>     <span class="cm">// localStorage key read</span>
-<span class="fn">storage_set</span>     <span class="cm">// localStorage key write</span>
-<span class="fn">notify</span>          <span class="cm">// system notification (permission required)</span></pre>
+              <pre><span class="fn">clipboard_read</span>              <span class="cm">// read clipboard text</span>
+<span class="fn">clipboard_write</span>             <span class="cm">// write text to clipboard</span>
+<span class="fn">storage_list_keys</span>           <span class="cm">// list localStorage keys</span>
+<span class="fn">storage_get</span>                 <span class="cm">// localStorage key read</span>
+<span class="fn">storage_set</span>                 <span class="cm">// localStorage key write</span>
+<span class="fn">notification_request_permission</span> <span class="cm">// request browser notification permission</span>
+<span class="fn">notification_send</span>           <span class="cm">// system notification</span>
+<span class="fn">tab_broadcast</span>               <span class="cm">// send message to all open tabs</span>
+<span class="fn">tab_listen</span>                  <span class="cm">// subscribe to cross-tab messages</span></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" onclick="tog(this)">
+        <div class="card-hd">
+          <div class="card-hd-l">
+            <span class="card-ico">🐙</span>
+            <div class="card-meta">
+              <div class="card-lbl">github-runtime.js</div>
+              <div class="card-ttl">GitHub</div>
+            </div>
+          </div>
+          <button class="card-tog">▼</button>
+        </div>
+        <div class="card-bd">
+          <div class="card-desc">GitHub REST API integration. Search code, manage PRs and issues, read files at any ref. Requires a GitHub token in settings.</div>
+          <div class="card-det">
+            <div class="cb">
+              <div class="cb-hd"><span class="cb-lang">Registry tools</span></div>
+              <pre><span class="fn">github_search_code</span>  <span class="cm">// search code across repositories</span>
+<span class="fn">github_get_pr</span>       <span class="cm">// PR details + changed files</span>
+<span class="fn">github_list_prs</span>     <span class="cm">// list PRs for a repo</span>
+<span class="fn">github_create_issue</span> <span class="cm">// open new issue</span>
+<span class="fn">github_get_file</span>     <span class="cm">// read file at specific ref / branch</span>
+<span class="fn">github_list_issues</span>  <span class="cm">// list issues filtered by label/state</span></pre>
             </div>
           </div>
         </div>

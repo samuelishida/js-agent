@@ -4,7 +4,7 @@
   <img src="assets/logo.svg" alt="js-agent logo" width="320">
 </p>
 
-Browser-first multi-step AI agent. No bundler. Local or cloud LLM. Modular tool runtime with 80+ tools. Runs from a single dev server command.
+Browser-first multi-step AI agent. No bundler. Local or cloud LLM. Modular tool runtime with 90+ tools across 5 runtime families. Runs from a single dev server command.
 
 ## Running
 
@@ -114,10 +114,12 @@ Scripts load with `defer`; execution order is declaration order — no bundler n
 
 `window.AgentTools.registry` is composed from four runtime module families:
 
-- **Web:** `web_search`, `web_fetch`, `read_page`, `http_fetch`, `extract_links`, `page_metadata`
-- **Device/browser:** datetime, geolocation, weather, clipboard, storage, notifications, tab messaging
-- **Filesystem:** list, read, write, append, search, tree, walk, stat, copy, move, delete, rename (File System Access API)
-- **Data/planning:** parse JSON/CSV, todos, tasks, `ask_user`, `tool_search`, `memory_write/search/list`
+- **Web:** `web_search`, `web_fetch`, `read_page`, `http_fetch`, `extract_links`, `page_metadata`, `geo_current_location`, `weather_current`
+- **Device/browser:** `clipboard_read/write`, `storage_get/set/list_keys`, `notification_send`, `tab_broadcast/listen`
+- **Filesystem:** `fs_list_dir`, `fs_tree`, `fs_walk`, `fs_read_file`, `fs_preview_file`, `fs_write_file`, `fs_append_file`, `fs_edit` (via compat), `fs_search_name`, `fs_search_content`, `fs_glob`, `fs_grep`, `fs_stat`, `fs_exists`, `fs_copy_file`, `fs_move_file`, `fs_delete_path`, `fs_rename_path`, `fs_mkdir`, `fs_touch`, `fs_download_file`, `fs_upload_pick` (File System Access API)
+- **Data/planning:** `parse_json`, `parse_csv`, `todo_write`, `task_create/get/list/update`, `worker_batch/list/get`, `ask_user_question`, `memory_write/search/list`, `tool_search`, `snapshot_tool_catalog`
+- **GitHub:** `github_search_code`, `github_get_pr`, `github_list_prs`, `github_create_issue`, `github_get_file`, `github_list_issues`
+- **Runtime compat:** `runtime_readFile`, `runtime_writeFile`, `runtime_editFile`, `runtime_multiEdit`, `runtime_listDir`, `runtime_glob`, `runtime_searchCode`, `runtime_runTerminal`, `runtime_generateFile`, `runtime_webFetch`, `runtime_getDiagnostics`, `runtime_fileDiff`, `runtime_spawnAgent`
 
 Tools carry execution metadata (`readOnly`, `concurrencySafe`, `risk`). Read-only concurrent tools run in parallel; risky or write tools run sequentially.
 
@@ -131,26 +133,26 @@ Skills are **methodology and expertise** — not executable tools. They are `.md
 | **Skills** | Expertise / Methodology | Model (as needed) | "How to review security code" |
 | **MCP** | Standardization / Connection | Infrastructure | Connect Slack to Claude |
 
-`window.AgentSkillLoader` auto-loads 16 built-in skills from `src/skills/`:
+`window.AgentSkillLoader` auto-loads 17 built-in skills from `src/skills/`:
 
 - **algorithmic-art** — p5.js generative art with seeded randomness
 - **brand-guidelines** — Brand colors and typography styling
 - **canvas-design** — Visual art in .png/.pdf
 - **doc-coauthoring** — Structured documentation co-authoring
-- **docx** — Word document creation/editing
+- **docx** — Read/edit existing Word documents (creation → file-generation)
+- **file-generation** — Generate DOCX, PDF, XLSX, PPTX via Node.js scripts
 - **frontend-design** — Production-grade frontend UI
 - **internal-comms** — Company communication formats
 - **mcp-builder** — MCP server creation guide
-- **pdf** — PDF manipulation (merge, split, OCR, forms)
-- **pptx** — PowerPoint creation/editing
+- **pdf** — Read/process existing PDFs (creation → file-generation)
+- **pptx** — Read/edit existing PowerPoint (creation → file-generation)
 - **skill-creator** — Create and improve skills
-- **slack-gif-creator** — Animated GIFs for Slack
 - **theme-factory** — 10 pre-set themes for styling
 - **web-artifacts-builder** — React + Tailwind + shadcn/ui artifacts
 - **webapp-testing** — Playwright-based web testing
-- **xlsx** — Spreadsheet creation and analysis
+- **xlsx** — Read/analyze existing spreadsheets (creation → file-generation)
 
-Skills are matched to user messages via keyword detection and injected into the system prompt as context blocks.
+All file generation uses **pure JavaScript** (no Python). Skills are matched to user messages via keyword detection and injected into the system prompt as context blocks.
 
 ## 🚀 Deploy to Production (Render.com — Free Tier)
 

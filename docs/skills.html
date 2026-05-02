@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JS Agent — Skills Reference</title>
+  <style>
+    :root {
+      --bg: #0a1118; --bg2: #0f1724; --panel: #111b27; --panel2: #172436;
+      --panel3: #1c2d42; --line: rgba(255,255,255,0.07); --text: #e8eef7;
+      --muted: #8fa8c8; --dim: #4e6880; --blue: #5b9bfd; --accent: #337ad2;
+      --green: #61d4a4; --amber: #ffd27a; --red: #f87171; --purple: #a78bfa;
+    }
+    *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+    html { scroll-behavior:smooth; }
+    body { background:var(--bg); color:var(--text); font:14px/1.6 "Segoe UI",system-ui,sans-serif; padding:48px 64px; max-width:1100px; margin:0 auto; }
+    h1 { font-size:32px; font-weight:800; letter-spacing:-0.03em; margin-bottom:8px; background:linear-gradient(135deg,var(--text) 40%,var(--blue)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+    .lead { color:var(--muted); margin-bottom:40px; font-size:15px; }
+    h2 { font-size:14px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--dim); margin:40px 0 16px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:16px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:20px 24px; transition:border-color 0.2s; }
+    .card:hover { border-color:rgba(91,155,253,0.4); }
+    .card-name { font-size:15px; font-weight:700; color:var(--blue); margin-bottom:6px; }
+    .card-desc { font-size:13px; color:var(--muted); line-height:1.5; }
+    .tag-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+    .tag { padding:3px 10px; border-radius:4px; background:rgba(91,155,253,0.1); border:1px solid rgba(91,155,253,0.2); color:var(--blue); font-size:10px; font-weight:600; text-transform:uppercase; }
+    .tag.js { background:rgba(97,212,164,0.1); border-color:rgba(97,212,164,0.25); color:var(--green); }
+    .tag.read { background:rgba(255,210,122,0.1); border-color:rgba(255,210,122,0.25); color:var(--amber); }
+    footer { margin-top:64px; padding-top:24px; border-top:1px solid var(--line); color:var(--dim); font-size:12px; }
+    a { color:var(--blue); }
+  </style>
+</head>
+<body>
+  <h1>JS Agent Skills</h1>
+  <p class="lead">17 built-in skills for the browser-first AI agent. All file generation uses <strong>pure JavaScript</strong> — no Python required.</p>
+
+  <h2>File Generation (Binary Outputs)</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="card-name">file-generation</div>
+      <div class="card-desc">Generate DOCX, PDF, XLSX, PPTX using Node.js scripts executed via <code>runtime_generateFile</code>. The central skill for all binary file output.</div>
+      <div class="tag-row"><span class="tag js">Pure JS</span><span class="tag">Binary Output</span></div>
+    </div>
+  </div>
+
+  <h2>Reading & Editing Existing Files</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="card-name">docx</div>
+      <div class="card-desc">Read and edit existing Word documents. For creating new docs, use file-generation.</div>
+      <div class="tag-row"><span class="tag read">Read/Edit</span></div>
+    </div>
+    <div class="card">
+      <div class="card-name">pdf</div>
+      <div class="card-desc">Read and process existing PDF files. For creating new PDFs, use file-generation.</div>
+      <div class="tag-row"><span class="tag read">Read/Process</span></div>
+    </div>
+    <div class="card">
+      <div class="card-name">pptx</div>
+      <div class="card-desc">Read and edit existing PowerPoint files. For creating new decks, use file-generation.</div>
+      <div class="tag-row"><span class="tag read">Read/Edit</span></div>
+    </div>
+    <div class="card">
+      <div class="card-name">xlsx</div>
+      <div class="card-desc">Read and analyze existing spreadsheets. For creating new spreadsheets, use file-generation.</div>
+      <div class="tag-row"><span class="tag read">Read/Analyze</span></div>
+    </div>
+  </div>
+
+  <h2>Content & Design Skills</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="card-name">algorithmic-art</div>
+      <div class="card-desc">p5.js generative art with seeded randomness for reproducible outputs.</div>
+      <div class="tag-row"><span class="tag js">Pure JS</span></div>
+    </div>
+    <div class="card">
+      <div class="card-name">brand-guidelines</div>
+      <div class="card-desc">Apply brand colors and typography to artifacts needing a specific look-and-feel.</div>
+    </div>
+    <div class="card">
+      <div class="card-name">canvas-design</div>
+      <div class="card-desc">Create visual art in .png and .pdf using design philosophy methodology.</div>
+    </div>
+    <div class="card">
+      <div class="card-name">doc-coauthoring</div>
+      <div class="card-desc">Guide users through structured workflow for co-authoring documentation.</div>
+    </div>
+    <div class="card">
+      <div class="card-name">frontend-design</div>
+      <div class="card-desc">Create distinctive, production-grade frontend interfaces with high design quality.</div>
+    </div>
+    <div class="card">
+      <div class="card-name">internal-comms</div>
+      <div class="card-desc">Resources for writing internal communications using company-preferred formats.</div>
+    </div>
+    <div class="card">
+      <div class="card-name">theme-factory</div>
+      <div class="card-desc">Toolkit for styling artifacts with a theme — 10 pre-set themes or generate new ones.</div>
+    </div>
+    <div class="card">
+      <div class="card-name">web-artifacts-builder</div>
+      <div class="card-desc">Suite of tools for creating elaborate HTML artifacts using React, Tailwind CSS, and shadcn/ui.</div>
+      <div class="tag-row"><span class="tag js">React</span></div>
+    </div>
+    <div class="card">
+      <div class="card-name">webapp-testing</div>
+      <div class="card-desc">Toolkit for interacting with and testing local web applications using Playwright.</div>
+      <div class="tag-row"><span class="tag js">Playwright</span></div>
+    </div>
+  </div>
+
+  <h2>Developer Skills</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="card-name">mcp-builder</div>
+      <div class="card-desc">Guide for creating high-quality MCP servers for LLM integration.</div>
+    </div>
+    <div class="card">
+      <div class="card-name">skill-creator</div>
+      <div class="card-desc">Create new skills, modify existing skills, and measure skill performance.</div>
+    </div>
+  </div>
+
+  <footer>
+    <p>JS Agent — Browser-first AI agent with pure JavaScript execution. No bundler. No Python.</p>
+    <p style="margin-top:8px;"><a href="https://github.com/samuelishida/js-agent">GitHub</a> · <a href="agentic-search-arch.html">Architecture</a></p>
+  </footer>
+</body>
+</html>

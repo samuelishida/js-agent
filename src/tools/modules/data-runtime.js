@@ -60,7 +60,10 @@
 
     async function storageSet({ key, value }) {
       const k = String(key || '').trim();
-      if (!k) return formatToolResult('storage_set', 'ERROR: storage_set requires a non-empty key.');
+      if (!k) {
+        // Return error but don't count as a repeated tool call — empty key is a malformed call, not a loop
+        return formatToolResult('storage_set', 'ERROR: storage_set requires a non-empty key. Pass key="your_key_name".');
+      }
       const v = String(value ?? '');
       try {
         localStorage.setItem(k, v);

@@ -20,6 +20,73 @@
       return rootId;
     }
 
+    // ── Server sandbox helpers (fallback when no File System Access API) ──
+    async function callSandboxApi(payload) {
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (window.__terminalToken) headers['Authorization'] = `Bearer ${window.__terminalToken}`;
+        const response = await fetch('/api/terminal-files', { method: 'POST', headers, body: JSON.stringify(payload) });
+        const text = await response.text();
+        if (!response.ok) throw new Error(text || `HTTP ${response.status}`);
+        try { return JSON.parse(text); } catch { return { ok: true, result: text }; }
+      } catch (e) {
+        return { ok: false, error: e?.message || String(e) };
+      }
+    }
+
+    async function readSandboxFile(sandboxPath) {
+      const cleanPath = String(sandboxPath || '').replace(/^agent-sandbox[\\/]/, '');
+      if (!cleanPath) return { ok: false, error: 'No path provided' };
+      const result = await callSandboxApi({
+        command: `cat "agent-sandbox/${cleanPath}"`,
+        files: []
+      });
+      if (result.ok && result.result) {
+        // Extract content after the CWD line
+        const output = String(result.result || '');
+        const match = output.match(/CWD:[^\n]*\n\n([\s\S]*)$/);
+        if (match) return { ok: true, content: match[1] };
+        return { ok: true, content: output };
+      }
+      return { ok: false, error: result.error || 'Failed to read sandbox file' };
+    }
+
+    async function writeSandboxFile(sandboxPath, content) {
+      const cleanPath = String(sandboxPath || '').replace(/^agent-sandbox[\\/]/, '');
+      if (!cleanPath) return { ok: false, error: 'No path provided' };
+      // Encode content as base64 for safe transport
+      let contentB64;
+      if (typeof TextEncoder !== 'undefined') {
+        const bytes = new TextEncoder().encode(content);
+        const CHUNK = 8192;
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          const slice = bytes.subarray(i, Math.min(i + CHUNK, bytes.length));
+          binary += String.fromCharCode.apply(null, slice);
+        }
+        contentB64 = btoa(binary);
+      } else {
+        contentB64 = btoa(encodeURIComponent(content).replace(/%([0-9A-F]{2})/g, (_, p1) => String.fromCharCode(parseInt(p1, 16))));
+      }
+      const result = await callSandboxApi({
+        command: `echo "Wrote ${cleanPath}"`,
+        files: [{ path: `agent-sandbox/${cleanPath}`, content: contentB64, mode: 0o644 }]
+      });
+      if (result.ok) {
+        return { ok: true, path: `agent-sandbox/${cleanPath}` };
+      }
+      return { ok: false, error: result.error || 'Failed to write sandbox file' };
+    }
+
+    async function appendSandboxFile(sandboxPath, content) {
+      const cleanPath = String(sandboxPath || '').replace(/^agent-sandbox[\\/]/, '');
+      if (!cleanPath) return { ok: false, error: 'No path provided' };
+      // Read existing, append, write back
+      const readResult = await readSandboxFile(cleanPath);
+      const existing = readResult.ok ? readResult.content : '';
+      return writeSandboxFile(cleanPath, existing + content);
+    }
+
     function parseVirtualPath(path) {
       const raw = String(path || '').trim();
       if (!raw) return { rootId: state.defaultRootId, segments: [] };
@@ -280,10 +347,29 @@
           blob = new Blob([raw], { type: detectDownloadMime(resolvedName) });
         }
       } else if (path) {
-        const { handle, fileName } = await resolveFile(path, false);
-        const file = await handle.getFile();
-        blob = file;
-        resolvedName = resolvedName || fileName;
+        // Try to read from authorized root first; if none, try agent-sandbox via server
+        try {
+          const { handle, fileName } = await resolveFile(path, false);
+          const file = await handle.getFile();
+          blob = file;
+          resolvedName = resolvedName || fileName;
+        } catch (fsErr) {
+          // No authorized root — try reading from agent-sandbox via server
+          const sandboxPath = path.replace(/^agent-sandbox[\\/]/, '');
+          const result = await readSandboxFile(sandboxPath);
+          if (result.ok) {
+            resolvedName = resolvedName || sandboxPath.split(/[\\/]/).pop() || 'download';
+            const raw = result.content;
+            if (isLikelyBase64(raw)) {
+              const bytes = base64ToUint8Array(raw);
+              blob = bytes ? new Blob([bytes], { type: detectDownloadMime(resolvedName) }) : new Blob([raw], { type: detectDownloadMime(resolvedName) });
+            } else {
+              blob = new Blob([raw], { type: detectDownloadMime(resolvedName) });
+            }
+          } else {
+            return formatToolResult('fs_download_file', `ERROR: No content or path provided, and no authorized folder. ${fsErr?.message || ''}`);
+          }
+        }
       } else {
         return formatToolResult('fs_download_file', 'ERROR: No content or path provided.');
       }
@@ -671,6 +757,12 @@
         return formatToolResult('fs_write_file', 'ERROR: content argument missing — likely caused by JSON truncation while generating large file content. Split the content into smaller chunks and retry, or use a separate tool call for each section.');
       }
       if (!supportsFsAccess()) {
+        // No File System Access API — write to agent-sandbox via server fallback
+        const result = await writeSandboxFile(path, String(content || ''));
+        if (result.ok) {
+          const fallbackName = String(path || 'download.txt').split(/[\\/]/).pop() || 'download.txt';
+          return formatToolResult('fs_write_file', `Wrote to server sandbox: ${result.path} (no local folder authorized). Use fs_download_file(path="${result.path}") to download.`);
+        }
         const fallbackName = String(path || 'download.txt').split(/[\\/]/).pop() || 'download.txt';
         return downloadFile({ content, filename: fallbackName });
       }
@@ -695,6 +787,11 @@
         return formatToolResult('fs_append_file', 'ERROR: content argument missing — likely caused by JSON truncation while generating large file content. Split the content into smaller chunks and retry.');
       }
       if (!supportsFsAccess()) {
+        // No File System Access API — append to agent-sandbox via server fallback
+        const result = await appendSandboxFile(path, String(content || ''));
+        if (result.ok) {
+          return formatToolResult('fs_append_file', `Appended to server sandbox: ${result.path} (no local folder authorized).`);
+        }
         return formatToolResult('fs_append_file', 'ERROR: File System Access API not available. Use fs_write_file with a small content chunk, or use fs_download_file with content= to trigger a browser download.');
       }
 

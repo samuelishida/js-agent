@@ -59,8 +59,19 @@
     }
 
     async function storageSet({ key, value }) {
-      localStorage.setItem(String(key), String(value ?? ''));
-      return formatToolResult('storage_set', `Saved ${key}`);
+      const k = String(key || '').trim();
+      if (!k) return formatToolResult('storage_set', 'ERROR: storage_set requires a non-empty key.');
+      const v = String(value ?? '');
+      try {
+        localStorage.setItem(k, v);
+        return formatToolResult('storage_set', `Saved ${k} (${v.length} chars)`);
+      } catch (e) {
+        const msg = e?.message || String(e);
+        if (msg.includes('quota') || msg.includes('QuotaExceededError') || msg.includes('exceeded')) {
+          return formatToolResult('storage_set', `ERROR: localStorage quota exceeded for key '${k}'. Value is ${v.length} chars — use runtime_generateFile with content= instead of storageKey.`);
+        }
+        return formatToolResult('storage_set', `ERROR: Failed to save key '${k}': ${msg}`);
+      }
     }
 
     function loadTodos() {

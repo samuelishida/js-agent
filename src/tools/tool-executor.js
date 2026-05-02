@@ -398,10 +398,18 @@
     const payload = { command: runCmd, cwd, files: [] };
     if (resolvedContent) {
       // Encode script content as UTF-8 bytes → base64, so Unicode survives btoa
+      // Use chunked encoding to avoid call stack overflow on large scripts
       let contentB64;
       if (typeof TextEncoder !== 'undefined') {
         const bytes = new TextEncoder().encode(resolvedContent);
-        contentB64 = btoa(String.fromCharCode(...bytes));
+        // Chunked btoa to avoid Maximum call stack size exceeded on large payloads
+        const CHUNK = 8192;
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          const slice = bytes.subarray(i, Math.min(i + CHUNK, bytes.length));
+          binary += String.fromCharCode.apply(null, slice);
+        }
+        contentB64 = btoa(binary);
       } else {
         contentB64 = btoa(encodeURIComponent(resolvedContent).replace(/%([0-9A-F]{2})/g, (_, p1) => String.fromCharCode(parseInt(p1, 16))));
       }

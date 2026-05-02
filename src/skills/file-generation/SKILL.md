@@ -16,6 +16,8 @@ Binary file generation requires TWO separate tool calls:
 
 **NEVER try to pass base64 in tool arguments — it will be truncated!**
 
+**For large scripts**: Pass the script content directly in the `content` parameter of `runtime_generateFile`. Do NOT use `storage_set` + `storageKey` for large scripts — localStorage has a ~5MB quota and will fail. The `content` parameter handles scripts of any size.
+
 ## Decision Tree
 
 ```
@@ -43,7 +45,7 @@ Script path format: `agent-sandbox/gen.cjs` (NOT `gen.js`)
 Use `runtime_generateFile` with your Node.js script as `content`:
 
 ```javascript
-// filepath: agent-sandbox/gen_docx.js
+// filepath: agent-sandbox/gen_docx.cjs
 const { Document, Packer, Paragraph, TextRun } = require('docx');
 
 const doc = new Document({
@@ -64,7 +66,7 @@ Packer.toBase64String(doc).then(b64 => process.stdout.write(b64));
 
 ```javascript
 // Tool: runtime_runTerminal
-// Command: node agent-sandbox/gen_docx.js
+// Command: node agent-sandbox/gen_docx.cjs
 ```
 
 The tool result will contain `base64:<long_string>` in the output. Extract this.
@@ -134,7 +136,7 @@ pres.writeFile({ fileName: 'agent-sandbox/temp.pptx' }).then(() => {
 |-------|-------|-----|
 | `MODULE_NOT_FOUND` | Script uses wrong require path | Use `require('docx')` not relative paths |
 | `Exit code: 1` | Syntax error in script | Test script in terminal first |
-| `storage_set Saved undefined` | Script content too long | Use `runtime_generateFile` with `content` instead |
+| `storage_set ERROR: quota exceeded` | Script content too long for localStorage | Use `runtime_generateFile` with `content` instead |
 | `Command too long` | Command exceeds 4096 chars | Use `runtime_generateFile` to write script first |
 
 ## What NOT To Do

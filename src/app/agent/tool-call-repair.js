@@ -13,7 +13,81 @@ function completeToolCallArgs(call, { messages = [], userMessage = '' } = {}) {
     }
   }
 
+  // storage_set with empty key — recover from recent messages, or drop if fully empty
+  if (normalized.tool === 'storage_set' && !String(normalized.args?.key || '').trim()) {
+    const hasValue = String(normalized.args?.value ?? '').trim();
+    if (!hasValue) {
+      // Completely empty call (no key, no value) — drop to prevent repair loop.
+      // The model will see no tool result and should self-correct next round.
+      return null;
+    }
+    const recoveredKey = recoverStorageKeyFromMessages(messages);
+    if (recoveredKey) {
+      normalized.args = { ...normalized.args, key: recoveredKey };
+    }
+  }
+
+  // fs_download_file with no content or path — recover base64 from recent runtime_generateFile
+  if (normalized.tool === 'fs_download_file'
+      && !String(normalized.args?.content || '').trim()
+      && !String(normalized.args?.path || '').trim()) {
+    const recovered = recoverDownloadContentFromMessages(messages);
+    if (recovered.content) normalized.args = { ...normalized.args, content: recovered.content };
+    if (recovered.filename) normalized.args = { ...normalized.args, filename: recovered.filename };
+  }
+
   return normalized;
+}
+
+/**
+ * Scan recent messages for a previously-used storage_set key.
+ * Looks for: storage_set(key="..."), storage_set({"key":"..."}), or runtime_generateFile storageKey references.
+ */
+function recoverStorageKeyFromMessages(messages) {
+  if (!Array.isArray(messages)) return '';
+  // Walk backwards through messages looking for a storage_set key
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    const content = String(msg?.content || '');
+    // Match storage_set result: "Saved some_key (N chars)"
+    let m = content.match(/^## storage_set\b[^]*?\n\nSaved (\S+)\s/);
+    if (m) return m[1];
+    // Match storage_set(key="...") in tool_call blocks
+    m = content.match(/storage_set\s*\(\s*\{[^}]*"key"\s*:\s*"([^"]+)"/);
+    if (m) return m[1];
+    // Match runtime_generateFile storageKey reference
+    m = content.match(/"storageKey"\s*:\s*"([^"]+)"/);
+    if (m) return m[1];
+  }
+  return '';
+}
+
+/**
+ * Scan recent messages for base64 content from runtime_generateFile output.
+ * Returns { content, filename } if found.
+ */
+function recoverDownloadContentFromMessages(messages) {
+  if (!Array.isArray(messages)) return {};
+  // Walk backwards through messages
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    const content = String(msg?.content || '');
+    // Match runtime_generateFile base64 output: "base64:AAAA..."
+    let m = content.match(/base64:([A-Za-z0-9+/=]{40,})/);
+    if (m) {
+      // Try to find a filename from nearby context
+      let filename = '';
+      const fnMatch = content.match(/([^/\s"'\\]+\.[a-z]{3,5})/i);
+      if (fnMatch) filename = fnMatch[1];
+      return { content: m[1], filename };
+    }
+    // Match fs_download_file result for filename hint
+    m = content.match(/Triggered browser download for (\S+)/);
+    if (m && !content.includes('ERROR')) {
+      return { content: '', filename: m[1] };
+    }
+  }
+  return {};
 }
 
 function shouldAttemptToolCallRepair({ rawReply = '', cleanReply = '', thinkingBlocks = [] } = {}) {

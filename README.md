@@ -4,7 +4,7 @@
   <img src="assets/logo.svg" alt="js-agent logo" width="320">
 </p>
 
-Browser-first multi-step AI agent. No bundler. Local or cloud LLM. Modular tool runtime with 90+ tools across 5 runtime families. Runs from a single dev server command.
+Browser-first multi-step AI agent. No bundler. Local or cloud LLM. Modular tool runtime with 86 tools across 5 runtime families. Runs from a single dev server command.
 
 ## Running
 
@@ -79,7 +79,7 @@ Agent/
     ├── skills/
     │   ├── skill-loader.js   → window.AgentSkillLoader (methodology/expertise loader)
     │   ├── skills-manifest.json                        (built-in skill catalog)
-    │   └── algorithmic-art/, pdf/, xlsx/, ...          (16 .md skill dirs)
+    │   └── algorithmic-art/, pdf/, xlsx/, ...          (17 .md skill dirs)
      │   └── app/
      │       ├── core/                # state.js, constants.js, permissions.js, provider-state.js
      │       ├── agent/              # agent.js, round-controller.js, session-lifecycle.js, error-recovery.js, tool-call-repair.js
@@ -269,29 +269,19 @@ Tool outputs are untrusted. The loop detects prompt-injection patterns in tool r
 
 - Shell expansion (`$HOME`, backticks, `|`, `&`) is rejected
 - UNC paths (`\\server\share`, `//server/share`) are blocked
+- Windows 8.3 short names (`~1`, `~A`, etc.) are detected and blocked
 - Glob patterns on write operations are rejected
 - Dangerous removal paths (`/`, `/etc`, `C:\`) are blocked
 
 ## Verification
 
 ```bash
-npm run test:smoke          # 118 checks — runtime, LLM utils, context, all modules
-npm run test:tools-smoke   # tools, snapshot, memory
-
-node --check src/app/agent/agent.js
-node --check src/app/llm/llm.js
-node --check src/core/orchestrator.js
-node --check src/app/core/constants.js
-node --check src/app/core/state.js
-node --check src/app/core/permissions.js
-node --check src/app/context/compaction.js
-node --check src/app/context/steering.js
-node --check src/app/tools/tool-execution.js
-node --check src/app/tools/filesystem-guards.js
-node --check src/app/reply-analysis.js
-node --check src/app/ui/ui-render.js
-node --check src/app/llm/child-agent.js
-node --check src/app/app-init.js
+npm run test:smoke          # 122 checks — runtime, LLM utils, context, all modules
+npm run test:tools-smoke    # tools, snapshot, memory
+npm run test:security       # security hardening tests
+npm run test:skills-smoke   # skill script validation (24 scripts, 16 SKILL.md files)
+npm run check:js            # syntax-check 35 core source files
+npm run check:skills-scripts # syntax-check 24 skill scripts
 ```
 
 ```bash

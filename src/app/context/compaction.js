@@ -2,16 +2,28 @@
 // Keeps the extracted compaction boundary while publishing a browser-friendly
 // window API for the current plain-script runtime.
 ;(function() {
+  /** @type {Function} */
   const C = () => window.CONSTANTS || {};
 
+  /** @type {number} */
   let runMaxOutputTokensRecoveryCount = 0;
+  /** @type {Set<string>} */
   let runCompactedResultNoticeSignatures = new Set();
+  /** @type {Map<string, number>} */
   let repeatedToolCallCounts = new Map();
+  /** @type {Map<string, number>} */
   let toolFailureCounts = new Map();
+  /** @type {string[]} */
   let promptInjectionSignals = [];
 
+  /** @type {number} */
   const CHAR_TOKEN_RATIO = 3.5;
 
+  /**
+   * Estimate token count from text.
+   * @param {string|string[]} text - Text to estimate
+   * @returns {number} Estimated tokens
+   */
   function estimateTokens(text) {
     if (Array.isArray(text)) {
       return text.reduce((sum, part) => sum + estimateTokens(part?.text || part), 0);
@@ -23,16 +35,30 @@
     return Math.ceil(wsTokens * 1.3 + punctTokens * 0.5 + lineBreaks * 0.3);
   }
 
+  /**
+   * Calculate context size in characters.
+   * @param {import('../../types/index.js').SessionMessage[]} [messages=[]] - Messages
+   * @returns {number} Character count
+   */
   function ctxSize(messages = []) {
     return (Array.isArray(messages) ? messages : [])
       .reduce((total, message) => total + String(message?.content || '').length, 0);
   }
 
+  /**
+   * Estimate token count for a message array.
+   * @param {import('../../types/index.js').SessionMessage[]} [messages=[]] - Messages
+   * @returns {number} Estimated tokens
+   */
   function ctxTokenEstimate(messages = []) {
     return (Array.isArray(messages) ? messages : [])
       .reduce((total, message) => total + estimateTokens(message?.content), 0);
   }
 
+  /**
+   * Reset compaction state for a new run.
+   * @returns {void}
+   */
   function resetCompactionState() {
     runMaxOutputTokensRecoveryCount = 0;
     runCompactedResultNoticeSignatures = new Set();
@@ -40,10 +66,19 @@
     toolFailureCounts = new Map();
   }
 
+  /**
+   * Reset prompt injection state.
+   * @returns {void}
+   */
   function resetPromptInjectionState() {
     promptInjectionSignals = [];
   }
 
+  /**
+   * Get a deterministic signature for a tool call.
+   * @param {import('../../types/index.js').ToolCall} call - Tool call
+   * @returns {string} Signature string
+   */
   function getCallSignature(call) {
     const TE = window.AgentToolExecution;
     if (TE?.getToolCallSignature) return TE.getToolCallSignature(call);
@@ -53,6 +88,11 @@
     return `${String(call?.tool || 'unknown')}:${stableArgs}`;
   }
 
+  /**
+   * Record a repeated tool call.
+   * @param {import('../../types/index.js').ToolCall} call - Tool call
+   * @returns {{signature: string, count: number, repeated: boolean}} Repeat state
+   */
   function recordRepeatedToolCall(call) {
     const signature = getCallSignature(call);
     const nextCount = Number(repeatedToolCallCounts.get(signature) || 0) + 1;
@@ -64,6 +104,12 @@
     };
   }
 
+  /**
+   * Record a tool failure.
+   * @param {import('../../types/index.js').ToolCall} call - Tool call
+   * @param {string} result - Tool result
+   * @returns {{signature: string, count: number, repeated: boolean}} Failure state
+   */
   function recordToolFailure(call, result) {
     const signature = getCallSignature(call);
     if (/^ERROR\b/i.test(String(result || ''))) {
@@ -84,6 +130,12 @@
     };
   }
 
+  /**
+   * Extract prompt injection signals from a tool result.
+   * @param {import('../../types/index.js').ToolCall} toolCall - Tool call
+   * @param {string} result - Tool result
+   * @returns {string[]} Detected signals
+   */
   function extractPromptInjectionSignals(toolCall, result) {
     const signals = [];
     const text = String(result || '');
@@ -97,6 +149,11 @@
     return signals;
   }
 
+  /**
+   * Register prompt injection signals.
+   * @param {string[]} [signals=[]] - Signals to register
+   * @returns {string[]} Registered signals
+   */
   function registerPromptInjectionSignals(signals = []) {
     for (const signal of Array.isArray(signals) ? signals : []) {
       const text = String(signal || '').trim();
@@ -109,6 +166,11 @@
     return promptInjectionSignals.slice();
   }
 
+  /**
+   * Sanitize a tool result by stripping injection tags.
+   * @param {string} result - Raw result
+   * @returns {string} Sanitized result
+   */
   function sanitizeToolResult(result) {
     const text = String(result || '');
     const patterns = C().INJECTION_PATTERNS || {};
@@ -119,6 +181,12 @@
       .trim();
   }
 
+  /**
+   * Apply context budget to a tool result.
+   * @param {import('../../types/index.js').ToolCall} toolCall - Tool call
+   * @param {string} result - Tool result
+   * @returns {string} Compacted result
+   */
   function applyToolResultContextBudget(toolCall, result) {
     const text = sanitizeToolResult(result);
     const budget = C().TOOL_RESULT_CONTEXT_BUDGET || {};
@@ -144,6 +212,15 @@
     return `${head}\n\n[${String(toolCall?.tool || 'tool')} result compacted; omitted ${omitted} chars]\n\n${tail}`;
   }
 
+  /**
+   * Microcompact tool result messages to preserve context.
+   * @param {import('../../types/index.js').SessionMessage[]} [messages=[]] - Messages
+   * @param {Object} [options] - Options
+   * @param {number} [options.keepRecent] - Number of recent results to keep
+   * @param {boolean} [options.clearOnly] - Only clear, don't compact
+   * @param {string} [options.clearedNotice] - Notice text
+   * @returns {{messages: import('../../types/index.js').SessionMessage[], clearedCount: number, savedChars: number}} Compaction result
+   */
   function microcompactToolResultMessages(messages = [], options = {}) {
     const keepRecent = Math.max(0, Number(options.keepRecent || 0));
     const clearOnly = !!options.clearOnly;
@@ -191,6 +268,11 @@
     return { messages: nextMessages, clearedCount, savedChars };
   }
 
+  /**
+   * Build a summary of tool use from batch results.
+   * @param {import('../../types/index.js').BatchResult[]} [batchResults=[]] - Batch results
+   * @returns {string} Summary text
+   */
   function buildToolUseSummary(batchResults = []) {
     const lines = (Array.isArray(batchResults) ? batchResults : []).map(({ call, result }) => {
       const tool = String(call?.tool || 'tool');

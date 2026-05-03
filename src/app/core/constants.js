@@ -1,7 +1,105 @@
+// src/app/core/constants.js
 // Centralized constants — replaces magic numbers inline in agent.js
 // and sibling modules. Both patterns are supported: named import (for future
 // bundler migration) and window property (for current defer-tag loading).
+
+/**
+ * @typedef {Object} AgentConstants
+ * @property {Object} TOOL_RESULT_CONTEXT_BUDGET
+ * @property {Object} CONTEXT_COMPACTION_POLICY
+ * @property {Object} TIME_BASED_MICROCOMPACT_POLICY
+ * @property {number} PERMISSION_DENIAL_LIMIT
+ * @property {number} PROMPT_INJECTION_SIGNAL_LIMIT
+ * @property {Object} PERMISSION_ESCALATION_THRESHOLDS
+ * @property {number} MAX_CONSECUTIVE_NON_ACTION_ROUNDS
+ * @property {string} TOOL_RESULT_REPLACEMENTS_STORAGE_KEY
+ * @property {number} STEERING_CHAR_LIMIT
+ * @property {number} MAX_OUTPUT_TOKEN_RECOVERY_ATTEMPTS
+ * @property {number} TOOL_CALL_REPAIR_MAX_TOKENS
+ * @property {number} TOOL_CALL_REPAIR_TEMPERATURE
+ * @property {number} TOOL_CALL_REPAIR_TIMEOUT_MS_LOCAL
+ * @property {number} TOOL_CALL_REPAIR_TIMEOUT_MS_CLOUD
+ * @property {number} TOOL_CALL_REPAIR_RETRIES_LOCAL
+ * @property {number} TOOL_CALL_REPAIR_RETRIES_CLOUD
+ * @property {number} DEFAULT_MAX_TOKENS_LOCAL
+ * @property {number} DEFAULT_MAX_TOKENS_CLOUD
+ * @property {number} DEFAULT_TIMEOUT_MS_LOCAL
+ * @property {number} DEFAULT_TIMEOUT_MS_CLOUD
+ * @property {number} DEFAULT_RETRIES_LOCAL
+ * @property {number} DEFAULT_RETRIES_CLOUD
+ * @property {number} SUMMARY_MAX_TOKENS
+ * @property {number} SUMMARY_TEMPERATURE
+ * @property {number} SUMMARY_TIMEOUT_MS
+ * @property {number} SUMMARY_RETRIES
+ * @property {number} SUMMARY_CACHE_TTL_MS
+ * @property {number} SUMMARY_CACHE_MAX_ENTRIES
+ * @property {number} SUMMARY_CACHE_MAX_BYTES
+ * @property {string} CACHE_SCOPE_TOOL_HOT
+ * @property {string} CACHE_SCOPE_TOOL_RESULT_DIGEST
+ * @property {string} CACHE_SCOPE_TOOL_RESULT_ARCHIVE
+ * @property {string} CACHE_SCOPE_CONTEXT_SUMMARY
+ * @property {number} TOOL_RESULT_DIGEST_TTL_MS
+ * @property {number} TOOL_RESULT_ARCHIVE_TTL_MS
+ * @property {number} TOOL_RESULT_ARCHIVE_MAX_ENTRIES
+ * @property {number} TOOL_RESULT_ARCHIVE_MAX_BYTES
+ * @property {number} TOOL_RESULT_DIGEST_MAX_ENTRIES
+ * @property {number} TOOL_RESULT_DIGEST_MAX_BYTES
+ * @property {number} TOOL_HOT_TTL_READONLY_MS
+ * @property {number} TOOL_HOT_TTL_WRITABLE_MS
+ * @property {number} TOOL_HOT_MAX_ENTRIES_READONLY
+ * @property {number} TOOL_HOT_MAX_ENTRIES_WRITABLE
+ * @property {number} TOOL_HOT_MAX_BYTES
+ * @property {number} CHILD_AGENT_MAX_ITERATIONS
+ * @property {number} CHILD_AGENT_MAX_TOKENS
+ * @property {number} CHILD_AGENT_TEMPERATURE
+ * @property {number} CHILD_AGENT_TIMEOUT_MS
+ * @property {number} CHILD_AGENT_RETRIES
+ * @property {number} WORKER_MAX_TASKS
+ * @property {number} WORKER_MAX_WORKERS
+ * @property {number} WORKER_DEFAULT_MAX_TOKENS
+ * @property {number} WORKER_DEFAULT_TEMPERATURE
+ * @property {number} WORKER_TIMEOUT_MS
+ * @property {number} WORKER_RETRIES
+ * @property {number} WORKER_OUTPUT_MAX_CHARS
+ * @property {number} WORKER_ERROR_MAX_CHARS
+ * @property {string} WORKER_RUNS_STORAGE_KEY
+ * @property {number} WORKER_RUNS_LIMIT
+ * @property {number} SESSION_TITLE_MAX_CHARS
+ * @property {number} MEMORY_CONTENT_MAX_CHARS
+ * @property {number} WORKER_CONTEXT_SNIPPET_MAX_CHARS
+ * @property {number} QUERY_PLAN_MAX_CHARS
+ * @property {number} HINTS_MAX_CHARS
+ * @property {number} NOTE_MAX_CHARS
+ * @property {number} NOTIFICATION_TITLE_MAX_CHARS
+ * @property {number} NOTIFICATION_BODY_MAX_CHARS
+ * @property {number} TOOL_RESULT_PREVIEW_MAX_CHARS
+ * @property {number} TOOL_RESULT_DIGEST_HEAD_CHARS
+ * @property {number} TOOL_RESULT_DIGEST_TAIL_CHARS
+ * @property {number} TOOL_RESULT_ARCHIVE_TRUNCATE_CHARS
+ * @property {number} DETAILED_ERROR_MAX_CHARS
+ * @property {number} SESSION_SAVE_DEBOUNCE_MS
+ * @property {number} TOOL_CACHE_TTL_MS
+ * @property {number} PROBE_TIMEOUT_MS
+ * @property {number} PREFETCH_TIMEOUT_MS
+ * @property {number} PREFETCH_WAIT_MS
+ * @property {Object} INJECTION_PATTERNS
+ * @property {string[]} SANITIZE_STRING_ARGS
+ * @property {Set<string>} WEB_SEARCH_STOPWORDS
+ * @property {string} TASKS_STORAGE_KEY
+ * @property {string} TODOS_STORAGE_KEY
+ * @property {string} RUNTIME_MEMORY_GLOBAL_KEY
+ * @property {string} RUNTIME_MEMORY_PROJECT_PREFIX
+ * @property {number} MAX_TOOL_CALLS_PER_REPLY
+ * @property {number} MAX_STORED_REPLACEMENTS
+ * @property {number} DEFAULT_ROUND_LIMIT
+ * @property {number} DEFAULT_CTX_LIMIT_CHARS
+ * @property {number} MAX_CTX_LIMIT_CHARS
+ * @property {number} DEFAULT_DELAY_MS
+ * @property {Object} RATE_LIMIT_CONFIG
+ */
+
 (function() {
+  /** @type {AgentConstants} */
   const C = {
     // ── Tool result context budget ───────────────────────────────────
     TOOL_RESULT_CONTEXT_BUDGET: {

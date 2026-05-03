@@ -1,4 +1,8 @@
+// src/app/ui/ui-render.js
+// UI rendering utilities: markdown, HTML sanitization, and message rendering.
+
 ;(function() {
+  /** @type {Set<string>} */
   var SAFE_HTML_TAGS = new Set([
     'p', 'br', 'strong', 'em', 'b', 'i', 'u', 's',
     'ul', 'ol', 'li', 'code', 'pre', 'blockquote',
@@ -6,16 +10,27 @@
     'h1', 'h2', 'h3', 'h4', 'hr', 'div', 'span'
   ]);
 
+  /** @type {Object<string, Set<string>>} */
   var SAFE_HTML_ATTRS = {
     a: new Set(['href', 'title']),
     th: new Set(['colspan', 'rowspan']),
     td: new Set(['colspan', 'rowspan'])
   };
 
+  /**
+   * Escape HTML entities.
+   * @param {any} s - Text to escape
+   * @returns {string} Escaped HTML
+   */
   function escHtml(s) {
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
+  /**
+   * Check if text contains Markdown syntax.
+   * @param {string} text - Text to check
+   * @returns {boolean} True if contains markdown
+   */
   function containsMarkdown(text) {
     var s = String(text || '');
     return (
@@ -31,14 +46,29 @@
     );
   }
 
+  /**
+   * Check if text looks like an HTML fragment.
+   * @param {string} text - Text to check
+   * @returns {boolean} True if HTML-like
+   */
   function looksLikeHtmlFragment(text) {
     return /<\/?[a-z][^>]*>/i.test(String(text || ''));
   }
 
+  /**
+   * Escape inline HTML.
+   * @param {string} text - Text to escape
+   * @returns {string} Escaped text
+   */
   function escapeInlineHtml(text) {
     return escHtml(String(text || ''));
   }
 
+  /**
+   * Render inline Markdown to HTML.
+   * @param {string} text - Markdown text
+   * @returns {string} HTML string
+   */
   function renderInlineMarkdown(text) {
     var value = escapeInlineHtml(text);
     value = value.replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -50,6 +80,11 @@
     return value;
   }
 
+  /**
+   * Render Markdown blocks to HTML.
+   * @param {string} text - Markdown text
+   * @returns {string} HTML string
+   */
   function renderMarkdownBlocks(text) {
     var source = String(text || '').replace(/\r\n/g, '\n').trim();
     if (!source) return '<p></p>';

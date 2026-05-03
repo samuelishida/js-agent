@@ -136,9 +136,9 @@ function shouldAttemptToolCallRepair({ rawReply = '', cleanReply = '', thinkingB
   // to avoid infinite loops where repair keeps triggering on model narration
   if (thinkingSaysFinal) return false;
 
-  // Skip repair on apology / final-answer text — the model already gave up,
-  // repairing it just burns a round with no benefit
-  if (/^(I apologize|I'm sorry|I cannot|I am unable|Unfortunately,? I|Since I cannot)/i.test(visible)) return false;
+  // Skip repair on apology / final-answer / give-up text — the model already
+  // conceded, repairing it just burns a round with no benefit
+  if (/^(I apologize|I'm sorry|I cannot|I am unable|Unfortunately,? I|Since I cannot|The repeated attempts|As a result,? I|Due to)/i.test(visible)) return false;
 
   if (looksLikeDeferredActionReply(visible)) return true;
   if (looksLikeToolExecutionClaimWithoutCall(visible)) return true;

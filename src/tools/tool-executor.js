@@ -520,6 +520,19 @@
         return formatToolResult('runtime_generateFile', `base64:${b64}\n[Auto-download failed: ${e.message}. Use fs_download_file(filename="output.docx", storageKey="__last_generated_base64__") to download.]`);
       }
     }
+    // If node failed, make the error actionable instead of just dumping raw output
+    if (!b64 && rawOutput) {
+      // Detect SyntaxError from raw newlines in JS strings — common model mistake
+      if (/SyntaxError.*Invalid or unexpected token/i.test(rawOutput)) {
+        return formatToolResult('runtime_generateFile', `HINT: Your script has a SyntaxError — most likely raw newlines inside a double-quoted string. JS strings cannot span multiple lines with real newlines.\n\nFix: Use backtick template literals (\`...\`) for multi-line text, or use \\n escape sequences.\n\nExample:\n  const text = \`line 1\nline 2\nline 3\`;  // ← backticks, not quotes\n\nRewrite your script with backtick strings and try again.`);
+      }
+      // Detect MODULE_NOT_FOUND
+      if (/MODULE_NOT_FOUND|Cannot find module/i.test(rawOutput)) {
+        const modMatch = rawOutput.match(/Cannot find module\s+'([^']+)'/i);
+        const missing = modMatch ? modMatch[1] : 'unknown';
+        return formatToolResult('runtime_generateFile', `HINT: Module "${missing}" is not installed. Use a library that IS available (pdfkit, docx, exceljs, puppeteer, sharp, canvas).\n\nRewrite your script to use pdfkit (already installed) and try again.`);
+      }
+    }
     return formatToolResult('runtime_generateFile', rawOutput || 'Script executed.');
   }
   async function runtimeEditFile(args = {}) { return editLocalFile({ path: args.path, oldText: args.oldString ?? args.oldText, newText: args.newString ?? args.newText, replaceAll: args.replaceAll === true }); }

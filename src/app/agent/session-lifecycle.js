@@ -1,10 +1,22 @@
 // src/app/agent/session-lifecycle.js
 // Session lifecycle, stop control, UI helpers, and run guards.
 
+/** @typedef {import('../../types/index.js').SessionMessage} SessionMessage */
+
+/** @type {boolean} */
 let stopRequested = false;
 
+/**
+ * Sleep for a given duration.
+ * @param {number} ms - Milliseconds
+ * @returns {Promise<void>}
+ */
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+/**
+ * Request the agent to stop processing.
+ * @returns {void}
+ */
 function requestStop() {
   if (!window.isBusy) return;
   stopRequested = true;
@@ -15,6 +27,11 @@ function requestStop() {
   window.AgentTools?.abortAllTabListeners?.('Run stopped by user.');
 }
 
+/**
+ * Throw if stop was requested.
+ * @returns {void}
+ * @throws {Error} With code RUN_STOPPED
+ */
 function throwIfStopRequested() {
   if (!stopRequested) return;
   const error = new Error('RUN_STOPPED');
@@ -22,6 +39,11 @@ function throwIfStopRequested() {
   throw error;
 }
 
+/**
+ * Set the stop button UI state.
+ * @param {boolean} running - Whether the agent is running
+ * @returns {void}
+ */
 function setStopButtonState(running) {
   const stopBtn = document.getElementById('btn-stop');
   if (!stopBtn) return;
@@ -31,6 +53,10 @@ function setStopButtonState(running) {
   if (sendBtn) sendBtn.style.display = running ? 'none' : 'flex';
 }
 
+/**
+ * Reset all run guards and state for a new run.
+ * @returns {void}
+ */
 function resetRunGuards() {
   window.AgentToolExecution?.resetRunToolState?.();
   window.AgentRateLimiter?.resetRateLimiter?.();
@@ -40,6 +66,10 @@ function resetRunGuards() {
   stopRequested = false;
 }
 
+/**
+ * Send a user message and start the agent loop.
+ * @returns {Promise<void>}
+ */
 async function sendMessage() {
   if (window.isBusy) return;
   if (!runtimeReady()) {
@@ -108,6 +138,11 @@ async function sendMessage() {
   }
 }
 
+/**
+ * Handle keyboard events in the input field.
+ * @param {KeyboardEvent} e - Keyboard event
+ * @returns {void}
+ */
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
@@ -115,11 +150,21 @@ function handleKey(e) {
   }
 }
 
+/**
+ * Auto-resize a textarea to fit content.
+ * @param {HTMLTextAreaElement} el - Textarea element
+ * @returns {void}
+ */
 function autoResize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
 
+/**
+ * Use an example button's text as input.
+ * @param {HTMLButtonElement} btn - Example button
+ * @returns {void}
+ */
 function useExample(btn) {
   const input = document.getElementById('msg-input');
   input.value = btn.textContent;

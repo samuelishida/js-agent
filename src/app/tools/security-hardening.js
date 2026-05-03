@@ -6,6 +6,11 @@
   'use strict';
 
   // ── Symlink Detection ───────────────────────────────────────────────────────
+  /**
+   * Check if a path looks like a symlink.
+   * @param {string} pathValue - Path to check
+   * @returns {boolean} True if symlink-like
+   */
   function isSymlinkPath(pathValue) {
     const text = String(pathValue || '');
     // Detecta padrões comuns de symlink em paths
@@ -15,6 +20,11 @@
     return false;
   }
 
+  /**
+   * Detect symlink patterns in a path.
+   * @param {string} pathValue - Path to check
+   * @returns {{isSymlink: boolean, segment?: string, reason?: string}} Detection result
+   */
   function detectSymlinkInPath(pathValue) {
     const normalized = String(pathValue || '').replace(/[\\/]+/g, '/').trim();
     const segments = normalized.split('/').filter(Boolean);
@@ -27,6 +37,11 @@
   }
 
   // ── URL-encoded Path Normalization ──────────────────────────────────────────
+  /**
+   * Normalize a URL-encoded path.
+   * @param {string} pathValue - Path to normalize
+   * @returns {string} Normalized path
+   */
   function normalizeUrlEncodedPath(pathValue) {
     let text = String(pathValue || '');
     try {
@@ -46,11 +61,20 @@
     return text;
   }
 
+  /**
+   * Check if a path contains URL encoding.
+   * @param {string} pathValue - Path to check
+   * @returns {boolean} True if URL-encoded
+   */
   function containsUrlEncoding(pathValue) {
     return /%[0-9A-Fa-f]{2}/.test(String(pathValue || ''));
   }
 
   // ── CSP Headers ─────────────────────────────────────────────────────────────
+  /**
+   * Generate CSP security headers.
+   * @returns {Object.<string, string>} CSP headers
+   */
   function generateCSPHeaders() {
     return {
       'Content-Security-Policy': [
@@ -71,6 +95,11 @@
     };
   }
 
+  /**
+   * Apply CSP headers to a response.
+   * @param {Response} response - Fetch response
+   * @returns {Response} Response with CSP headers
+   */
   function applyCSPHeaders(response) {
     const headers = generateCSPHeaders();
     for (const [key, value] of Object.entries(headers)) {
@@ -82,8 +111,15 @@
   }
 
   // ── Request Body Limits ────────────────────────────────────────────────────
+  /** @type {number} */
   const DEFAULT_MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB
 
+  /**
+   * Validate request body size.
+   * @param {string|Object} body - Request body
+   * @param {number} [maxSize=DEFAULT_MAX_BODY_SIZE] - Max size in bytes
+   * @returns {{valid: boolean, reason?: string, size: number, maxSize: number}} Validation result
+   */
   function validateRequestBody(body, maxSize = DEFAULT_MAX_BODY_SIZE) {
     const size = typeof body === 'string' ? body.length : JSON.stringify(body).length;
     if (size > maxSize) {

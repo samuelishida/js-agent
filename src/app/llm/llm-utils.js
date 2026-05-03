@@ -1,8 +1,17 @@
 // src/app/llm/llm-utils.js
 // Shared LLM utilities: SSE parsing, streaming, retry, dedup, message normalization.
 
+/** @typedef {import('../../types/index.js').SessionMessage} SessionMessage */
+
+/** @type {Set<number>} */
 const LLM_RETRY_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
+/**
+ * Check if output is incomplete or garbage.
+ * @param {string} content - Output content
+ * @param {string|null} finishReason - Finish reason
+ * @returns {boolean} True if incomplete/garbage
+ */
 function isIncompleteOrGarbageOutput(content, finishReason) {
   if (finishReason === null || finishReason === 'length') return true;
   if (!content || typeof content !== 'string') return false;
@@ -25,6 +34,11 @@ function isIncompleteOrGarbageOutput(content, finishReason) {
   return false;
 }
 
+/**
+ * Parse SSE chunk into events.
+ * @param {string} chunk - SSE chunk text
+ * @returns {Array<{done: boolean, parsed?: any}>} Parsed events
+ */
 function parseSSEChunk(chunk) {
   const lines = chunk.split('\n');
   const events = [];
@@ -44,6 +58,12 @@ function _combineReasoningContent(fullReasoning, fullContent) {
   return result;
 }
 
+/**
+ * Read Ollama native streaming response.
+ * @param {Response} response - Fetch response
+ * @param {Function} [onChunk] - Chunk callback
+ * @returns {Promise<string|null>} Combined content
+ */
 async function readOllamaNativeStream(response, onChunk) {
   const reader = response.body?.getReader();
   if (!reader) return null;
@@ -106,6 +126,12 @@ async function readOllamaNativeStream(response, onChunk) {
   return _combineReasoningContent(fullReasoning, fullContent);
 }
 
+/**
+ * Read OpenAI-style streaming response.
+ * @param {Response} response - Fetch response
+ * @param {Function} [onChunk] - Chunk callback
+ * @returns {Promise<string|null>} Combined content
+ */
 async function readStreamingResponse(response, onChunk) {
   const reader = response.body?.getReader();
   if (!reader) return null;
@@ -142,6 +168,12 @@ async function readStreamingResponse(response, onChunk) {
   return _combineReasoningContent(fullReasoning, fullContent);
 }
 
+/**
+ * Delay with abort support.
+ * @param {number} ms - Milliseconds
+ * @param {AbortSignal} [signal] - Abort signal
+ * @returns {Promise<void>}
+ */
 function delay(ms, signal) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(signal.reason || new Error('Aborted')); return; }
@@ -150,6 +182,11 @@ function delay(ms, signal) {
   });
 }
 
+/**
+ * Check if an error is retryable.
+ * @param {Error} error - Error object
+ * @returns {boolean} True if retryable
+ */
 function isRetryableError(error) {
   if (!error) return false;
   if (error.name === 'AbortError') return false;
@@ -164,6 +201,16 @@ function isRetryableError(error) {
   return false;
 }
 
+/**
+ * Retry a function with exponential backoff.
+ * @param {Function} fn - Function to retry
+ * @param {Object} [options]
+ * @param {number} [options.maxAttempts=3] - Max attempts
+ * @param {number} [options.baseMs=700] - Base delay
+ * @param {number} [options.maxMs=6000] - Max delay
+ * @param {number} [options.jitterMs=180] - Jitter
+ * @returns {Promise<any>} Function result
+ */
 async function retryWithBackoff(fn, { maxAttempts = 3, baseMs = 700, maxMs = 6000, jitterMs = 180 } = {}) {
   let attempt = 0;
   while (true) {
@@ -178,6 +225,11 @@ async function retryWithBackoff(fn, { maxAttempts = 3, baseMs = 700, maxMs = 600
   }
 }
 
+/**
+ * Validate and normalize a local backend URL.
+ * @param {string} rawUrl - Raw URL string
+ * @returns {{valid: boolean, url: string, reason: string}} Validation result
+ */
 function validateAndNormalizeLocalUrl(rawUrl) {
   const original = String(rawUrl || '').trim();
   if (!original) {

@@ -1,17 +1,40 @@
+// src/app/tools/filesystem-guards.js
+// Filesystem path validation and security guards.
+
 ;(function() {
+  /**
+   * Normalize a path input by trimming and removing surrounding quotes.
+   * @param {any} value - Raw path value
+   * @returns {string} Normalized path
+   */
   function normalizePathInput(value) {
     return String(value || '').trim().replace(/^['"`]+|['"`]+$/g, '').trim();
   }
 
+  /**
+   * Check if a path contains glob patterns.
+   * @param {any} value - Path value
+   * @returns {boolean} True if contains glob
+   */
   function containsGlobPattern(value) {
     return /[*?[\]{}]/.test(String(value || ''));
   }
 
+  /**
+   * Check if a path is a vulnerable UNC path.
+   * @param {any} value - Path value
+   * @returns {boolean} True if vulnerable UNC
+   */
   function containsVulnerableUncPathLight(value) {
     var text = String(value || '');
     return text.startsWith('\\\\') || text.startsWith('//');
   }
 
+  /**
+   * Check if a path has suspicious Windows patterns.
+   * @param {any} value - Path value
+   * @returns {boolean} True if suspicious
+   */
   function hasSuspiciousWindowsPathPattern(value) {
     var text = String(value || '');
     if (!text) return false;
@@ -29,6 +52,11 @@
     return false;
   }
 
+  /**
+   * Check if a removal path is dangerous.
+   * @param {any} pathValue - Path to check
+   * @returns {boolean} True if dangerous
+   */
   function isDangerousRemovalPath(pathValue) {
     var normalized = String(pathValue || '').replace(/[\\/]+/g, '/').trim();
     if (!normalized) return true;
@@ -44,6 +72,11 @@
     return false;
   }
 
+  /**
+   * Get the filesystem operation type for a tool.
+   * @param {string} toolName - Tool name
+   * @returns {'write'|'create'|'read'|'none'} Operation type
+   */
   function getFilesystemOperationType(toolName) {
     var tool = String(toolName || '').trim();
     var writeTools = new Set(['fs_write_file','file_write','write_file','file_edit','edit_file','fs_copy_file','fs_move_file','fs_delete_path','fs_rename_path','fs_mkdir','fs_touch','fs_save_upload','fs_append_file']);
@@ -53,6 +86,12 @@
     return 'none';
   }
 
+  /**
+   * Extract filesystem paths from tool arguments.
+   * @param {string} toolName - Tool name
+   * @param {Object} args - Tool arguments
+   * @returns {Array<{arg: string, path: string}>} Extracted paths
+   */
   function extractFilesystemPathsFromArgs(toolName, args) {
     var tool = String(toolName || '').trim();
     var normalizedArgs = (args && typeof args === 'object' && !Array.isArray(args)) ? Object.assign({}, args) : {};
@@ -76,6 +115,11 @@
     return values;
   }
 
+  /**
+   * Validate a filesystem call against security guards.
+   * @param {import('../../types/index.js').ToolCall} call - Tool call
+   * @returns {{allowed: boolean, reason?: string, path?: string}} Validation result
+   */
   function validateFilesystemCallGuard(call) {
     var operationType = getFilesystemOperationType(call && call.tool);
     if (operationType === 'none') return { allowed: true };

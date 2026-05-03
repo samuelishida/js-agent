@@ -1,6 +1,8 @@
 // src/app/agent/error-recovery.js
 // Error classification, recovery prompt building, and retry logic.
 
+/** @typedef {import('../../types/index.js').SessionMessage} SessionMessage */
+
 /**
  * @typedef {'max_output_tokens' | 'local_timeout' | 'ollama_crash' | 'ollama_incomplete' | 'rate_limit' | 'network' | 'unknown'} ErrorClass
  */

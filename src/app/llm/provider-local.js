@@ -1,11 +1,26 @@
 // src/app/llm/provider-local.js
 // Local / LM Studio provider implementation.
 
+/** @typedef {import('../../types/index.js').SessionMessage} SessionMessage */
+/** @typedef {import('../../types/index.js').LlmCallOptions} LlmCallOptions */
+
+/**
+ * Update the model badge for local backend.
+ * @param {string} modelName - Model name
+ * @returns {void}
+ */
 function updateModelBadgeForLocal(modelName) {
   const badgeModel = document.getElementById('topbar-model');
   if (badgeModel) badgeModel.textContent = `local/${modelName || 'unknown'}`;
 }
 
+/**
+ * Call local LLM backend.
+ * @param {SessionMessage[]} msgs - Messages
+ * @param {AbortSignal} signal - Abort signal
+ * @param {LlmCallOptions} [options={}] - Call options
+ * @returns {Promise<string>} Response content
+ */
 async function callLocal(msgs, signal, options = {}) {
   const modelMaxTokens = typeof getMaxTokensForModel === 'function'
     ? getMaxTokensForModel()

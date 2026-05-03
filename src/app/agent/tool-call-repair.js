@@ -1,6 +1,16 @@
 // src/app/agent/tool-call-repair.js
 // Malformed tool call detection and LLM-based repair.
 
+/** @typedef {import('../../types/index.js').SessionMessage} SessionMessage */
+
+/**
+ * Complete tool call arguments by recovering missing values from context.
+ * @param {import('../../types/index.js').ToolCall} call - Tool call to complete
+ * @param {Object} [opts]
+ * @param {SessionMessage[]} [opts.messages=[]] - Recent messages for context
+ * @param {string} [opts.userMessage=''] - Original user message
+ * @returns {import('../../types/index.js').ToolCall|null} Completed call or null
+ */
 function completeToolCallArgs(call, { messages = [], userMessage = '' } = {}) {
   const TE = window.AgentToolExecution;
   const normalized = TE?.normalizeToolCallObject ? TE.normalizeToolCallObject(call) : null;
@@ -90,6 +100,14 @@ function recoverDownloadContentFromMessages(messages) {
   return {};
 }
 
+/**
+ * Check if a tool call repair should be attempted.
+ * @param {Object} [opts]
+ * @param {string} [opts.rawReply=''] - Raw model reply
+ * @param {string} [opts.cleanReply=''] - Cleaned reply
+ * @param {string[]} [opts.thinkingBlocks=[]] - Thinking blocks
+ * @returns {boolean} True if repair should be attempted
+ */
 function shouldAttemptToolCallRepair({ rawReply = '', cleanReply = '', thinkingBlocks = [] } = {}) {
   const raw = String(rawReply || '').trim();
   const visible = String(cleanReply || '').trim();
@@ -107,6 +125,14 @@ function shouldAttemptToolCallRepair({ rawReply = '', cleanReply = '', thinkingB
   return false;
 }
 
+/**
+ * Attempt to repair malformed tool calls via a repair LLM call.
+ * @param {Object} [opts]
+ * @param {string} [opts.userMessage=''] - User message
+ * @param {string} [opts.rawReply=''] - Raw model reply
+ * @param {SessionMessage[]} [opts.messages=[]] - Message history
+ * @returns {Promise<{rawReply: string, parsedReply: any, reply: string, toolCalls: any[]}|null>} Repaired result
+ */
 async function attemptToolCallRepair({ userMessage = '', rawReply = '', messages = [] } = {}) {
   const TE = window.AgentToolExecution;
   const assistantReply = String(rawReply || '').trim();

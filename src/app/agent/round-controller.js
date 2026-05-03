@@ -1,6 +1,8 @@
 // src/app/agent/round-controller.js
 // Encapsulates one full agent round: LLM → parse → execute → compact.
 
+/** @typedef {import('../../types/index.js').SessionMessage} SessionMessage */
+
 /**
  * @typedef {Object} RoundResult
  * @property {boolean} finalAnswer - Whether the model gave a final answer
@@ -31,6 +33,10 @@ function drainSteering(messages) {
 }
 
 // Build LLM call options based on mode and recovery state.
+/**
+ * Get LLM call options for the current turn.
+ * @returns {import('../../types/index.js').LlmCallOptions & {enabledTools: string[], maxTokens: number}} Turn options
+ */
 function getTurnLlmCallOptions() {
   const Comp = window.AgentCompaction || {};
   const recoverySteps = Math.max(0, Number(Comp.runMaxOutputTokensRecoveryCount || 0));
@@ -383,6 +389,17 @@ async function executeToolBatches({ validToolCalls, reply, rawReply, round, dela
   return { messages, roundToolSummaryChunks, roundPromptInjectionNotes, roundSawPermissionDenied };
 }
 
+/**
+ * Execute a single agent round.
+ * @param {Object} opts
+ * @param {string} opts.userMessage
+ * @param {SessionMessage[]} opts.messages
+ * @param {number} opts.round
+ * @param {number} opts.maxRounds
+ * @param {number} opts.delay
+ * @param {number} opts.consecutiveNonActionRounds
+ * @returns {Promise<RoundResult>}
+ */
 /**
  * Execute a single agent round.
  * @param {Object} opts

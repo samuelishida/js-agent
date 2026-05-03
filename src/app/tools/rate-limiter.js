@@ -2,11 +2,18 @@
 // Enforces configurable maxCallsPerMinute per tool
 
 (() => {
+  /** @type {Function} */
   const C = () => window.CONSTANTS || {};
 
   // ── Rate limiter state ──
+  /** @type {Map<string, {calls: number[], lastReset: number}>} */
   const rateLimiter = new Map();
 
+  /**
+   * Get rate limit config for a tool.
+   * @param {string} toolName - Tool name
+   * @returns {{maxCallsPerMinute: number, windowMs: number}} Rate limit config
+   */
   function getRateLimitConfig(toolName) {
     const config = C().RATE_LIMIT_CONFIG || {};
     const toolConfig = config[toolName] || {};
@@ -16,6 +23,11 @@
     };
   }
 
+  /**
+   * Check if a tool call is rate limited.
+   * @param {string} toolName - Tool name
+   * @returns {{limited: boolean, remaining: number, resetTime?: number}} Rate limit status
+   */
   function isRateLimited(toolName) {
     const config = getRateLimitConfig(toolName);
     if (!config.maxCallsPerMinute) {
@@ -59,6 +71,10 @@
     };
   }
 
+  /**
+   * Reset the rate limiter state.
+   * @returns {void}
+   */
   function resetRateLimiter() {
     rateLimiter.clear();
   }

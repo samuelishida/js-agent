@@ -4,7 +4,7 @@
   <img src="assets/logo.svg" alt="js-agent logo" width="320">
 </p>
 
-Browser-first multi-step AI agent. No bundler. Local or cloud LLM. Modular tool runtime with 86 tools across 5 runtime families. Runs from a single dev server command.
+Browser-first multi-step AI agent. No bundler. Local or cloud LLM. Modular tool runtime with 88 tools across 5 runtime families. Skills are on-demand methodology docs discoverable via `skill_search`/`skill_load`. Runs from a single dev server command.
 
 ## Running
 
@@ -118,6 +118,7 @@ Scripts load with `defer`; execution order is declaration order — no bundler n
 - **Device/browser:** `clipboard_read/write`, `storage_get/set/list_keys`, `notification_send`, `tab_broadcast/listen`
 - **Filesystem:** `fs_list_dir`, `fs_tree`, `fs_walk`, `fs_read_file`, `fs_preview_file`, `fs_write_file`, `fs_append_file`, `fs_edit` (via compat), `fs_search_name`, `fs_search_content`, `fs_glob`, `fs_grep`, `fs_stat`, `fs_exists`, `fs_copy_file`, `fs_move_file`, `fs_delete_path`, `fs_rename_path`, `fs_mkdir`, `fs_touch`, `fs_download_file`, `fs_upload_pick` (File System Access API)
 - **Data/planning:** `parse_json`, `parse_csv`, `todo_write`, `task_create/get/list/update`, `worker_batch/list/get`, `ask_user_question`, `memory_write/search/list`, `tool_search`, `snapshot_tool_catalog`
+- **Skills:** `skill_search`, `skill_load` — on-demand methodology discovery (replaces passive pre-loading)
 - **GitHub:** `github_search_code`, `github_get_pr`, `github_list_prs`, `github_create_issue`, `github_get_file`, `github_list_issues`
 - **Runtime compat:** `runtime_readFile`, `runtime_writeFile`, `runtime_editFile`, `runtime_multiEdit`, `runtime_listDir`, `runtime_glob`, `runtime_searchCode`, `runtime_runTerminal`, `runtime_generateFile`, `runtime_webFetch`, `runtime_getDiagnostics`, `runtime_fileDiff`, `runtime_spawnAgent`
 
@@ -125,15 +126,20 @@ Tools carry execution metadata (`readOnly`, `concurrencySafe`, `risk`). Read-onl
 
 ## Skills
 
-Skills are **methodology and expertise** — not executable tools. They are `.md` files loaded at runtime that provide domain knowledge, workflows, and guidelines the LLM follows when relevant.
+Skills are **methodology and expertise** — not executable tools. They are `.md` files that provide domain knowledge, workflows, and guidelines the LLM follows when relevant. Unlike tools (which the LLM calls actively), skills are **discovered on-demand** via two dedicated tools:
+
+- **`skill_search(query)`** — search available skills by keyword, returns scored matches with descriptions
+- **`skill_load(name)`** — load a skill's full methodology content by name
+
+This replaces the old passive-injection model (where all matched skills were pre-loaded into every system prompt). Now the LLM decides when to pull in expertise, saving context tokens.
 
 | Resource | Function | Who Controls? | Example |
 |----------|----------|---------------|---------|
-| **Tools** | Actions / Execution | Model (active call) | `create_jira_issue(title, desc)` |
-| **Skills** | Expertise / Methodology | Model (as needed) | "How to review security code" |
+| **Tools** | Actions / Execution | Model (active call) | `runtime_generateFile(path, content)` |
+| **Skills** | Expertise / Methodology | Model (on-demand via `skill_search`/`skill_load`) | "How to generate a DOCX file" |
 | **MCP** | Standardization / Connection | Infrastructure | Connect Slack to Claude |
 
-`window.AgentSkillLoader` auto-loads 17 built-in skills from `src/skills/`:
+`window.AgentSkillLoader` manages 16 built-in skills from `src/skills/`:
 
 - **algorithmic-art** — p5.js generative art with seeded randomness
 - **brand-guidelines** — Brand colors and typography styling
@@ -152,7 +158,7 @@ Skills are **methodology and expertise** — not executable tools. They are `.md
 - **webapp-testing** — Playwright-based web testing
 - **xlsx** — Read/analyze existing spreadsheets (creation → file-generation)
 
-All file generation uses **pure JavaScript** (no Python). Skills are matched to user messages via keyword detection and injected into the system prompt as context blocks.
+All file generation uses **pure JavaScript** (no Python). Skills are cached in localStorage for offline use after first load.
 
 ## 🚀 Deploy to Production (Render.com — Free Tier)
 

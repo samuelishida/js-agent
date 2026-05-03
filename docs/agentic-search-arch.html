@@ -1777,10 +1777,35 @@ node proxy/dev-server.js
       <h2>Skills Catalog</h2>
     </div>
     <p class="sec-desc">
-      17 built-in skills for the browser-first AI agent. All file generation uses <strong>pure JavaScript</strong> — no Python required.
-      Skills are loaded dynamically and registered in <code>window.AgentToolModules</code>.
+      16 built-in skills for the browser-first AI agent. All file generation uses <strong>pure JavaScript</strong> — no Python required.
+      Skills are <strong>discovered on-demand</strong> via <code>skill_search(query)</code> and <code>skill_load(name)</code> tools,
+      replacing the old passive-injection model. The LLM decides when to pull in expertise, saving context tokens.
     </p>
     <div class="card-grid">
+      <div class="card" onclick="tog(this)">
+        <div class="card-hd">
+          <div class="card-hd-l">
+            <span class="card-ico">🔍</span>
+            <div class="card-meta">
+              <div class="card-lbl">Discovery Tools</div>
+              <div class="card-ttl">skill_search & skill_load</div>
+            </div>
+          </div>
+          <button class="card-tog">▼</button>
+        </div>
+        <div class="card-bd">
+          <div class="card-desc">Two dedicated tools for on-demand skill discovery. No more passive pre-loading into every system prompt.</div>
+          <div class="card-det">
+            <div class="cb">
+              <div class="cb-hd"><span class="cb-lang">Tools</span></div>
+              <pre><span class="fn">skill_search</span>(query?)  <span class="cm">// search skills by keyword, returns scored matches</span>
+<span class="fn">skill_load</span>(name)      <span class="cm">// load a skill's full methodology content</span></pre>
+            </div>
+            <div class="tag-row" style="margin-top:10px"><span class="tag">On-Demand</span><span class="tag">Context-Efficient</span></div>
+          </div>
+        </div>
+      </div>
+
       <div class="card" onclick="tog(this)">
         <div class="card-hd">
           <div class="card-hd-l">

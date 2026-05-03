@@ -1,19 +1,32 @@
-// ── Steering buffer ───────────────────────────────────────────────────────────
-// Allows injecting mid-flight guidance via steer() or an external hook.
-// The agent loop drains this buffer each iteration and injects messages as new
-// User turns so the LLM sees them immediately.
+// src/app/context/steering.js
+// Steering buffer: inject mid-flight guidance into the agent loop.
+
 ;(function() {
+  /** @type {string[]} */
   var steeringBuffer = [];
 
+  /**
+   * Push a steering message.
+   * @param {string} msg - Message to inject
+   * @returns {void}
+   */
   function pushSteering(msg) {
     var text = String(msg || '').trim();
     if (text) steeringBuffer.push(text);
   }
 
+  /**
+   * Drain all steering messages.
+   * @returns {string[]} Drained messages
+   */
   function drainSteering() {
     return steeringBuffer.splice(0, steeringBuffer.length);
   }
 
+  /**
+   * Clear the steering buffer.
+   * @returns {string[]} Cleared messages
+   */
   function clearSteering() {
     var drained = drainSteering();
     var status = document.getElementById('steering-status');
@@ -21,6 +34,10 @@
     return drained;
   }
 
+  /**
+   * Send steering from input field.
+   * @returns {void}
+   */
   function sendSteering() {
     var input = document.getElementById('steering-input');
     if (!input) return;

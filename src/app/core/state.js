@@ -2,6 +2,12 @@
 // Core state: variables, window bindings, runtime glue, and delegations to
 // extracted modules (session-manager, tool-cache, provider-state).
 
+/**
+ * Safely get a value from localStorage.
+ * @param {string} key - localStorage key
+ * @param {string} [fallback=''] - Fallback value
+ * @returns {string} Stored value or fallback
+ */
 function safeGet(key, fallback = '') {
   try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
 }
@@ -84,6 +90,11 @@ let busyChannel = null;
 // agentInstanceId is defined in tool-cache.js; state.js uses it in BroadcastChannel handlers
 // CACHE_SCHEMA_VERSION is defined in tool-cache.js; used in fallback loadToolCache delegation
 
+/**
+ * Normalize session stats.
+ * @param {any} value - Raw stats
+ * @returns {{rounds: number, tools: number, resets: number, msgs: number}} Normalized stats
+ */
 function normalizeSessionStats(value) {
   return {
     rounds: Number(value?.rounds || 0),
@@ -93,6 +104,13 @@ function normalizeSessionStats(value) {
   };
 }
 
+/**
+ * Bind a property to window with getter/setter.
+ * @param {string} name - Property name
+ * @param {Function} getter - Getter function
+ * @param {Function} setter - Setter function
+ * @returns {void}
+ */
 function bindWindowStateProperty(name, getter, setter) {
   Object.defineProperty(window, name, {
     configurable: true, enumerable: true,
@@ -112,6 +130,10 @@ bindWindowStateProperty('openrouterBackend', () => openrouterBackend, value => {
 bindWindowStateProperty('chatSessions', () => chatSessions, value => { chatSessions = Array.isArray(value) ? value : []; });
 bindWindowStateProperty('activeSessionId', () => activeSessionId, value => { activeSessionId = value == null ? null : String(value); });
 
+/**
+ * Get runtime modules.
+ * @returns {{tools: any, regex: any, orchestrator: any, prompts: any}} Runtime modules
+ */
 function getRuntimeModules() {
   return {
     tools: window.AgentTools,
@@ -121,16 +143,29 @@ function getRuntimeModules() {
   };
 }
 
+/**
+ * Check if runtime is ready.
+ * @returns {boolean} True if ready
+ */
 function runtimeReady() {
   const modules = getRuntimeModules();
   return !!(modules.tools && modules.regex && modules.orchestrator && modules.prompts);
 }
 
+/**
+ * Assert runtime is ready.
+ * @returns {void}
+ * @throws {Error} If not ready
+ */
 function assertRuntimeReady() {
   if (!runtimeReady()) throw new Error('Agent bootstrap failed: required modules were not loaded.');
 }
 
 // -- File access --------------------------------------------------------------
+/**
+ * Update file access status in UI.
+ * @returns {void}
+ */
 function updateFileAccessStatus() {
   const el = document.getElementById('file-access-status');
   if (!el) return;
@@ -138,6 +173,10 @@ function updateFileAccessStatus() {
   el.textContent = roots.length ? `authorized: ${roots.join(', ')}` : 'no folder authorized';
 }
 
+/**
+ * Request directory access.
+ * @returns {Promise<void>}
+ */
 async function requestDirectoryAccess() {
   if (!runtimeReady()) return;
   try {
@@ -154,6 +193,10 @@ async function requestDirectoryAccess() {
 }
 
 // -- GitHub token -------------------------------------------------------------
+/**
+ * Save GitHub token.
+ * @returns {void}
+ */
 function saveGithubToken() {
   const token = document.getElementById('github-token').value.trim();
   if (token) {
@@ -168,6 +211,10 @@ function saveGithubToken() {
   }
 }
 
+/**
+ * Load GitHub token status.
+ * @returns {void}
+ */
 function loadGithubTokenStatus() {
   const token = localStorage.getItem('github_token');
   const input = document.getElementById('github-token');

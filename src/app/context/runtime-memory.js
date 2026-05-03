@@ -1,10 +1,19 @@
+// src/app/context/runtime-memory.js
+// Runtime cache and long-term memory management.
+
 (() => {
+  /** @type {string} */
   const RUNTIME_CACHE_KEY = 'agent_runtime_cache_v1';
+  /** @type {number} */
   const RUNTIME_CACHE_SCHEMA = 1;
+  /** @type {string} */
   const LONG_TERM_MEMORY_KEY = 'agent_long_term_memory_v1';
+  /** @type {number} */
   const LONG_TERM_MEMORY_SCHEMA = 1;
+  /** @type {number} */
   const MAX_LONG_TERM_MEMORIES = 400;
 
+  /** @type {Object<string, {ttlMs: number, maxEntries: number, maxBytes: number}>} */
   const DEFAULT_SCOPE_POLICIES = {
     tool_hot: { ttlMs: 10 * 60 * 1000, maxEntries: 400, maxBytes: 2_000_000 },
     context_summary: { ttlMs: 6 * 60 * 60 * 1000, maxEntries: 160, maxBytes: 1_000_000 },
@@ -13,6 +22,12 @@
     memory_retrieval: { ttlMs: 5 * 60 * 1000, maxEntries: 200, maxBytes: 600_000 }
   };
 
+  /**
+   * Safely parse JSON.
+   * @param {string} value - JSON string
+   * @param {any} fallback - Fallback value
+   * @returns {any} Parsed value or fallback
+   */
   function safeJsonParse(value, fallback) {
     try {
       const parsed = JSON.parse(String(value || ''));
@@ -22,15 +37,30 @@
     }
   }
 
+  /**
+   * Get current ISO timestamp.
+   * @returns {string} ISO string
+   */
   function nowIso() {
     return new Date().toISOString();
   }
 
+  /**
+   * Convert value to number with fallback.
+   * @param {any} value - Value to convert
+   * @param {number} [fallback=0] - Fallback
+   * @returns {number} Number or fallback
+   */
   function toNumber(value, fallback = 0) {
     const num = Number(value);
     return Number.isFinite(num) ? num : fallback;
   }
 
+  /**
+   * Estimate byte size of a value.
+   * @param {any} value - Value to measure
+   * @returns {number} Byte size
+   */
   function estimateBytes(value) {
     try {
       return JSON.stringify(value).length;
@@ -39,6 +69,12 @@
     }
   }
 
+  /**
+   * Normalize scope policy with overrides.
+   * @param {string} scope - Cache scope
+   * @param {Object} [overrides={}] - Policy overrides
+   * @returns {{ttlMs: number, maxEntries: number, maxBytes: number}} Normalized policy
+   */
   function normalizeScopePolicy(scope, overrides = {}) {
     const base = DEFAULT_SCOPE_POLICIES[scope] || { ttlMs: 10 * 60 * 1000, maxEntries: 200, maxBytes: 1_000_000 };
     return {
@@ -48,6 +84,10 @@
     };
   }
 
+  /**
+   * Load runtime cache store from localStorage.
+   * @returns {{version: number, scopes: Object}} Cache store
+   */
   function loadRuntimeCacheStore() {
     const empty = { version: RUNTIME_CACHE_SCHEMA, scopes: {} };
     const raw = safeJsonParse(localStorage.getItem(RUNTIME_CACHE_KEY), null);
@@ -61,6 +101,11 @@
     return empty;
   }
 
+  /**
+   * Save runtime cache store to localStorage.
+   * @param {{version: number, scopes: Object}} store - Cache store
+   * @returns {void}
+   */
   function saveRuntimeCacheStore(store) {
     try {
       localStorage.setItem(RUNTIME_CACHE_KEY, JSON.stringify(store));
@@ -69,6 +114,12 @@
     }
   }
 
+  /**
+   * Ensure a scope exists in the cache store.
+   * @param {{version: number, scopes: Object}} store - Cache store
+   * @param {string} scope - Scope name
+   * @returns {Object} Scope bucket
+   */
   function ensureScope(store, scope) {
     if (!store.scopes || typeof store.scopes !== 'object') {
       store.scopes = {};
@@ -79,6 +130,13 @@
     return store.scopes[scope];
   }
 
+  /**
+   * Prune expired entries from a runtime scope.
+   * @param {{version: number, scopes: Object}} store - Cache store
+   * @param {string} scope - Scope name
+   * @param {Object} [options={}] - Prune options
+   * @returns {boolean} True if changes were made
+   */
   function pruneRuntimeScope(store, scope, options = {}) {
     const bucket = ensureScope(store, scope);
     const policy = normalizeScopePolicy(scope, options);
@@ -122,6 +180,13 @@
     return changed;
   }
 
+  /**
+   * Get a value from runtime cache.
+   * @param {string} scope - Cache scope
+   * @param {string} key - Cache key
+   * @param {Object} [options={}] - Options
+   * @returns {any|null} Cached value or null
+   */
   function getRuntimeCache(scope, key, options = {}) {
     const store = loadRuntimeCacheStore();
     const bucket = ensureScope(store, scope);
@@ -138,6 +203,14 @@
     return entry.payload;
   }
 
+  /**
+   * Set a value in runtime cache.
+   * @param {string} scope - Cache scope
+   * @param {string} key - Cache key
+   * @param {any} payload - Value to cache
+   * @param {Object} [options={}] - Options
+   * @returns {boolean} True if set
+   */
   function setRuntimeCache(scope, key, payload, options = {}) {
     const store = loadRuntimeCacheStore();
     const bucket = ensureScope(store, scope);
@@ -163,6 +236,12 @@
     return true;
   }
 
+  /**
+   * Delete a key from runtime cache.
+   * @param {string} scope - Cache scope
+   * @param {string} key - Cache key
+   * @returns {boolean} True if deleted
+   */
   function deleteRuntimeCache(scope, key) {
     const store = loadRuntimeCacheStore();
     const bucket = ensureScope(store, scope);
@@ -172,6 +251,11 @@
     return true;
   }
 
+  /**
+   * Clear all entries in a runtime scope.
+   * @param {string} scope - Cache scope
+   * @returns {void}
+   */
   function clearRuntimeScope(scope) {
     const store = loadRuntimeCacheStore();
     if (!store.scopes || typeof store.scopes !== 'object') return;
@@ -179,6 +263,11 @@
     saveRuntimeCacheStore(store);
   }
 
+  /**
+   * Normalize tags array.
+   * @param {any[]} tags - Raw tags
+   * @returns {string[]} Normalized tags
+   */
   function normalizeTags(tags) {
     if (!Array.isArray(tags)) return [];
     return [...new Set(tags
@@ -187,6 +276,11 @@
       .slice(0, 12))];
   }
 
+  /**
+   * Normalize memory text.
+   * @param {string} text - Raw text
+   * @returns {string} Normalized text
+   */
   function normalizeMemoryText(text) {
     return String(text || '')
       .replace(/\s+/g, ' ')
@@ -194,6 +288,11 @@
       .slice(0, 480);
   }
 
+  /**
+   * Generate a fingerprint for memory text.
+   * @param {string} text - Text to fingerprint
+   * @returns {string} Fingerprint
+   */
   function memoryFingerprint(text) {
     return normalizeMemoryText(text)
       .toLowerCase()

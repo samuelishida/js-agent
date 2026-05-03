@@ -171,6 +171,25 @@
   }
 
   /**
+   * Check if thinking blocks indicate the model intended a final answer.
+   * @param {string[]} thinkingBlocks - Extracted thinking blocks
+   * @returns {boolean} True if thinking suggests final answer intent
+   */
+  function thinkingIndicatesFinalAnswer(thinkingBlocks) {
+    var text = (thinkingBlocks || []).join('\n').trim();
+    if (!text) return false;
+    var finalPatterns = [
+      /\b(?:final answer|provide the answer|answer the user|respond to the user|give the final|output the final|deliver the final|conclude with|wrap up with|summarize for the user)\b/i,
+      /\b(?:no (?:more )?tools needed|no (?:further )?tool calls? (?:are )?required|done with tools|finished with tools)\b/i,
+      /\b(?:the user (?:just |only )?wants|user (?:only |just )?asked for|user request is complete)\b/i
+    ];
+    for (var i = 0; i < finalPatterns.length; i++) {
+      if (finalPatterns[i].test(text)) return true;
+    }
+    return false;
+  }
+
+  /**
    * Split model reply into raw, thinking, and visible parts.
    * @param {string} text - Raw reply
    * @returns {{raw: string, thinkingBlocks: string[], visible: string}} Split reply
@@ -199,7 +218,8 @@
     extractPlannerOptimizedQueryFromMessages: extractPlannerOptimizedQueryFromMessages,
     extractThinkingBlocks: extractThinkingBlocks,
     normalizeVisibleModelText: normalizeVisibleModelText,
-    splitModelReply: splitModelReply
+    splitModelReply: splitModelReply,
+    thinkingIndicatesFinalAnswer: thinkingIndicatesFinalAnswer
   };
 
   window.stripModelMetaCommentary = stripModelMetaCommentary;

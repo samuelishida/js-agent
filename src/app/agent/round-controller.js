@@ -192,7 +192,9 @@ function handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionRounds,
     return { finalAnswer: false, messages: updated, consecutiveNonActionRounds: nextConsecutive, shouldContinue: true };
   }
 
-  if (looksLikeDeferredActionReply(cleanReply)) {
+  var thinkingSaysFinal = window.AgentReplyAnalysis?.thinkingIndicatesFinalAnswer?.(parsedReply?.thinkingBlocks || []);
+
+  if (looksLikeDeferredActionReply(cleanReply) && !thinkingSaysFinal) {
     const nextConsecutive = consecutiveNonActionRounds + 1;
     if (nextConsecutive >= (cfg.MAX_CONSECUTIVE_NON_ACTION_ROUNDS || 6)) {
       return {
@@ -209,7 +211,7 @@ function handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionRounds,
     return { finalAnswer: false, messages: updated, consecutiveNonActionRounds: nextConsecutive, shouldContinue: true };
   }
 
-  if (looksLikeToolExecutionClaimWithoutCall(cleanReply)) {
+  if (looksLikeToolExecutionClaimWithoutCall(cleanReply) && !thinkingSaysFinal) {
     const nextConsecutive = consecutiveNonActionRounds + 1;
     if (nextConsecutive >= (cfg.MAX_CONSECUTIVE_NON_ACTION_ROUNDS || 6)) {
       return {
@@ -224,6 +226,11 @@ function handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionRounds,
       { role: 'user', content: 'Your previous reply claimed a tool call already ran, but no valid <tool_call> block was present. Continue now with exactly one of these: (1) emit one or more valid tool calls with complete args, or (2) provide the complete final answer. Do not ask to wait for tool output.' }
     ];
     return { finalAnswer: false, messages: updated, consecutiveNonActionRounds: nextConsecutive, shouldContinue: true };
+  }
+
+  // If thinking indicates final answer but visible text is empty, use thinking as final answer
+  if (thinkingSaysFinal && !cleanReply && reasoningText) {
+    return { finalAnswer: true, finalText: stripModelMetaCommentary(reasoningText), messages, consecutiveNonActionRounds: 0 };
   }
 
   // Final answer
@@ -430,7 +437,16 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   setStatus('busy', `round ${round}/${maxRounds}`);
   showThinking(`round ${round}/${maxRounds}`);
 
+  var prevStreamingCb = window.AgentLLMUtils?.streamingCallback;
+  window.AgentLLMUtils && (window.AgentLLMUtils.streamingCallback = function(contentDelta, fullContent, reasoningDelta) {
+    if (reasoningDelta && window.updateStreamingThinking) {
+      window.updateStreamingThinking(contentDelta, reasoningDelta);
+    }
+  });
+
   const llmResult = await callLlmWithRecovery({ messages, round, maxRounds, delay });
+
+  if (window.AgentLLMUtils) window.AgentLLMUtils.streamingCallback = prevStreamingCb;
 
   if (llmResult.recovered && llmResult.recoveredMessages) {
     hideThinking();

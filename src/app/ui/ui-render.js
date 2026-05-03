@@ -339,6 +339,26 @@
     if (el) el.remove();
   }
 
+  function updateStreamingThinking(contentDelta, reasoningDelta) {
+    var el = document.getElementById('thinking');
+    if (!el) {
+      showThinking('thinking…');
+      el = document.getElementById('thinking');
+      if (!el) return;
+    }
+    var pre = el.querySelector('.thinking-stream');
+    if (!pre) {
+      pre = document.createElement('pre');
+      pre.className = 'thinking-stream';
+      pre.style.cssText = 'margin-top:6px;font-size:11px;font-family:var(--font-mono);color:var(--text-secondary);white-space:pre-wrap;max-height:200px;overflow-y:auto;';
+      el.appendChild(pre);
+    }
+    if (reasoningDelta) {
+      pre.textContent += reasoningDelta;
+      scrollBottom();
+    }
+  }
+
   function addMessage(role, content, round, isCall, isResult, hiddenThinking) {
     document.getElementById('empty')?.remove();
 
@@ -656,6 +676,7 @@
     renderAgentHtml: renderAgentHtml,
     showThinking: showThinking,
     hideThinking: hideThinking,
+    updateStreamingThinking: updateStreamingThinking,
     addMessage: addMessage,
     addNotice: addNotice,
     setStatus: setStatus,
@@ -702,4 +723,5 @@
   window.looksLikeHtmlFragment = looksLikeHtmlFragment;
   window.showThinking = showThinking;
   window.hideThinking = hideThinking;
+  window.updateStreamingThinking = updateStreamingThinking;
 })();

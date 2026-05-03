@@ -108,7 +108,7 @@ async function readOllamaNativeStream(response, onChunk) {
           const reasoning = obj.message?.reasoning || obj.message?.reasoning_content || obj.message?.thinking || '';
           if (delta) {
             fullContent += delta;
-            if (onChunk) onChunk(delta, fullContent);
+            if (onChunk) onChunk(delta, fullContent, reasoning);
           }
           if (reasoning) {
             fullReasoning += reasoning;
@@ -154,12 +154,13 @@ async function readStreamingResponse(response, onChunk) {
             return _combineReasoningContent(fullReasoning, fullContent);
           }
           const delta = event.parsed?.choices?.[0]?.delta;
+          const reasoningDelta = delta?.reasoning || delta?.reasoning_content || delta?.thinking;
           if (delta?.content) {
             fullContent += delta.content;
-            if (onChunk) onChunk(delta.content, fullContent);
+            if (onChunk) onChunk(delta.content, fullContent, reasoningDelta);
           }
-          if (delta?.reasoning || delta?.reasoning_content || delta?.thinking) {
-            fullReasoning += (delta?.reasoning || delta?.reasoning_content || delta?.thinking);
+          if (reasoningDelta) {
+            fullReasoning += reasoningDelta;
           }
         }
       }

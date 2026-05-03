@@ -2,6 +2,7 @@
 // Lightweight module registry for dependency injection.
 // Zero-build, zero-runtime-impact validation layer over window.* globals.
 
+/** @type {Object.<string, Object>} */
 const _modules = {};
 
 /**

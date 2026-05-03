@@ -3,12 +3,29 @@
 // error recovery to error-recovery.js, tool-call repair to tool-call-repair.js,
 // and session lifecycle to session-lifecycle.js.
 
+/** @typedef {import('../../types/index.js').SessionMessage} SessionMessage */
+
+/**
+ * Get constants helper.
+ * @returns {Object} Window constants
+ */
 const C = () => window.CONSTANTS || {};
 
+/**
+ * Extract long-term memory from a conversation turn.
+ * @param {string} userMessage - User message
+ * @param {string} assistantMessage - Assistant response
+ * @returns {any} Memory extraction result
+ */
 function maybeExtractLongTermMemory(userMessage, assistantMessage) {
   return window.AgentMemory?.extractFromTurn?.({ userMessage, assistantMessage }) ?? null;
 }
 
+/**
+ * Main agent loop entry point.
+ * @param {string} userMessage - User input message
+ * @returns {Promise<void>}
+ */
 async function agentLoop(userMessage) {
   assertRuntimeReady();
   throwIfStopRequested();

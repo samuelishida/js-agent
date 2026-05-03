@@ -2,8 +2,10 @@
 // LLM routing, lane scheduling, timeout, retry, and main callLLM entry point.
 // Provider implementations live in provider-*.js; shared utilities in llm-utils.js.
 
+/** @type {AbortController|null} */
 let activeLlmController = null;
 
+/** @type {Object.<string, number>} */
 const LLM_RATE_LIMIT_MS = {
   local: 250,
   ollama: 250,
@@ -11,6 +13,7 @@ const LLM_RATE_LIMIT_MS = {
   cloud: 1200
 };
 
+/** @type {Object.<string, number>} */
 const LLM_TIMEOUT_MS = {
   local: (window.CONSTANTS?.DEFAULT_TIMEOUT_MS_LOCAL || 120000),
   cloud: (window.CONSTANTS?.DEFAULT_TIMEOUT_MS_CLOUD || 45000),
@@ -19,6 +22,7 @@ const LLM_TIMEOUT_MS = {
   control: 20000
 };
 
+/** @type {Object.<string, {chain: Promise, nextAt: number}>} */
 const laneState = {
   local: { chain: Promise.resolve(), nextAt: 0 },
   cloud: { chain: Promise.resolve(), nextAt: 0 },
@@ -28,8 +32,11 @@ const laneState = {
 
 // Half-open circuit breaker: after THRESHOLD consecutive failures a lane goes OPEN
 // for RESET_MS, then allows one probe. Resets fully on success.
+/** @type {number} */
 const CIRCUIT_THRESHOLD = 3;
+/** @type {number} */
 const CIRCUIT_RESET_MS = 30000;
+/** @type {Object.<string, {failures: number, openUntil: number}>} */
 const circuitBreaker = {
   local:      { failures: 0, openUntil: 0 },
   cloud:      { failures: 0, openUntil: 0 },
@@ -37,6 +44,11 @@ const circuitBreaker = {
   ollama:     { failures: 0, openUntil: 0 }
 };
 
+/**
+ * Check if a circuit breaker is open for a lane.
+ * @param {string} lane - Lane name
+ * @returns {boolean} True if circuit is open
+ */
 function isCircuitOpen(lane) {
   const cb = circuitBreaker[lane];
   if (!cb) return false;
@@ -44,10 +56,20 @@ function isCircuitOpen(lane) {
   if (cb.openUntil > 0) { cb.openUntil = 0; cb.failures = 0; } // half-open probe
   return false;
 }
+/**
+ * Record a successful circuit breaker result.
+ * @param {string} lane - Lane name
+ * @returns {void}
+ */
 function recordCircuitSuccess(lane) {
   const cb = circuitBreaker[lane];
   if (cb) { cb.failures = 0; cb.openUntil = 0; }
 }
+/**
+ * Record a circuit breaker failure.
+ * @param {string} lane - Lane name
+ * @returns {void}
+ */
 function recordCircuitFailure(lane) {
   const cb = circuitBreaker[lane];
   if (!cb) return;
@@ -58,6 +80,14 @@ function recordCircuitFailure(lane) {
   }
 }
 
+/**
+ * Execute a request on a specific lane with circuit breaker, rate limiting, and retry.
+ * @param {string} lane - Lane name
+ * @param {import('../../types/index.js').SessionMessage[]} msgs - Messages
+ * @param {import('../../types/index.js').LlmCallOptions} options - Call options
+ * @param {AbortSignal} [outerSignal] - Abort signal
+ * @returns {Promise<import('../../types/index.js').LlmResponse>} LLM response
+ */
 function executeLane(lane, msgs, options, outerSignal) {
   if (isCircuitOpen(lane)) {
     const err = new Error(`LLM lane '${lane}' temporarily unavailable (circuit open, resets in ${Math.ceil((circuitBreaker[lane]?.openUntil - Date.now()) / 1000)}s)`);
@@ -102,6 +132,12 @@ function executeLane(lane, msgs, options, outerSignal) {
   });
 }
 
+/**
+ * Delay for a given duration, abortable.
+ * @param {number} ms - Milliseconds to delay
+ * @param {AbortSignal} [signal] - Abort signal
+ * @returns {Promise<void>}
+ */
 function delay(ms, signal) {
   const timeout = Math.max(0, Number(ms) || 0);
   if (!timeout) return Promise.resolve();
@@ -116,10 +152,24 @@ function delay(ms, signal) {
   });
 }
 
+/**
+ * Check if an error is retryable.
+ * @param {Error} error - Error object
+ * @returns {boolean} True if retryable
+ */
 function isRetryableError(error) {
   return window.AgentLLMUtils?.isRetryableError?.(error) ?? false;
 }
 
+/**
+ * Retry a function with exponential backoff.
+ * @param {Function} fn - Function to retry
+ * @param {Object} options - Retry options
+ * @param {number} [options.retries=2] - Number of retries
+ * @param {number} [options.baseDelayMs=700] - Base delay in ms
+ * @param {AbortSignal} [options.signal] - Abort signal
+ * @returns {Promise<any>} Function result
+ */
 async function retryWithBackoff(fn, { retries = 2, baseDelayMs = 700, signal } = {}) {
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -137,6 +187,10 @@ async function retryWithBackoff(fn, { retries = 2, baseDelayMs = 700, signal } =
   throw lastError;
 }
 
+/**
+ * Determine the best lane for the current request.
+ * @returns {{lane: string, error: string}} Lane and optional error
+ */
 function getLaneForRequest() {
   if (typeof ollamaBackend !== 'undefined' && ollamaBackend.enabled) {
     console.debug(`[LLM Route] ollamaBackend.enabled=true, url='${ollamaBackend.url}' → lane='ollama'`);
@@ -172,12 +226,24 @@ function getLaneForRequest() {
   return { lane: 'cloud', error: '' };
 }
 
+/**
+ * Get rate limit interval for a lane.
+ * @param {string} lane - Lane name
+ * @param {import('../../types/index.js').LlmCallOptions} [options] - Call options
+ * @returns {number} Rate limit in ms
+ */
 function getRateLimitMs(lane, options = {}) {
   const configured = Number(options.minIntervalMs);
   if (Number.isFinite(configured) && configured >= 0) return Math.max(0, configured);
   return LLM_RATE_LIMIT_MS[lane] || LLM_RATE_LIMIT_MS.cloud;
 }
 
+/**
+ * Get timeout for a lane.
+ * @param {string} lane - Lane name
+ * @param {import('../../types/index.js').LlmCallOptions} [options] - Call options
+ * @returns {number} Timeout in ms
+ */
 function getTimeoutMs(lane, options = {}) {
   const configured = Number(options.timeoutMs);
   if (Number.isFinite(configured) && configured > 0) {
@@ -189,6 +255,14 @@ function getTimeoutMs(lane, options = {}) {
   return LLM_TIMEOUT_MS[lane] || LLM_TIMEOUT_MS.cloud;
 }
 
+/**
+ * Schedule execution on a lane with rate limiting.
+ * @param {string} lane - Lane name
+ * @param {number} minIntervalMs - Minimum interval between requests
+ * @param {AbortSignal} signal - Abort signal
+ * @param {Function} work - Work function
+ * @returns {Promise<any>} Work result
+ */
 async function scheduleLaneExecution(lane, minIntervalMs, signal, work) {
   const state = laneState[lane] || laneState.cloud;
   const previous = state.chain.catch(() => undefined);

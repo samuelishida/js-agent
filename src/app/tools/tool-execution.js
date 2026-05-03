@@ -1,9 +1,15 @@
 // ── Tool execution, batching, and filesystem guards ──
 ;(function() {
+  /** @type {Function} */
   const C = () => window.CONSTANTS || {};
 
   // ── Stable hashing / ID generation ──
 
+  /**
+   * Compute a stable FNV-1a hash of text.
+   * @param {any} value - Value to hash
+   * @returns {string} Hex hash string
+   */
   function stableHashText(value) {
     const text = String(value || '');
     let hash = 2166136261;
@@ -14,11 +20,19 @@
     return (hash >>> 0).toString(16);
   }
 
+  /**
+   * Generate a unique run chain ID.
+   * @returns {string} Chain ID
+   */
   function generateRunChainId() {
     if (window.crypto?.randomUUID) return window.crypto.randomUUID();
     return `chain_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
   }
 
+  /**
+   * Get the active session ID safely.
+   * @returns {string} Session ID or fallback
+   */
   function getActiveSessionIdSafe() {
     try {
       const session = typeof getActiveSession === 'function' ? getActiveSession() : null;
@@ -28,11 +42,19 @@
 
   // ── Tool result replacement persistence ──
 
+  /**
+   * Get the localStorage key for tool result replacements.
+   * @returns {string} Storage key
+   */
   function getReplacementStorageKey() {
     const C = window.CONSTANTS || {};
     return `${C.TOOL_RESULT_REPLACEMENTS_STORAGE_KEY || 'agent_tool_result_replacements_v1'}:${getActiveSessionIdSafe()}`;
   }
 
+  /**
+   * Load persisted tool result replacements from sessionStorage.
+   * @returns {Array<{signature: string, replacement: string, timestamp: string}>} Replacement records
+   */
   function loadPersistedToolResultReplacements() {
     try {
       const raw = sessionStorage.getItem(getReplacementStorageKey());
@@ -55,6 +77,13 @@
     } catch { return []; }
   }
 
+  /**
+   * Persist a tool result replacement record.
+   * @param {import('../../types/index.js').ToolCall} call - Tool call
+   * @param {string} originalResult - Original tool result
+   * @param {string} replacement - Replacement text
+   * @returns {void}
+   */
   function persistToolResultReplacementRecord(call, originalResult, replacement) {
     try {
       const signature = getToolCallSignature(call);
@@ -73,10 +102,21 @@
 
   // ── Tool call normalization ──
 
+  /**
+   * Normalize tool arguments to a plain object.
+   * @param {any} args - Raw arguments
+   * @returns {Object} Normalized arguments
+   */
   function normalizeToolArgs(args) {
     return args && typeof args === 'object' && !Array.isArray(args) ? { ...args } : {};
   }
 
+  /**
+   * Stable JSON stringify for tool call signatures.
+   * @param {any} value - Value to stringify
+   * @param {number} [_depth=0] - Recursion depth
+   * @returns {string} Stable JSON string
+   */
   function stableStringify(value, _depth = 0) {
     if (_depth > 12) return '"[deep]"';
     if (value === null || value === undefined) return String(value);
@@ -90,10 +130,20 @@
     return JSON.stringify(String(value));
   }
 
+  /**
+   * Get a deterministic signature for a tool call.
+   * @param {import('../../types/index.js').ToolCall} call - Tool call
+   * @returns {string} Signature string
+   */
   function getToolCallSignature(call) {
     return `${String(call?.tool || 'unknown')}:${stableStringify(call?.args || {})}`;
   }
 
+  /**
+   * Get a semantic signature for a tool call (normalized for deduplication).
+   * @param {import('../../types/index.js').ToolCall} call - Tool call
+   * @returns {string} Semantic signature
+   */
   function getSemanticToolCallSignature(call) {
     const tool = String(call?.tool || '').trim();
     if (!tool) return 'unknown';
@@ -112,6 +162,11 @@
     return `${tool}:${tokens.join(' ') || normalized || rawQuery.toLowerCase()}`;
   }
 
+  /**
+   * Normalize a raw tool call object.
+   * @param {any} call - Raw call object
+   * @returns {import('../../types/index.js').ToolCall|null} Normalized call or null
+   */
   function normalizeToolCallObject(call) {
     if (!call?.tool) return null;
     const tool = String(call.tool || '').trim();
@@ -119,6 +174,12 @@
     return { tool, args: normalizeToolArgs(call.args) };
   }
 
+  /**
+   * Deduplicate tool calls by signature.
+   * @param {any[]} calls - Raw tool calls
+   * @param {number} [maxCalls] - Maximum calls to return
+   * @returns {import('../../types/index.js').ToolCall[]} Deduplicated calls
+   */
   function dedupeToolCalls(calls, maxCalls) {
     const limit = maxCalls || (window.CONSTANTS?.MAX_TOOL_CALLS_PER_REPLY || 5);
     const deduped = [];
@@ -148,11 +209,21 @@
   const validateFilesystemCallGuard = (window.AgentFsGuards || {}).validateFilesystemCallGuard || function() { return { allowed: true }; };
 
   // P3.1: Blast-radius confirmation gate
+  /**
+   * Get the risk level of a tool.
+   * @param {string} tool - Tool name
+   * @returns {'safe'|'irreversible'|'shared'} Risk level
+   */
   function getToolRisk(tool) {
     const riskMap = { runtime_writeFile:'irreversible', runtime_editFile:'irreversible', runtime_multiEdit:'irreversible', runtime_spawnAgent:'shared' };
     return riskMap[tool] || 'safe';
   }
 
+  /**
+   * Check if a tool requires user confirmation.
+   * @param {string} tool - Tool name
+   * @returns {boolean} True if confirmation required
+   */
   function requiresConfirmation(tool) {
     const risk = getToolRisk(tool);
     return risk === 'irreversible' || risk === 'shared';
@@ -161,6 +232,11 @@
   let runPendingConfirmations = new Map();
   let runRiskApprovals = new Map();
 
+  /**
+   * Check if a tool call needs user confirmation.
+   * @param {import('../../types/index.js').ToolCall} call - Tool call
+   * @returns {boolean} True if confirmation needed
+   */
   function needsUserConfirmation(call) {
     const { tool } = call;
     if (!requiresConfirmation(tool)) return false;
@@ -171,6 +247,11 @@
     return true;
   }
 
+  /**
+   * Inject a confirmation gate for a risky tool call.
+   * @param {import('../../types/index.js').ToolCall} call - Tool call
+   * @returns {string} Confirmation message or empty string
+   */
   function injectConfirmationGate(call) {
     const { tool, args } = call;
     const risk = getToolRisk(tool);
@@ -184,6 +265,11 @@
     return '';
   }
 
+  /**
+   * Approve a pending confirmation.
+   * @param {string} toolSignature - Tool call signature
+   * @returns {boolean} True if approved
+   */
   function approveConfirmation(toolSignature) {
     if (runPendingConfirmations.has(toolSignature)) {
       const item = runPendingConfirmations.get(toolSignature);
@@ -196,6 +282,11 @@
     return false;
   }
 
+  /**
+   * Reject a pending confirmation.
+   * @param {string} toolSignature - Tool call signature
+   * @returns {boolean} True if rejected
+   */
   function rejectConfirmation(toolSignature) {
     if (runPendingConfirmations.has(toolSignature)) {
       runPendingConfirmations.delete(toolSignature);

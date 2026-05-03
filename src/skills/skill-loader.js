@@ -10,10 +10,27 @@
 // custom skills) are also persisted in localStorage. No filesystem permissions
 // required.
 
+// src/skills/skill-loader.js
+// Skill loader: discovers, parses, and injects .md-based skills into the agent loop.
+// Skills are methodology/expertise documents (not executable tools).
+// They provide domain knowledge, workflows, and guidelines that the LLM follows.
+//
+// Publishes: window.AgentSkillLoader
+//
+// Browser compatibility: All skill data is cached in localStorage so skills
+// work offline after first load. User preferences (enabled/disabled skills,
+// custom skills) are also persisted in localStorage. No filesystem permissions
+// required.
+
+/** @typedef {import('../types/index.js').SkillEntry} SkillEntry */
+/** @typedef {import('../types/index.js').SkillCacheEntry} SkillCacheEntry */
+/** @typedef {import('../types/index.js').SkillSearchResult} SkillSearchResult */
+
 (() => {
   'use strict';
 
   // ── localStorage keys ───────────────────────────────────────────────────
+  /** @type {Object.<string, string>} */
   const LS_KEYS = {
     CACHE: 'agent_skills_cache',      // name → { markdown, source, timestamp }
     ENABLED: 'agent_skills_enabled', // string[] of enabled skill names
@@ -22,9 +39,15 @@
   };
 
   // ── Skill registry ────────────────────────────────────────────────────────
+  /** @type {Map<string, SkillEntry>} */
   const skills = new Map(); // name → { name, description, content, frontmatter, source }
 
   // ── YAML frontmatter parser (minimal) ─────────────────────────────────────
+  /**
+   * Parse YAML frontmatter from markdown text.
+   * @param {string} text - Raw markdown text
+   * @returns {{frontmatter: Object, body: string}} Parsed frontmatter and body
+   */
   function parseFrontmatter(text) {
     const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
     if (!match) return { frontmatter: {}, body: text };
@@ -48,6 +71,12 @@
   }
 
   // ── Register a skill from raw markdown ──────────────────────────────────
+  /**
+   * Register a skill from raw markdown content.
+   * @param {string} markdown - Raw markdown content
+   * @param {string} [source='unknown'] - Source identifier
+   * @returns {SkillEntry|null} Registered skill entry or null if invalid
+   */
   function registerSkill(markdown, source = 'unknown') {
     const { frontmatter, body } = parseFrontmatter(markdown);
     const name = frontmatter.name || source;
@@ -73,6 +102,12 @@
 
   // ── localStorage helpers ────────────────────────────────────────────────
 
+  /**
+   * Read and parse a value from localStorage.
+   * @param {string} key - localStorage key
+   * @param {any} [fallback=null] - Fallback value if key not found or parse fails
+   * @returns {any} Parsed value or fallback
+   */
   function lsGet(key, fallback = null) {
     try {
       const raw = localStorage.getItem(key);
@@ -83,6 +118,12 @@
     }
   }
 
+  /**
+   * Write a value to localStorage as JSON.
+   * @param {string} key - localStorage key
+   * @param {any} value - Value to store
+   * @returns {boolean} True if successful
+   */
   function lsSet(key, value) {
     try {
       localStorage.setItem(key, JSON.stringify(value));
@@ -95,6 +136,10 @@
 
   // ── Cache management ─────────────────────────────────────────────────────
 
+  /**
+   * Save all registered skills to localStorage cache.
+   * @returns {void}
+   */
   function saveCache() {
     const cache = {};
     for (const [name, skill] of skills) {
@@ -107,6 +152,10 @@
     lsSet(LS_KEYS.CACHE, cache);
   }
 
+  /**
+   * Load skills from localStorage cache.
+   * @returns {SkillEntry[]} Loaded skills
+   */
   function loadCache() {
     const cache = lsGet(LS_KEYS.CACHE, {});
     const loaded = [];
@@ -121,16 +170,30 @@
     return loaded;
   }
 
+  /**
+   * Clear the localStorage skills cache.
+   * @returns {void}
+   */
   function clearCache() {
     try { localStorage.removeItem(LS_KEYS.CACHE); } catch {}
   }
 
   // ── User preferences ─────────────────────────────────────────────────────
 
+  /**
+   * Get list of enabled skill names.
+   * @returns {string[]|null} Enabled skill names or null (all enabled)
+   */
   function getEnabledSkills() {
     return lsGet(LS_KEYS.ENABLED, null); // null = all enabled
   }
 
+  /**
+   * Enable or disable a single skill.
+   * @param {string} name - Skill name
+   * @param {boolean} enabled - Whether to enable
+   * @returns {void}
+   */
   function setEnabledSkill(name, enabled) {
     const current = lsGet(LS_KEYS.ENABLED, null);
     let list = current ? [...current] : Array.from(skills.keys());
@@ -142,16 +205,31 @@
     lsSet(LS_KEYS.ENABLED, list);
   }
 
+  /**
+   * Set the list of enabled skills.
+   * @param {string[]} names - Skill names to enable
+   * @returns {void}
+   */
   function setEnabledSkills(names) {
     lsSet(LS_KEYS.ENABLED, names);
   }
 
+  /**
+   * Reset enabled skills to default (all enabled).
+   * @returns {void}
+   */
   function resetEnabledSkills() {
     try { localStorage.removeItem(LS_KEYS.ENABLED); } catch {}
   }
 
   // ── Custom skills ────────────────────────────────────────────────────────
 
+  /**
+   * Save a custom skill to localStorage.
+   * @param {string} name - Skill name
+   * @param {string} markdown - Raw markdown content
+   * @returns {SkillEntry} Registered skill entry
+   */
   function saveCustomSkill(name, markdown) {
     const custom = lsGet(LS_KEYS.CUSTOM, {});
     custom[name] = { markdown, source: 'user-custom', addedAt: Date.now() };
@@ -159,6 +237,10 @@
     return registerSkill(markdown, 'user-custom');
   }
 
+  /**
+   * Load custom skills from localStorage.
+   * @returns {SkillEntry[]} Loaded custom skills
+   */
   function loadCustomSkills() {
     const custom = lsGet(LS_KEYS.CUSTOM, {});
     const loaded = [];
@@ -173,6 +255,11 @@
     return loaded;
   }
 
+  /**
+   * Delete a custom skill by name.
+   * @param {string} name - Skill name to delete
+   * @returns {void}
+   */
   function deleteCustomSkill(name) {
     const custom = lsGet(LS_KEYS.CUSTOM, {});
     delete custom[name];
@@ -181,6 +268,11 @@
   }
 
   // ── Register a skill from a URL (async fetch) ─────────────────────────
+  /**
+   * Fetch and register a skill from a URL.
+   * @param {string} url - URL to fetch skill from
+   * @returns {Promise<SkillEntry|null>} Registered skill or null on failure
+   */
   async function registerSkillFromUrl(url) {
     try {
       const res = await fetch(url);
@@ -196,6 +288,11 @@
   }
 
   // ── Register skills from a manifest ───────────────────────────────────
+  /**
+   * Load skills from a manifest URL, with caching and offline support.
+   * @param {string} manifestUrl - URL to manifest JSON
+   * @returns {Promise<SkillEntry[]>} Loaded skills
+   */
   async function registerSkillsFromManifest(manifestUrl) {
     // 1. Load cached skills first (offline support)
     loadCache();
@@ -254,21 +351,39 @@
   }
 
   // ── Get a skill by name ────────────────────────────────────────────────
+  /**
+   * Get a skill by name.
+   * @param {string} name - Skill name
+   * @returns {SkillEntry|null} Skill entry or null
+   */
   function getSkill(name) {
     return skills.get(name) || null;
   }
 
   // ── List all registered skills ──────────────────────────────────────────
+  /**
+   * List all registered skills.
+   * @returns {SkillEntry[]} All registered skills
+   */
   function listSkills() {
     return Array.from(skills.values());
   }
 
   // ── Get skill names ────────────────────────────────────────────────────
+  /**
+   * Get all registered skill names.
+   * @returns {string[]} Skill names
+   */
   function getSkillNames() {
     return Array.from(skills.keys());
   }
 
   // ── Build a context block for the system prompt ─────────────────────────
+  /**
+   * Build a context block of enabled skills for the system prompt.
+   * @param {string[]|null} [enabledSkillNames=null] - Names of skills to include
+   * @returns {string} Formatted context block
+   */
   function buildSkillContextBlock(enabledSkillNames = null) {
     const prefs = enabledSkillNames || getEnabledSkills();
     const entries = prefs
@@ -303,6 +418,11 @@
   }
 
   // ── Match skills to a user message (scored) ────────────────────────────
+  /**
+   * Match skills to a user message using scoring.
+   * @param {string} userMessage - User message to match against
+   * @returns {SkillEntry[]} Top 3 matching skills
+   */
   function matchSkills(userMessage) {
     const msg = String(userMessage || '').toLowerCase();
     const scored = [];
@@ -338,6 +458,11 @@
   }
 
   // ── Search skills by query (tool-callable) ─────────────────────────────
+  /**
+   * Search skills by query string.
+   * @param {string} query - Search query
+   * @returns {SkillSearchResult[]} Top 10 matching skills with scores
+   */
   function skillSearch(query) {
     const terms = String(query || '').toLowerCase().trim();
     const scored = [];
@@ -378,6 +503,11 @@
   }
 
   // ── Load a skill by name (tool-callable) ───────────────────────────────
+  /**
+   * Load a skill by name.
+   * @param {string} name - Skill name
+   * @returns {SkillEntry|null} Skill entry or null
+   */
   function skillLoad(name) {
     const skill = getSkill(name);
     if (!skill) return null;
@@ -390,6 +520,10 @@
   }
 
   // ── Clear all skills ────────────────────────────────────────────────────
+  /**
+   * Clear all registered skills.
+   * @returns {void}
+   */
   function clearSkills() {
     skills.clear();
   }

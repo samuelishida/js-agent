@@ -1,5 +1,13 @@
+// src/app/app-init.js
+// Application bootstrap and initialization.
+
+/** @type {boolean} */
 let extensionChannelWarningShown = false;
 
+/**
+ * Install a guard that suppresses benign extension channel warnings.
+ * @returns {void}
+ */
 function installUnhandledRejectionGuard() {
   if (window.__agentUnhandledRejectionGuardInstalled) return;
   window.__agentUnhandledRejectionGuardInstalled = true;
@@ -16,11 +24,24 @@ function installUnhandledRejectionGuard() {
   });
 }
 
+/**
+ * Slider definition for UI initialization.
+ * @typedef {Object} SliderDef
+ * @property {string} id - Slider element id
+ * @property {string} valId - Value display element id
+ * @property {string} key - localStorage key
+ */
+
+/**
+ * Initialize the application on DOM ready.
+ * @returns {void}
+ */
 document.addEventListener('DOMContentLoaded', () => {
   installUnhandledRejectionGuard();
   applySidebarState();
   window.addEventListener('resize', handleResponsiveSidebar);
 
+  /** @type {SliderDef[]} */
   const sliderDefs = [
     { id: 'sl-rounds', valId: 'val-rounds', key: 'agent_sl_rounds' },
     { id: 'sl-ctx',    valId: 'val-ctx',    key: 'agent_sl_ctx'    },

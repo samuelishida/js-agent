@@ -1,4 +1,10 @@
+// src/core/orchestrator.js
+// System prompt builder and orchestration logic.
+
 (() => {
+  'use strict';
+
+  /** @type {Object.<string, string>} */
   const DEFAULT_PROMPTS = {
     system: 'prompts/system.md',
     repair: 'prompts/repair.md',
@@ -6,6 +12,8 @@
     policy: 'prompts/orchestrator.md',
     safety: 'prompts/safety_guidelines.md'
   };
+
+  /** @type {Object.<string, string>|null} */
   let cachedSafetyGuidelines = null;
 
   async function loadSafetyGuidelines() {

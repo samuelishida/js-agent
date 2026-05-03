@@ -46,8 +46,8 @@
     return /(weather|temperature|temperatura|clima|forecast|previs[aÃ£]o|how hot|how cold)/i.test(value);
   }
 
-  function detectFilesystemIntent(text) {
-    return /(file|files|arquivo|arquivos|folder|pasta|directory|diret[oÃ³]rio|rename|renome|move|mover|copy|copiar|delete|deletar|remove|remover|list files|listar arquivos|search file|buscar arquivo|open file|abrir arquivo|read project|ler projeto|leia o projeto|leio o proejto|codebase|repo|repository|src\/|[a-z]:\\)/i.test(String(text || ''));
+  function detectFilesystemIntent(text) {    // Don't match if this is a generation request (DOCX, PDF, etc.)
+    if (detectGenerationIntent(text)) return false;    return /(file|files|arquivo|arquivos|folder|pasta|directory|diret[oÃ³]rio|rename|renome|move|mover|copy|copiar|delete|deletar|remove|remover|list files|listar arquivos|search file|buscar arquivo|open file|abrir arquivo|read project|ler projeto|leia o projeto|leio o proejto|codebase|repo|repository|src\/|[a-z]:\\)/i.test(String(text || ''));
   }
 
   function detectAuthorizeFolderIntent(text) {
@@ -70,6 +70,16 @@
 
   function detectSaveIntent(text) {
     return /(save|salvar|write file|escrever arquivo|export|exportar|download|baixar|save it|save as|json file|arquivo json)/i.test(String(text || ''));
+  }
+
+  function detectGenerationIntent(text) {
+    const value = String(text || '').toLowerCase();
+    // Binary file generation keywords
+    if (/\b(generate|create|make|build|produce|gerar|criar|fazer|produzir|convert).*(docx|doc|pdf|xlsx|xls|pptx|ppt|png|jpg|image|report|relat[oó]rio|spreadsheet|planilha|presentation|apresenta[cç][aã]o)\b/i.test(value)) return true;
+    if (/\b(docx|pdf|xlsx|pptx)\b/i.test(value) && /\b(generate|create|make|build|produce|export|download|gerar|criar|fazer|with|com)\b/i.test(value)) return true;
+    // Direct format requests: "a docx", "an xlsx", etc.
+    if (/\b(a\s+|an\s+)?(docx|pdf|xlsx|pptx)\b/i.test(value) && /\b(generate|create|make|build|export|download|report|relat)\b/i.test(value)) return true;
+    return false;
   }
 
   function detectClipboardIntent(text) {
@@ -105,6 +115,7 @@
     detectFullFileDisplayIntent,
     detectProjectToolsIntent,
     detectSaveIntent,
+    detectGenerationIntent,
     detectClipboardIntent,
     detectParsingIntent,
     detectTabCoordinationIntent,

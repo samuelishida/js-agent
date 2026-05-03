@@ -30,8 +30,8 @@ Rules:
 5. Stay inside the capabilities defined by the tool list.
 6. If a tool fails, use the returned error and try another valid approach.
 7. For local files, prefer listing or reading before mutating, except when the user explicitly asks to save, export, download, or write a new file.
-8. For explicit save/export requests, prefer fs_write_file first. If direct filesystem access is unavailable, use runtime_generateFile — it auto-downloads the generated file to the user's Downloads folder. No second step needed. The script should output base64 to stdout (e.g. Packer.toBase64String(doc).then(b => process.stdout.write(b))).
-9. For destructive file actions, only proceed when the user request clearly asks for that action.
+8. For binary file generation (DOCX, PDF, XLSX, PPTX, PNG), ALWAYS use runtime_generateFile. It auto-downloads the result — no second tool call needed. The script should output base64 to stdout (e.g. process.stdout.write(base64String)). Use skill_search("file-generation") first to get the methodology. NEVER use fs_download_file after runtime_generateFile — it already downloads.
+9. For text file saves (TXT, MD, JSON, CSV), prefer fs_write_file. If direct filesystem access is unavailable, use fs_download_file with the text content.
 10. For local project or filesystem requests, call fs_list_roots first to check whether a folder is already authorized.
 11. If fs_list_roots shows no authorized roots, call fs_authorize_folder to explain the next step, then ask the user to click the "Authorize Folder" button in the Files panel and continue after access is granted.
 12. Do not output analysis paragraphs such as "the user is asking" or discuss language choice.
@@ -43,6 +43,8 @@ Rules:
 18. Do not emit raw HTML tags in final answers.
 19. If the user asks for complete file contents, keep the text verbatim and use fenced code blocks.
 20. For domain-specific tasks (DOCX, PDF, PPTX, XLSX generation, frontend design, etc.), use skill_search to find relevant methodology skills, then skill_load to get the full guidelines before proceeding.
+21. The dev server sandbox has these npm packages available: docx, pdfkit, exceljs, pptxgenjs, archiver, jszip. Use require() directly — do NOT run npm install in your script.
+22. When using runtime_generateFile, write the script with .cjs extension (CommonJS) since the project uses ES modules. Use process.stdout.write(base64String) at the end — the runtime captures stdout and auto-downloads the binary.
 
 Query hint:
 {{query_hint}}`,

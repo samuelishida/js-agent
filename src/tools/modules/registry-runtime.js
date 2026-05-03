@@ -278,7 +278,7 @@
           defineTool({
             name: 'fs_download_file',
             signature: 'fs_download_file(filename, content?, path?, storageKey?)',
-            description: 'Triggers a browser download. Provide filename + content (text or base64) to download without filesystem access. Provide filename + path to download a local file. Provide filename + storageKey to download from localStorage. No directory root needed when content or storageKey is provided.',
+            description: 'Triggers a browser download. Provide filename + content (text or base64) to download without filesystem access. Provide filename + path to download a local file. Provide filename + storageKey to download from localStorage. No directory root needed when content or storageKey is provided. NOTE: Do NOT use this after runtime_generateFile — it already auto-downloads.',
             run: handlers.fs_download_file
           }),
           defineTool({

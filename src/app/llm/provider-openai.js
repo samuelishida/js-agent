@@ -1,6 +1,17 @@
 // src/app/llm/provider-openai.js
 // OpenAI cloud provider implementation.
 
+/** @typedef {import('../../types/index.js').SessionMessage} SessionMessage */
+/** @typedef {import('../../types/index.js').LlmCallOptions} LlmCallOptions */
+
+/**
+ * Call OpenAI cloud API.
+ * @param {SessionMessage[]} msgs - Messages
+ * @param {AbortSignal} signal - Abort signal
+ * @param {LlmCallOptions} [options={}] - Call options
+ * @param {string} [initialModel=''] - Model override
+ * @returns {Promise<string>} Response content
+ */
 async function callOpenAiCloud(msgs, signal, options = {}, initialModel = '') {
   const apiKey = window.apiKey;
   if (!apiKey) {

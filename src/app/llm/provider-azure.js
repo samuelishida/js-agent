@@ -1,6 +1,17 @@
 // src/app/llm/provider-azure.js
 // Azure OpenAI provider implementation.
 
+/** @typedef {import('../../types/index.js').SessionMessage} SessionMessage */
+/** @typedef {import('../../types/index.js').LlmCallOptions} LlmCallOptions */
+
+/**
+ * Call Azure OpenAI cloud API.
+ * @param {SessionMessage[]} msgs - Messages
+ * @param {AbortSignal} signal - Abort signal
+ * @param {LlmCallOptions} [options={}] - Call options
+ * @param {string} [initialDeployment=''] - Deployment override
+ * @returns {Promise<string>} Response content
+ */
 async function callAzureOpenAiCloud(msgs, signal, options = {}, initialDeployment = '') {
   const apiKey = window.apiKey;
   if (!apiKey) {

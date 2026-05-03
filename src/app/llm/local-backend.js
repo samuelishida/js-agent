@@ -1,9 +1,20 @@
+// src/app/llm/local-backend.js
+// Local backend probing and model discovery.
+
+/** @type {Array<{port: number, paths: string[], name: string, chatPath: string}>} */
 const LOCAL_CANDIDATES = [
   { port: 1234,  paths: ['/v1/models'], name: 'LM Studio', chatPath: '/v1/chat/completions' },
   { port: 8080,  paths: ['/v1/models'], name: 'llama.cpp', chatPath: '/v1/chat/completions' },
   { port: 5000,  paths: ['/v1/models'], name: 'generic',   chatPath: '/v1/chat/completions' },
 ];
 
+/**
+ * Fetch with timeout.
+ * @param {string} url - URL to fetch
+ * @param {Object} [options={}] - Fetch options
+ * @param {number} [timeoutMs=5000] - Timeout in ms
+ * @returns {Promise<Response>} Fetch response
+ */
 function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -18,6 +29,11 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
 
 window.fetchWithTimeout = fetchWithTimeout;
 
+/**
+ * Deduplicate probe targets.
+ * @param {Array<{url: string}>} targets - Targets
+ * @returns {Array<{url: string}>} Unique targets
+ */
 function uniqueTargets(targets) {
   const seen = new Set();
   return targets.filter(t => {
@@ -28,6 +44,11 @@ function uniqueTargets(targets) {
   });
 }
 
+/**
+ * Infer probe config from URL.
+ * @param {string} url - Backend URL
+ * @returns {{paths: string[], chatPath: string, name: string}} Probe config
+ */
 function inferProbeConfigFromUrl(url) {
   try {
     const parsed = new URL(url);
@@ -44,6 +65,11 @@ function inferProbeConfigFromUrl(url) {
   }
 }
 
+/**
+ * Normalize probe URL.
+ * @param {string} rawUrl - Raw URL
+ * @returns {string} Normalized URL
+ */
 function normalizeProbeUrl(rawUrl) {
   const input = String(rawUrl || '').trim();
   if (!input) return '';
@@ -59,6 +85,11 @@ function normalizeProbeUrl(rawUrl) {
   }
 }
 
+/**
+ * Get probe targets for local backend.
+ * @param {string} [manualUrl] - Manual URL
+ * @returns {Array<{url: string, paths: string[], chatPath: string, name: string}>} Targets
+ */
 function getProbeTargets(manualUrl) {
   const candidateTargets = LOCAL_CANDIDATES.map(candidate => ({
     ...candidate,
@@ -78,6 +109,11 @@ function getProbeTargets(manualUrl) {
   ]);
 }
 
+/**
+ * Extract models from probe payload.
+ * @param {any} data - Payload data
+ * @returns {string[]} Model names
+ */
 function extractModelsFromPayload(data) {
   const out = [];
 
@@ -106,6 +142,10 @@ function extractModelsFromPayload(data) {
   return [...new Set(out)];
 }
 
+/**
+ * Probe local backends for available models.
+ * @returns {Promise<void>}
+ */
 async function probeLocal() {
   if (typeof maybeRequestNotifPermission === 'function') {
     maybeRequestNotifPermission();

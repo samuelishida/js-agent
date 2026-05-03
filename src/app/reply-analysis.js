@@ -1,4 +1,12 @@
+// src/app/reply-analysis.js
+// Reply analysis: strip meta commentary, detect errors, extract thinking blocks.
+
 ;(function() {
+  /**
+   * Strip model meta commentary from text.
+   * @param {string} text - Raw text
+   * @returns {string} Cleaned text
+   */
   function stripModelMetaCommentary(text) {
     var value = String(text || '').trim();
     if (!value) return '';
@@ -11,12 +19,22 @@
     return value.trim();
   }
 
+  /**
+   * Check if error looks like max output token error.
+   * @param {Error} error - Error object
+   * @returns {boolean} True if max output token error
+   */
   function isMaxOutputTokenLikeError(error) {
     var message = String(error && error.message || '');
     if (!message) return false;
     return /(max(?:imum)?\s*(?:output\s*)?tokens?|max_output_tokens|output token limit|too many output tokens|exceeded.*output|finish_reason\s*[:=]\s*"?length"?)/i.test(message);
   }
 
+  /**
+   * Check if reply looks like deferred action.
+   * @param {string} text - Reply text
+   * @returns {boolean} True if deferred
+   */
   function looksLikeDeferredActionReply(text) {
     var value = String(text || '').trim();
     if (!value) return false;
@@ -26,6 +44,11 @@
     return futureActionPattern.test(value) && actionVerbPattern.test(value) && !finalityPattern.test(value);
   }
 
+  /**
+   * Check if reply claims tool execution without call.
+   * @param {string} text - Reply text
+   * @returns {boolean} True if claim without call
+   */
   function looksLikeToolExecutionClaimWithoutCall(text) {
     var value = String(text || '').trim();
     if (!value) return false;
@@ -35,6 +58,10 @@
     return executionClaimPattern.test(value) && waitingPattern.test(value) && !finalityPattern.test(value);
   }
 
+  /**
+   * Get regex for tool call cleanup.
+   * @returns {RegExp} Cleanup regex
+   */
   function getToolCallCleanupRegex() {
     var regex = window.AgentRegex;
     var sharedToolBlock = regex && regex.TOOL_BLOCK;
@@ -44,6 +71,11 @@
     return /<tool_call(?:\s[^>]*>|>?)\s*[\s\S]*?<\/tool_call>/gi;
   }
 
+  /**
+   * Extract planner optimized query from messages.
+   * @param {import('../types/index.js').SessionMessage[]} messages - Messages
+   * @returns {string} Extracted query
+   */
   function extractPlannerOptimizedQueryFromMessages(messages) {
     var recentUserMessages = Array.isArray(messages)
       ? messages.filter(function(message) { return message && message.role === 'user'; }).slice(-8).reverse()
@@ -74,6 +106,11 @@
     return '';
   }
 
+  /**
+   * Extract thinking blocks from text.
+   * @param {string} text - Raw text
+   * @returns {string[]} Thinking blocks
+   */
   function extractThinkingBlocks(text) {
     var blocks = [];
     var remaining = String(text || '');
@@ -96,6 +133,11 @@
     return blocks.filter(Boolean);
   }
 
+  /**
+   * Normalize visible model text.
+   * @param {string} text - Raw text
+   * @returns {string} Normalized text
+   */
   function normalizeVisibleModelText(text) {
     var value = String(text || '').trim();
     if (!value) return '';
@@ -128,6 +170,11 @@
     return value.trim();
   }
 
+  /**
+   * Split model reply into raw, thinking, and visible parts.
+   * @param {string} text - Raw reply
+   * @returns {{raw: string, thinkingBlocks: string[], visible: string}} Split reply
+   */
   function splitModelReply(text) {
     var raw = String(text || '');
     var withoutThinking = raw;

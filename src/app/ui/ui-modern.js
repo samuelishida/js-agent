@@ -1,9 +1,11 @@
-﻿/**
- * Modern UI Handlers - Settings Modal Management Only
- * Session list, sidebar, and badge updates are handled in state.js and agent.js
- */
+﻿// src/app/ui/ui-modern.js
+// Modern UI Handlers - Settings Modal Management Only
+// Session list, sidebar, and badge updates are handled in state.js and agent.js
 
-// Settings Modal Management
+/**
+ * Open settings modal.
+ * @returns {void}
+ */
 function openSettings() {
   const modal = document.getElementById('settings-modal');
   if (modal) {
@@ -12,6 +14,10 @@ function openSettings() {
   }
 }
 
+/**
+ * Close settings modal.
+ * @returns {void}
+ */
 function closeSettings() {
   const modal = document.getElementById('settings-modal');
   if (modal) {
@@ -26,6 +32,10 @@ window.openConfirmationPanel = openConfirmationPanel;
 window.closeConfirmationPanel = closeConfirmationPanel;
 
 // Confirmation Panel Handlers
+/**
+ * Open confirmation panel with pending items.
+ * @returns {void}
+ */
 function openConfirmationPanel() {
   const panel = document.getElementById('confirmation-panel');
   const list = document.getElementById('confirmation-list');
@@ -64,11 +74,20 @@ function openConfirmationPanel() {
   }, { once: true });
 }
 
+/**
+ * Close confirmation panel.
+ * @returns {void}
+ */
 function closeConfirmationPanel() {
   const panel = document.getElementById('confirmation-panel');
   if (panel) panel.classList.add('hidden');
 }
 
+/**
+ * Approve a confirmation by signature.
+ * @param {string} signature - Tool signature
+ * @returns {void}
+ */
 function approveConfirmation(signature) {
   if (window.AgentConfirmation?.approve) {
     window.AgentConfirmation.approve(signature);
@@ -76,6 +95,11 @@ function approveConfirmation(signature) {
   }
 }
 
+/**
+ * Reject a confirmation by signature.
+ * @param {string} signature - Tool signature
+ * @returns {void}
+ */
 function rejectConfirmation(signature) {
   if (window.AgentConfirmation?.reject) {
     window.AgentConfirmation.reject(signature);

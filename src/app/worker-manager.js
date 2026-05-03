@@ -1,11 +1,17 @@
-// ── Worker Manager ──
-// Creates and manages Web Workers for sandbox isolation.
-// Workers are created lazily on first use and reused.
+// src/app/worker-manager.js
+// Worker Manager: creates and manages Web Workers for sandbox isolation.
 
 ;(function() {
+  /** @type {Worker|null} */
   let sandboxWorker = null;
+  /** @type {number} */
   let taskIdCounter = 0;
 
+  /**
+   * Create a Web Worker.
+   * @param {string} url - Worker script URL
+   * @returns {Worker|null} Worker or null
+   */
   function createWorker(url) {
     try {
       return new Worker(url, { type: 'classic' });
@@ -15,12 +21,22 @@
     }
   }
 
+  /**
+   * Get or create sandbox worker.
+   * @returns {Worker|null} Sandbox worker
+   */
   function getSandboxWorker() {
     if (sandboxWorker) return sandboxWorker;
     sandboxWorker = createWorker('/src/tools/sandboxWorker.js');
     return sandboxWorker;
   }
 
+  /**
+   * Post message to worker and await response.
+   * @param {Worker} worker - Target worker
+   * @param {Object} msg - Message to post
+   * @returns {Promise<any>} Worker response
+   */
   function postToWorker(worker, msg) {
     return new Promise((resolve, reject) => {
       if (!worker) { reject(new Error('Worker not available')); return; }
@@ -45,6 +61,12 @@
     });
   }
 
+  /**
+   * Execute a tool in sandboxed worker.
+   * @param {string} tool - Tool name
+   * @param {Object} args - Tool arguments
+   * @returns {Promise<any>} Execution result
+   */
   function executeSandboxed(tool, args) {
     const worker = getSandboxWorker();
     // Pass terminal auth token to worker (worker has no window access)
@@ -54,6 +76,10 @@
     return postToWorker(worker, { tool, args });
   }
 
+  /**
+   * Terminate all workers.
+   * @returns {void}
+   */
   function terminateAll() {
     if (sandboxWorker) { sandboxWorker.terminate(); sandboxWorker = null; }
   }

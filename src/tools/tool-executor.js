@@ -6,28 +6,58 @@
 (() => {
   'use strict';
 
+  /** @type {string} */
   const TASKS_STORAGE_KEY = 'agent_tasks_v1';
+  /** @type {string} */
   const TODOS_STORAGE_KEY = 'agent_todos_v1';
+  /** @type {string} */
   const WORKER_RUNS_STORAGE_KEY = 'agent_worker_runs_v1';
+  /** @type {number} */
   const WORKER_RUNS_LIMIT = 40;
+  /** @type {Set<string>} */
   const TEXT_EXTENSIONS = new Set(['txt', 'md', 'json', 'js', 'ts', 'css', 'html', 'xml', 'csv', 'log', 'yml', 'yaml']);
 
+  /**
+   * Format a tool result.
+   * @param {string} title - Tool name
+   * @param {string} body - Result body
+   * @returns {string} Formatted result
+   */
   function formatToolResult(title, body) {
     return `## ${title}\n\n${body}`.trim();
   }
 
+  /**
+   * Get file extension.
+   * @param {string} name - Filename
+   * @returns {string} Extension
+   */
   function getExtension(name) {
     return String(name || '').split('.').pop().toLowerCase();
   }
 
+  /**
+   * Check if file supports text preview.
+   * @param {string} name - Filename
+   * @returns {boolean} True if text previewable
+   */
   function supportsTextPreview(name) {
     return TEXT_EXTENSIONS.has(getExtension(name));
   }
 
+  /**
+   * Check if filesystem access is supported.
+   * @returns {boolean} True if supported
+   */
   function supportsFsAccess() {
     return !!window.showDirectoryPicker;
   }
 
+  /**
+   * Assert filesystem access is available.
+   * @returns {void}
+   * @throws {Error} If not supported
+   */
   function assertFsAccess() {
     if (!supportsFsAccess()) {
       throw new Error('File System Access API is not supported in this browser.');
@@ -48,6 +78,11 @@
 
   // ── Text utilities ──────────────────────────────────────────────────────
 
+  /**
+   * Strip agent tags from text.
+   * @param {string} text - Raw text
+   * @returns {string} Cleaned text
+   */
   function stripAgentTags(text) {
     return String(text || '')
       .replace(/<tool_result[\s\S]*?<\/tool_result>/gi, ' ')
@@ -58,6 +93,11 @@
       .trim();
   }
 
+  /**
+   * Extract query plan from message content.
+   * @param {string} text - Message content
+   * @returns {string} Extracted query or empty
+   */
   function extractQueryPlanFromMessageContent(text) {
     const raw = String(text || '');
     if (!raw) return '';
@@ -71,6 +111,11 @@
     return String(plannerMatch?.[1] || '').trim();
   }
 
+  /**
+   * Check if text is a runtime control prompt.
+   * @param {string} text - Text to check
+   * @returns {boolean} True if control prompt
+   */
   function isRuntimeControlPrompt(text) {
     const value = String(text || '').trim();
     if (!value) return false;
@@ -84,6 +129,12 @@
     ].some(pattern => pattern.test(value));
   }
 
+  /**
+   * Derive web search query from context.
+   * @param {string} query - Direct query
+   * @param {Object} [context={}] - Context with messages
+   * @returns {string} Derived query
+   */
   function deriveWebSearchQuery(query, context = {}) {
     const direct = String(query || '').trim();
     if (direct) return direct;

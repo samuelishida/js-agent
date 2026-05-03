@@ -6,6 +6,7 @@
 (() => {
   'use strict';
 
+  /** @type {Set<string>} */
   const LAZY_TOOLS = new Set([
     'weather_current', 'geo_current_location', 'clipboard_read', 'clipboard_write',
     'storage_list_keys', 'storage_get', 'storage_set',
@@ -24,10 +25,15 @@
     'runtime_fileDiff',
     'skill_search', 'skill_load'
   ]);
+  /** @type {Set<string>} */
   const lazyLoaded = new Set();
 
-  // Tracks first invocation of a tool for telemetry (does NOT defer loading —
-  // realRun is already bound at registration time; rename to reflect actual behavior).
+  /**
+   * Create a lazy runner that tracks first invocation.
+   * @param {string} name - Tool name
+   * @param {Function} realRun - Actual run function
+   * @returns {Function} Tracked run function
+   */
   function makeLazyRunner(name, realRun) {
     let invoked = false;
     return async function trackedRun(args, context) {
@@ -39,6 +45,18 @@
     };
   }
 
+  /**
+   * Register a compat tool.
+   * @param {Object} registry - Tool registry
+   * @param {Object} toolGroups - Tool groups
+   * @param {Object} tool - Tool definition
+   * @param {string} tool.name - Tool name
+   * @param {string} tool.signature - Tool signature
+   * @param {string} tool.description - Tool description
+   * @param {Function} tool.run - Run function
+   * @param {number} [tool.retries=1] - Retry count
+   * @returns {void}
+   */
   function registerCompatTool(registry, toolGroups, { name, signature, description, run, retries = 1 }) {
     if (registry[name]) return;
     const actualRun = LAZY_TOOLS.has(name) ? makeLazyRunner(name, run) : run;
@@ -55,6 +73,13 @@
     }
   }
 
+  /**
+   * Register snapshot tools from AgentSnapshot.
+   * @param {Object} registry - Tool registry
+   * @param {Object} toolGroups - Tool groups
+   * @param {Function} formatToolResult - Result formatter
+   * @returns {void}
+   */
   function registerSnapshotTools(registry, toolGroups, formatToolResult) {
     const snapshotApi = window.AgentSnapshot;
     const importedTools = snapshotApi?.getBundledTools?.() || [];
@@ -99,6 +124,15 @@
     }
   }
 
+  /**
+   * Search tools by query.
+   * @param {Object} registry - Tool registry
+   * @param {Object} opts - Options
+   * @param {string} [opts.query=''] - Search query
+   * @param {number} [opts.limit=30] - Result limit
+   * @param {Function} formatToolResult - Result formatter
+   * @returns {Promise<string>} Search results
+   */
   async function toolSearch(registry, { query = '', limit = 30 }, formatToolResult) {
     const terms = String(query || '').toLowerCase().trim();
     const max = Math.max(1, Math.min(200, Number(limit) || 30));
@@ -125,6 +159,14 @@
     );
   }
 
+  /**
+   * Get snapshot tool catalog.
+   * @param {Object} [opts={}] - Options
+   * @param {string} [opts.query=''] - Filter query
+   * @param {number} [opts.limit=30] - Result limit
+   * @param {Function} formatToolResult - Result formatter
+   * @returns {Promise<string>} Catalog
+   */
   async function snapshotToolCatalog({ query = '', limit = 30 } = {}, formatToolResult) {
     const snapshotApi = window.AgentSnapshot;
     const formatted = snapshotApi?.formatToolCatalogForTool?.({ query, limit });

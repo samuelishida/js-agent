@@ -1,6 +1,11 @@
+// src/tools/core/tool-meta.js
+// Tool metadata: classification, execution meta, dependency tracking.
+
 (() => {
+  /** @type {Object} */
   const root = (window.AgentToolCore = window.AgentToolCore || {});
 
+  /** @type {Set<string>} */
   const SAFE_CLASSIFIED_TOOLS = new Set([
     'web_search',
     'web_fetch',
@@ -140,6 +145,11 @@
     datetime: { readOnly: true, concurrencySafe: true, destructive: false, riskLevel: 'normal' }
   };
 
+  /**
+   * Classify tools into safe/write/other categories.
+   * @param {string[]} tools - Tool names
+   * @returns {{safe: string[], write: string[], other: string[], riskLevel: string}} Classification
+   */
   function classifyRecommendedTools(tools) {
     const safe = [];
     const write = [];
@@ -159,6 +169,11 @@
     };
   }
 
+  /**
+   * Get execution metadata for a tool.
+   * @param {string} toolName - Tool name
+   * @returns {{readOnly: boolean, concurrencySafe: boolean, destructive: boolean, riskLevel: string}} Execution meta
+   */
   function getToolExecutionMeta(toolName) {
     const name = String(toolName || '').trim();
     if (!name) {
@@ -187,6 +202,11 @@
     };
   }
 
+  /**
+   * Check if a tool can run concurrently.
+   * @param {import('../../types/index.js').ToolCall} call - Tool call
+   * @returns {boolean} True if concurrent
+   */
   function canRunToolConcurrently(call) {
     const meta = getToolExecutionMeta(call?.tool);
     return !!meta.concurrencySafe;

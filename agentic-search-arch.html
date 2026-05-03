@@ -429,6 +429,7 @@
   <a href="#routing">Model Routing</a>
   <a href="#memory">Memory + Cache</a>
   <a href="#rendering">UI Rendering</a>
+  <a href="#skills-catalog">Skills Catalog</a>
   <div class="nav-group">Safety</div>
   <a href="#safety">Prompt Injection</a>
   <a href="#guardrails">Loop Guardrails</a>
@@ -1764,6 +1765,123 @@ node proxy/dev-server.js
           </tr>
         </tbody>
       </table>
+    </div>
+  </section>
+
+  <div class="div"></div>
+
+  <!-- ── SKILLS CATALOG ── -->
+  <section id="skills-catalog" class="rv">
+    <div class="sec-hd">
+      <div class="sec-icon">🧩</div>
+      <h2>Skills Catalog</h2>
+    </div>
+    <p class="sec-desc">
+      17 built-in skills for the browser-first AI agent. All file generation uses <strong>pure JavaScript</strong> — no Python required.
+      Skills are loaded dynamically and registered in <code>window.AgentToolModules</code>.
+    </p>
+    <div class="card-grid">
+      <div class="card" onclick="tog(this)">
+        <div class="card-hd">
+          <div class="card-hd-l">
+            <span class="card-ico">📄</span>
+            <div class="card-meta">
+              <div class="card-lbl">Binary Output</div>
+              <div class="card-ttl">File Generation</div>
+            </div>
+          </div>
+          <button class="card-tog">▼</button>
+        </div>
+        <div class="card-bd">
+          <div class="card-desc">Generate DOCX, PDF, XLSX, PPTX using Node.js scripts executed via <code>runtime_generateFile</code>.</div>
+          <div class="card-det">
+            <div class="cb">
+              <div class="cb-hd"><span class="cb-lang">Skills</span></div>
+              <pre><span class="fn">file-generation</span>  <span class="cm">// central skill for all binary file output</span></pre>
+            </div>
+            <div class="tag-row" style="margin-top:10px"><span class="tag">Pure JS</span><span class="tag">Binary Output</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" onclick="tog(this)">
+        <div class="card-hd">
+          <div class="card-hd-l">
+            <span class="card-ico">📁</span>
+            <div class="card-meta">
+              <div class="card-lbl">Read / Edit</div>
+              <div class="card-ttl">Existing Files</div>
+            </div>
+          </div>
+          <button class="card-tog">▼</button>
+        </div>
+        <div class="card-bd">
+          <div class="card-desc">Read and edit existing Word, PDF, PowerPoint, and spreadsheet files.</div>
+          <div class="card-det">
+            <div class="cb">
+              <div class="cb-hd"><span class="cb-lang">Skills</span></div>
+              <pre><span class="fn">docx</span>   <span class="cm">// read and edit Word documents</span>
+<span class="fn">pdf</span>    <span class="cm">// read and process PDF files</span>
+<span class="fn">pptx</span>   <span class="cm">// read and edit PowerPoint files</span>
+<span class="fn">xlsx</span>   <span class="cm">// read and analyze spreadsheets</span></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" onclick="tog(this)">
+        <div class="card-hd">
+          <div class="card-hd-l">
+            <span class="card-ico">🎨</span>
+            <div class="card-meta">
+              <div class="card-lbl">Content & Design</div>
+              <div class="card-ttl">Creative & Frontend</div>
+            </div>
+          </div>
+          <button class="card-tog">▼</button>
+        </div>
+        <div class="card-bd">
+          <div class="card-desc">Generative art, brand guidelines, canvas design, documentation co-authoring, frontend interfaces, themes, and web artifacts.</div>
+          <div class="card-det">
+            <div class="cb">
+              <div class="cb-hd"><span class="cb-lang">Skills</span></div>
+              <pre><span class="fn">algorithmic-art</span>      <span class="cm">// p5.js generative art with seeded randomness</span>
+<span class="fn">brand-guidelines</span>     <span class="cm">// apply brand colors and typography</span>
+<span class="fn">canvas-design</span>      <span class="cm">// create visual art in .png and .pdf</span>
+<span class="fn">doc-coauthoring</span>    <span class="cm">// structured workflow for co-authoring docs</span>
+<span class="fn">frontend-design</span>    <span class="cm">// production-grade frontend interfaces</span>
+<span class="fn">internal-comms</span>     <span class="cm">// company-preferred communication formats</span>
+<span class="fn">theme-factory</span>      <span class="cm">// 10 pre-set themes or generate new ones</span>
+<span class="fn">web-artifacts-builder</span> <span class="cm">// React + Tailwind CSS + shadcn/ui artifacts</span>
+<span class="fn">webapp-testing</span>     <span class="cm">// Playwright-based web app testing</span></pre>
+            </div>
+            <div class="tag-row" style="margin-top:10px"><span class="tag">Pure JS</span><span class="tag">React</span><span class="tag">Playwright</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" onclick="tog(this)">
+        <div class="card-hd">
+          <div class="card-hd-l">
+            <span class="card-ico">🛠️</span>
+            <div class="card-meta">
+              <div class="card-lbl">Developer</div>
+              <div class="card-ttl">Builder Tools</div>
+            </div>
+          </div>
+          <button class="card-tog">▼</button>
+        </div>
+        <div class="card-bd">
+          <div class="card-desc">Create MCP servers and manage the skill lifecycle.</div>
+          <div class="card-det">
+            <div class="cb">
+              <div class="cb-hd"><span class="cb-lang">Skills</span></div>
+              <pre><span class="fn">mcp-builder</span>    <span class="cm">// guide for creating high-quality MCP servers</span>
+<span class="fn">skill-creator</span>  <span class="cm">// create, modify, and measure skill performance</span></pre>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 

@@ -231,6 +231,19 @@
       INJECTION_TAG_STRIP_REGEX: /<tool_call>[\s\S]*?<\/tool_call>/gi,
       REMINDER_TAG_STRIP_REGEX: /<system-reminder[^>]*>[\s\S]*?<\/system-reminder>/gi,
       DENIAL_TAG_STRIP_REGEX: /<permission_denials[^>]*>[\s\S]*?<\/permission_denials>/gi,
+      // Natural-language prompt-injection heuristics applied to tool results
+      NL_INJECTION_PATTERNS: [
+        /ignore\s+(?:all\s+)?(?:previous\s+)?instructions?/i,
+        /ignore\s+(?:the\s+)?(?:system\s+)?prompt/i,
+        /you\s+(?:are\s+)?now\s+(?:in\s+)?(?:developer|debug|admin|root|DAN)\s*mode/i,
+        /jailbreak|DAN\s+mode|do\s+anything\s+now/i,
+        /new\s+system\s+prompt|override\s+system\s+prompt/i,
+        /disregard\s+(?:your\s+)?(?:programming|training|safety\s+guidelines)/i,
+        /(?:pretend|act\s+as\s+if)\s+you\s+(?:are|have\s+no)/i,
+        /\[\s*SYSTEM\s+OVERRIDE\s*\]/i,
+        /<\s*system\s*override\s*>/i,
+        /end\s+of\s+(?:system|developer|previous)\s+instructions?/i
+      ]
     },
 
     // ── String sanitization ──────────────────────────────────────────

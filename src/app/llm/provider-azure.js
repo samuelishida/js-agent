@@ -99,21 +99,45 @@ async function callAzureOpenAiCloud(msgs, signal, options = {}, initialDeploymen
     }
     const retryData = JSON.parse(await retryRes.text());
     const retryToolCalls = retryData?.choices?.[0]?.message?.tool_calls;
+    const retryReasoning = retryData?.choices?.[0]?.message?.reasoning || retryData?.choices?.[0]?.message?.reasoning_content || retryData?.choices?.[0]?.message?.thinking || '';
     if (Array.isArray(retryToolCalls) && retryToolCalls.length) {
       const xml = window.AgentLLMUtils?.normalizeFunctionCallsToXml(retryToolCalls);
-      if (xml) return xml;
+      if (xml) {
+        if (retryReasoning && String(retryReasoning).trim()) {
+          return '\u003cthink\u003e\n' + String(retryReasoning).trim() + '\n\u003c/think\u003e\n' + xml;
+        }
+        return xml;
+      }
     }
-    return retryData?.choices?.[0]?.message?.content || retryData?.choices?.[0]?.text || '';
+    const retryContent = retryData?.choices?.[0]?.message?.content || retryData?.choices?.[0]?.text || '';
+    if (retryReasoning && String(retryReasoning).trim()) {
+      let combined = '<tool_call>\n' + String(retryReasoning).trim() + '\n<\/think>\n';
+      if (retryContent) combined += '\n' + retryContent;
+      return combined;
+    }
+    return retryContent;
   }
 
   const text = await res.text();
   const data = JSON.parse(text);
   const toolCalls = data.choices?.[0]?.message?.tool_calls;
+  const rawReasoning = data?.choices?.[0]?.message?.reasoning || data?.choices?.[0]?.message?.reasoning_content || data?.choices?.[0]?.message?.thinking || '';
   if (Array.isArray(toolCalls) && toolCalls.length) {
     const xml = window.AgentLLMUtils?.normalizeFunctionCallsToXml(toolCalls);
-    if (xml) return xml;
+    if (xml) {
+      if (rawReasoning && String(rawReasoning).trim()) {
+        return '\u003cthink\u003e\n' + String(rawReasoning).trim() + '\n\u003c/think\u003e\n' + xml;
+      }
+      return xml;
+    }
   }
-  return data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || '';
+  const rawContent = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || '';
+  if (rawReasoning && String(rawReasoning).trim()) {
+    let combined = '<tool_call>\n' + String(rawReasoning).trim() + '\n<\/think>\n';
+    if (rawContent) combined += '\n' + rawContent;
+    return combined;
+  }
+  return rawContent;
 }
 
 window.AgentLLMProviderAzure = { callAzureOpenAiCloud };

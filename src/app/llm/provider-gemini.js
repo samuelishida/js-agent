@@ -97,7 +97,23 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
     error.status = 500;
     throw error;
   }
-  return data.candidates[0]?.content?.parts?.[0]?.text || '';
+
+  // Extract thinking/reasoning parts from Gemini response
+  const parts = data.candidates[0]?.content?.parts || [];
+  let visibleText = '';
+  let thinkingText = '';
+  for (const part of parts) {
+    if (part.text) visibleText += part.text;
+    if (part.thought && part.text) thinkingText += part.text;
+  }
+  // If there are thought parts, wrap them in <think> tags
+  if (thinkingText.trim()) {
+    let combined = '<tool_call>\n' + thinkingText.trim() + '\n<\/think>\n';
+    if (visibleText.trim()) combined += '\n' + visibleText.trim();
+    return combined;
+  }
+
+  return visibleText || '';
 }
 
 window.AgentLLMProviderGemini = { callGeminiDirect };

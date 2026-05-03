@@ -146,6 +146,15 @@
       signals.push(`Prompt injection guard: ${String(toolCall?.tool || 'tool')} returned control-channel content.`);
     }
 
+    // Detect natural-language prompt-injection attempts in tool results
+    const nlPatterns = C().INJECTION_PATTERNS?.NL_INJECTION_PATTERNS || [];
+    for (const re of nlPatterns) {
+      if (re.test(text)) {
+        signals.push(`Prompt injection guard: ${String(toolCall?.tool || 'tool')} returned possible natural-language injection attempt.`);
+        break; // one signal per tool result is enough
+      }
+    }
+
     return signals;
   }
 

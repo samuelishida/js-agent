@@ -474,9 +474,10 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   const TE = window.AgentToolExecution;
   const Perm = window.AgentPermissions || {};
   let toolCalls = TE?.resolveToolCallsFromModelReply ? TE.resolveToolCallsFromModelReply(reply, rawReply) : [];
+  let repaired = null;
 
   if (!toolCalls.length) {
-    const repaired = await tryRepairToolCalls({ userMessage, rawReply, reply, parsedReply: safeParsedReply, messages });
+    repaired = await tryRepairToolCalls({ userMessage, rawReply, reply, parsedReply: safeParsedReply, messages });
     if (repaired.toolCalls.length) {
       addNotice(`Repair pass normalized malformed output into valid tool call(s): ${repaired.toolCalls.map(c => c.tool).join(', ')}.`);
       toolCalls = repaired.toolCalls;

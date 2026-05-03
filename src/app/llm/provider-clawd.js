@@ -59,10 +59,24 @@ async function callClawdCloud(msgs, signal, options = {}, initialModel = '') {
   }
 
   const data = JSON.parse(text);
-  const responseText = Array.isArray(data.content)
-    ? data.content.filter(block => block?.type === 'text').map(block => block.text || '').join('')
-    : '';
-  return responseText || data.output_text || '';
+  // Extract thinking blocks from Claude's extended thinking format
+  let thinkingText = '';
+  let visibleText = '';
+  if (Array.isArray(data.content)) {
+    for (const block of data.content) {
+      if (block?.type === 'thinking' && block?.thinking) {
+        thinkingText += block.thinking;
+      } else if (block?.type === 'text' && block?.text) {
+        visibleText += block.text;
+      }
+    }
+  }
+  if (thinkingText.trim()) {
+    let combined = '<tool_call>\n' + thinkingText.trim() + '\n<\/think>\n';
+    if (visibleText.trim()) combined += '\n' + visibleText.trim();
+    return combined;
+  }
+  return visibleText || data.output_text || '';
 }
 
 window.AgentLLMProviderClawd = { callClawdCloud };

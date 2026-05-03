@@ -407,9 +407,18 @@
       lines.push('');
       // Truncate very long skill content to avoid context bloat
       const maxContentLength = 4000;
-      const content = skill.content.length > maxContentLength
+      let content = skill.content.length > maxContentLength
         ? skill.content.slice(0, maxContentLength) + '\n... (truncated)'
         : skill.content;
+      // SECURITY: Strip control-channel tags from skill content before injecting into
+      // the system prompt. A compromised or malicious skill file could otherwise inject
+      // <system-reminder>, <tool_call>, or [SYSTEM OVERRIDE] into the system prompt.
+      const injectionPatterns = window.CONSTANTS?.INJECTION_PATTERNS || {};
+      content = content
+        .replace(injectionPatterns.INJECTION_TAG_STRIP_REGEX || /<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+        .replace(injectionPatterns.REMINDER_TAG_STRIP_REGEX || /<system-reminder[^>]*>[\s\S]*?<\/system-reminder>/gi, '')
+        .replace(injectionPatterns.DENIAL_TAG_STRIP_REGEX || /<permission_denials[^>]*>[\s\S]*?<\/permission_denials>/gi, '')
+        .replace(/\[SYSTEM\s+OVERRIDE\]/gi, '[BLOCKED]');
       lines.push(content);
       lines.push('');
     }

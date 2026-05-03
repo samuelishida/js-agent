@@ -132,6 +132,10 @@ function shouldAttemptToolCallRepair({ rawReply = '', cleanReply = '', thinkingB
   const thinkingSaysFinal = window.AgentReplyAnalysis?.thinkingIndicatesFinalAnswer?.(thinkingBlocks);
   if (!visible && Array.isArray(thinkingBlocks) && thinkingBlocks.some(block => String(block || '').trim()) && !thinkingSaysFinal) return true;
 
+  // If thinking indicates final answer, skip deferred-action and reasoning-leak repair
+  // to avoid infinite loops where repair keeps triggering on model narration
+  if (thinkingSaysFinal) return false;
+
   if (looksLikeDeferredActionReply(visible)) return true;
   if (looksLikeToolExecutionClaimWithoutCall(visible)) return true;
   if (orchestrator?.hasReasoningLeak?.(visible)) return true;

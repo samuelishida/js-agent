@@ -241,7 +241,13 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
       const toolCalls = data.choices?.[0]?.message?.tool_calls;
       if (Array.isArray(toolCalls) && toolCalls.length) {
         const xml = window.AgentLLMUtils?.normalizeFunctionCallsToXml(toolCalls);
-        if (xml) return xml;
+        if (xml) {
+          // Preserve reasoning even when returning tool calls
+          if (rawReasoning && rawReasoning.trim()) {
+            return '<think>\n' + rawReasoning + '\n</think>\n' + xml;
+          }
+          return xml;
+        }
       }
     }
 

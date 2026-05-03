@@ -70,12 +70,26 @@ async function callOpenRouter(msgs, signal, options = {}, initialModel = '') {
 
   // Check for native tool_calls before falling back to content
   const toolCalls = data?.choices?.[0]?.message?.tool_calls;
+  const rawReasoning = data?.choices?.[0]?.message?.reasoning || data?.choices?.[0]?.message?.reasoning_content || data?.choices?.[0]?.message?.thinking || '';
   if (Array.isArray(toolCalls) && toolCalls.length) {
     const xml = window.AgentLLMUtils?.normalizeFunctionCallsToXml(toolCalls);
-    if (xml) return xml;
+    if (xml) {
+      if (rawReasoning && String(rawReasoning).trim()) {
+        return '\u003cthink\u003e\n' + String(rawReasoning).trim() + '\n\u003c/think\u003e\n' + xml;
+      }
+      return xml;
+    }
   }
 
-  return data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || '';
+  const rawContent = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || '';
+
+  if (rawReasoning && String(rawReasoning).trim()) {
+    let combined = '<think>\n' + String(rawReasoning).trim() + '\n</think>';
+    if (rawContent) combined += '\n' + rawContent;
+    return combined;
+  }
+
+  return rawContent;
 }
 
 window.AgentLLMProviderOpenRouter = { callOpenRouter };

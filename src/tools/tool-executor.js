@@ -446,6 +446,22 @@
         if (stored) resolvedContent = stored;
       } catch { /* localStorage unavailable — fall through */ }
     }
+
+    // Validate: runtime_generateFile expects a Node.js script, not plain text/markdown
+    if (resolvedContent) {
+      const looksLikeMarkdown = /^\s*#+\s/.test(resolvedContent) || /^\s*\*\s/.test(resolvedContent) || /^\s*-\s/.test(resolvedContent);
+      const looksLikePlainText = !/\b(require\(|import\s|module\.exports|exports\.|const\s|let\s|var\s|function\s|async\s|=>|process\.)/.test(resolvedContent) && resolvedContent.length > 0;
+      const hasJsExtension = /\.(js|cjs|mjs)$/i.test(scriptPath);
+      if (looksLikeMarkdown || (looksLikePlainText && !hasJsExtension)) {
+        return formatToolResult('runtime_generateFile', `ERROR: runtime_generateFile expects a Node.js script that generates binary output (e.g., using pdfkit, docx, exceljs). The provided content appears to be ${looksLikeMarkdown ? 'Markdown/plaintext' : 'plain text'} and the path "${scriptPath}" does not have a .js/.cjs extension.\n\nTo generate a PDF, provide a script like:\n\nconst PDFDocument = require('pdfkit');\nconst doc = new PDFDocument();\n// ... build PDF ...\nprocess.stdout.write(doc.output());`);
+      }
+      // SECURITY: If content is a script, the execution path MUST have a JS extension.
+      // Otherwise node will throw ERR_UNKNOWN_FILE_EXTENSION (e.g., node "report.pdf").
+      if (!hasJsExtension) {
+        return formatToolResult('runtime_generateFile', `ERROR: runtime_generateFile path must have a .js, .cjs, or .mjs extension when content is provided. Received: "${scriptPath}".\n\nUse a script path like "agent-sandbox/gen.cjs" and set filename="${scriptPath}" or outputFilename="${scriptPath}" to control the downloaded file name.`);
+      }
+    }
+
     const runCmd = command || `node "${scriptPath}"`;
     const payload = { command: runCmd, cwd, files: [] };
     if (resolvedContent) {
@@ -489,7 +505,11 @@
         const a = document.createElement('a');
         a.href = url;
         a.download = outputFilename || scriptPath.replace(/^.*[\\/]/, '') || `output.${ext}`;
+        // Append to DOM so click works reliably across browsers, then clean up
+        a.style.display = 'none';
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(url), 5000);
         // Also save to localStorage as fallback
         try { localStorage.setItem('__last_generated_base64__', b64); } catch {}

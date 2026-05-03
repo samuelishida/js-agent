@@ -93,7 +93,9 @@
         memory_search: args => Memory.memorySearch(args),
         memory_list: args => Memory.memoryList(args),
         tool_search: args => Registry.toolSearch(registry, args, Executor.formatToolResult),
-        snapshot_tool_catalog: args => Registry.snapshotToolCatalog(args, Executor.formatToolResult)
+        snapshot_tool_catalog: args => Registry.snapshotToolCatalog(args, Executor.formatToolResult),
+        skill_search: args => Executor.skillSearch(args),
+        skill_load: args => Executor.skillLoad(args)
       })
     : { registry: {}, toolGroups: {} };
 
@@ -119,7 +121,7 @@
     { name: 'runtime_glob', signature: 'runtime_glob(pattern, exclude?)', description: 'Finds files matching a glob pattern.', run: Executor.runtimeGlob },
     { name: 'runtime_searchCode', signature: 'runtime_searchCode(query, glob?, isRegex?, caseSensitive?, contextLines?, maxResults?)', description: 'Searches code/text files with optional glob and context.', run: Executor.runtimeSearchCode },
     { name: 'runtime_runTerminal', signature: 'runtime_runTerminal(command, cwd?)', description: 'Runs a terminal command through the local dev server bridge.', run: Executor.runtimeRunTerminal },
-    { name: 'runtime_generateFile', signature: 'runtime_generateFile(path, content?, cwd?, command?, storageKey?)', description: 'Writes a script to the dev server sandbox and executes it. AUTO-DOWNLOADS the result when the script outputs base64 to stdout — no second tool call needed. Use for generating binary files (DOCX, PDF, PPTX, XLSX, PNG) server-side. The script should end with process.stdout.write(base64String). Prefer the content parameter for script source — it handles any size. Only use storageKey for small scripts already in localStorage. Always prefer this over runtime_runTerminal for file generation — no confirmation gate, no authorized folder needed.', run: Executor.runtimeGenerateFile },
+    { name: 'runtime_generateFile', signature: 'runtime_generateFile(path, content?, cwd?, command?, storageKey?)', description: 'Writes a script to the dev server sandbox and executes it. AUTO-DOWNLOADS when script outputs base64 to stdout. Use for generating binary files (DOCX, PDF, PPTX, XLSX, PNG). Script should end with process.stdout.write(base64String). Prefer content param for script source. Only use storageKey for scripts already in localStorage.', run: Executor.runtimeGenerateFile },
     { name: 'runtime_webFetch', signature: 'runtime_webFetch(url)', description: 'Fetches a URL and returns readable text.', run: Executor.runtimeWebFetch },
     { name: 'runtime_getDiagnostics', signature: 'runtime_getDiagnostics(path?, severity?)', description: 'Gets diagnostics from the local dev server bridge when available.', run: Executor.runtimeGetDiagnostics },
     { name: 'runtime_fileDiff', signature: 'runtime_fileDiff(path, newContent)', description: 'Computes a line-by-line diff of a file before editing.', run: Executor.runtimeFileDiff },
@@ -127,7 +129,9 @@
     { name: 'runtime_memoryRead', signature: 'runtime_memoryRead(scope?)', description: 'Reads compatibility memory with global/project scopes.', run: Memory.runtimeMemoryRead },
     { name: 'runtime_memoryWrite', signature: 'runtime_memoryWrite(topic?, content, replace?, scope?)', description: 'Writes compatibility memory with global/project scopes.', run: Memory.runtimeMemoryWrite },
     { name: 'runtime_lsp', signature: 'runtime_lsp(action, path?, line?, col?, query?)', description: 'LSP compatibility placeholder for the browser runtime.', run: Executor.runtimeLsp },
-    { name: 'runtime_spawnAgent', signature: 'runtime_spawnAgent(task, tools?, maxIterations?)', description: 'Runs a focused sub-agent task using the worker runtime.', run: Executor.runtimeSpawnAgent }
+    { name: 'runtime_spawnAgent', signature: 'runtime_spawnAgent(task, tools?, maxIterations?)', description: 'Runs a focused sub-agent task using the worker runtime.', run: Executor.runtimeSpawnAgent },
+    { name: 'skill_search', signature: 'skill_search(query?)', description: 'Search available skills (methodology/expertise docs) by keyword. Returns scored matches with descriptions. Use before skill_load to discover what skills exist.', run: Executor.skillSearch },
+    { name: 'skill_load', signature: 'skill_load(name)', description: 'Load a skill\'s full content by name. Use after skill_search to get the complete methodology/guidelines for a specific skill.', run: Executor.skillLoad }
   ];
 
   compatTools.forEach(tool => Registry.registerCompatTool(registry, toolGroups, tool));

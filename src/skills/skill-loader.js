@@ -302,34 +302,91 @@
     return lines.join('\n');
   }
 
-  // ── Match skills to a user message ─────────────────────────────────────
+  // ── Match skills to a user message (scored) ────────────────────────────
   function matchSkills(userMessage) {
     const msg = String(userMessage || '').toLowerCase();
-    const matches = [];
+    const scored = [];
 
     for (const skill of listSkills()) {
       const desc = (skill.description || '').toLowerCase();
       const name = skill.name.toLowerCase();
       const keywords = (skill.frontmatter.keywords || '').toLowerCase().split(',').map(k => k.trim()).filter(Boolean);
+      let score = 0;
 
-      // Match on skill name (exact or hyphenated parts)
+      // Name parts match (strong signal)
       const nameParts = name.split(/[-_]/);
-      const nameMatch = nameParts.some(part => part.length >= 3 && msg.includes(part));
-
-      // Match on explicit keywords
-      const keywordMatch = keywords.some(kw => kw.length >= 3 && msg.includes(kw));
-
-      // Match on key phrases from description (3+ word sequences, not individual words)
-      const descPhrases = desc.match(/\b[a-z]{3,}(?:\s+[a-z]{2,}){1,4}\b/gi) || [];
-      const phraseMatch = descPhrases.some(phrase => phrase.length >= 8 && msg.includes(phrase.toLowerCase()));
-
-      if (nameMatch || keywordMatch || phraseMatch) {
-        matches.push(skill);
+      for (const part of nameParts) {
+        if (part.length >= 3 && msg.includes(part)) score += 3;
       }
+
+      // Keyword match (medium signal)
+      for (const kw of keywords) {
+        if (kw.length >= 3 && msg.includes(kw)) score += 2;
+      }
+
+      // Description phrase match (weaker signal)
+      const descPhrases = desc.match(/\b[a-z]{3,}(?:\s+[a-z]{2,}){1,4}\b/gi) || [];
+      for (const phrase of descPhrases) {
+        if (phrase.length >= 8 && msg.includes(phrase.toLowerCase())) score += 1;
+      }
+
+      if (score > 0) scored.push({ skill, score });
     }
 
-    // Limit to top 3 matched skills to avoid context bloat
-    return matches.slice(0, 3);
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 3).map(s => s.skill);
+  }
+
+  // ── Search skills by query (tool-callable) ─────────────────────────────
+  function skillSearch(query) {
+    const terms = String(query || '').toLowerCase().trim();
+    const scored = [];
+
+    for (const skill of listSkills()) {
+      const hay = `${skill.name} ${skill.description} ${skill.frontmatter.keywords || ''}`.toLowerCase();
+      let score = 0;
+
+      if (!terms) {
+        score = 1; // return all when no query
+      } else {
+        // Name parts (strong)
+        const nameParts = skill.name.toLowerCase().split(/[-_]/);
+        for (const part of nameParts) {
+          if (part.length >= 3 && terms.includes(part)) score += 3;
+        }
+        // Keywords (medium)
+        const keywords = (skill.frontmatter.keywords || '').toLowerCase().split(',').map(k => k.trim());
+        for (const kw of keywords) {
+          if (kw.length >= 3 && terms.includes(kw)) score += 2;
+        }
+        // Description words (weak)
+        const descWords = skill.description.toLowerCase().split(/\s+/);
+        for (const word of descWords) {
+          if (word.length >= 4 && terms.includes(word)) score += 1;
+        }
+      }
+
+      if (score > 0) scored.push({ skill, score });
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 10).map(s => ({
+      name: s.skill.name,
+      description: s.skill.description,
+      score: s.score
+    }));
+  }
+
+  // ── Load a skill by name (tool-callable) ───────────────────────────────
+  function skillLoad(name) {
+    const skill = getSkill(name);
+    if (!skill) return null;
+    return {
+      name: skill.name,
+      description: skill.description,
+      content: skill.content,
+      source: skill.source
+    };
   }
 
   // ── Clear all skills ────────────────────────────────────────────────────
@@ -347,6 +404,8 @@
     getSkillNames,
     buildSkillContextBlock,
     matchSkills,
+    skillSearch,
+    skillLoad,
     clearSkills,
     // localStorage API
     saveCache,

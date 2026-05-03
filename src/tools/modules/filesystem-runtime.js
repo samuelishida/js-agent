@@ -353,15 +353,28 @@
         }
       }
 
+      // Auto-fallback: check __last_generated_base64__ if no content/path provided
+      if (!content && !path && !storageKey) {
+        const lastGen = localStorage.getItem('__last_generated_base64__');
+        if (lastGen) {
+          content = lastGen;
+          resolvedName = resolvedName || 'generated_output.docx';
+        }
+      }
+
       if (content) {
         // Content provided — trigger browser download directly without needing an authorized root
         resolvedName = resolvedName || (path ? String(path).split(/[\\/]/).pop() : 'download.txt');
-        const raw = String(content);
+        const raw = String(content).trim();
+        if (!raw) {
+          return formatToolResult('fs_download_file', 'ERROR: Content is empty. If generating files, use runtime_generateFile which auto-downloads.');
+        }
         if (isLikelyBase64(raw)) {
           const bytes = base64ToUint8Array(raw);
           if (bytes) {
             blob = new Blob([bytes], { type: detectDownloadMime(resolvedName) });
           } else {
+            // Base64 decode failed — try as plain text
             blob = new Blob([raw], { type: detectDownloadMime(resolvedName) });
           }
         } else {

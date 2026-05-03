@@ -21,7 +21,8 @@
     'fs_preview_file',
     'runtime_lsp', 'runtime_spawnAgent', 'runtime_todoWrite',
     'runtime_memoryRead', 'runtime_memoryWrite', 'runtime_getDiagnostics',
-    'runtime_fileDiff'
+    'runtime_fileDiff',
+    'skill_search', 'skill_load'
   ]);
   const lazyLoaded = new Set();
 

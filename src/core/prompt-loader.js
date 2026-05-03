@@ -42,6 +42,7 @@ Rules:
 17. Final user-facing answers must be Markdown only.
 18. Do not emit raw HTML tags in final answers.
 19. If the user asks for complete file contents, keep the text verbatim and use fenced code blocks.
+20. For domain-specific tasks (DOCX, PDF, PPTX, XLSX generation, frontend design, etc.), use skill_search to find relevant methodology skills, then skill_load to get the full guidelines before proceeding.
 
 Query hint:
 {{query_hint}}`,

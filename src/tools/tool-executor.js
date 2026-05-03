@@ -487,6 +487,32 @@
     return formatToolResult('runtime_spawnAgent', `Task: ${task}\n\n${output}`);
   }
 
+  // ── Skill tools (delegate to AgentSkillLoader) ──────────────────────────
+  function skillSearch(args = {}) {
+    const loader = window.AgentSkillLoader;
+    if (!loader) throw new Error('Skill loader not available.');
+    const results = loader.skillSearch(args.query || '');
+    if (!results.length) return formatToolResult('skill_search', '(no matching skills)');
+    const body = results.map((r, i) => `${i + 1}. **${r.name}** (score: ${r.score}) — ${r.description}`).join('\n');
+    return formatToolResult('skill_search', body);
+  }
+
+  function skillLoad(args = {}) {
+    const loader = window.AgentSkillLoader;
+    if (!loader) throw new Error('Skill loader not available.');
+    const name = String(args.name || '').trim();
+    if (!name) throw new Error('skill_load requires name.');
+    const skill = loader.skillLoad(name);
+    if (!skill) return formatToolResult('skill_load', `Skill "${name}" not found. Use skill_search to discover available skills.`);
+    const body = [
+      `# ${skill.name}`,
+      skill.description ? `**Description:** ${skill.description}` : '',
+      '',
+      skill.content
+    ].filter(Boolean).join('\n');
+    return formatToolResult('skill_load', body);
+  }
+
   window.AgentToolExecutor = {
     formatToolResult,
     getExtension,
@@ -582,6 +608,9 @@
     runtimeTodoWrite,
     runtimeLsp,
     runtimeFileDiff,
-    runtimeSpawnAgent
+    runtimeSpawnAgent,
+    // Skill tools
+    skillSearch,
+    skillLoad
   };
 })();

@@ -175,7 +175,14 @@
       '- Use read_file before edit_file or multi_edit.',
       '- Prefer edit_file for targeted edits and multi_edit for coordinated file changes.',
       '- Call multiple independent read-only tools in parallel when safe.',
-      '- Do not invent tool outputs, files, URLs, or command results.'
+      '- Do not invent tool outputs, files, URLs, or command results.',
+      '',
+      '# Skills (Methodology & Expertise)',
+      '- Skills are domain knowledge documents, NOT executable tools.',
+      '- Use **skill_search(query)** to discover relevant skills for a task.',
+      '- Use **skill_load(name)** to load a skill\'s full methodology before following it.',
+      '- When a loaded skill applies, follow its guidelines and workflows.',
+      '- Skills are loaded on-demand — they are NOT all pre-loaded in context.'
     ].join('\n');
   }
 
@@ -278,12 +285,6 @@
 
     const promptInjectionSection = sanitizeProviderMentions(safetyGuidelines.prompt_injection_safety || '');
 
-    // Inject matched skills (methodology/expertise) into the system prompt
-    const matchedSkills = window.AgentSkillLoader?.matchSkills?.(userMessage) || [];
-    const skillContext = matchedSkills.length
-      ? window.AgentSkillLoader.buildSkillContextBlock(matchedSkills.map(s => s.name))
-      : '';
-
     return mergePromptSections([
       buildPromptHeader({}, safetyGuidelines),
       buildSystemSection(),
@@ -292,8 +293,7 @@
       buildSessionGuidanceSection({ maxRounds, ctxLimit, hint }),
       promptInjectionSection,
       sanitizeProviderMentions(policy),
-      sanitizeProviderMentions(systemPromptTemplate),
-      skillContext
+      sanitizeProviderMentions(systemPromptTemplate)
     ]);
   }
 

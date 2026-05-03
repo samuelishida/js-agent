@@ -824,7 +824,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[dev-server] running at http://127.0.0.1:${PORT}`);
+  const boundPort = /** @type {import('node:net').AddressInfo} */ (server.address()).port;
+  console.log(`[dev-server] running at http://127.0.0.1:${boundPort}`);
   console.log(`[dev-server] proxy route: ${API_PREFIX} -> ${OLLAMA_BASE}/v1`);
   console.log(`[dev-server] proxy route: ${GNEWS_PREFIX} -> ${GNEWS_BASE}`);
   console.log(`[dev-server] compat routes: ${TERMINAL_PREFIX}, ${DIAGNOSTICS_PREFIX}, ${ENV_PREFIX}`);

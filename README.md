@@ -34,6 +34,30 @@ PORT=8080 node proxy/dev-server.js                  # custom port
 2. **Probe** to detect locally installed models
 3. Select a model (local or cloud) → **Enable Ollama** → start chatting
 
+## Desktop App (Electron)
+
+A native desktop build is available via Electron. It embeds the same dev server and requires zero frontend changes.
+
+```bash
+npm install               # install Electron + electron-builder
+npm run electron          # run in development (auto-opens DevTools)
+npm run electron:build    # build production installers for current platform
+```
+
+**Windows:** `release/JS Agent Setup.exe` + portable `.exe`  
+**macOS:** `release/JS Agent.dmg` + `.zip`  
+**Linux:** `release/JS Agent.AppImage` + `.deb`
+
+The Electron wrapper lives in `electron/`:
+- `electron/main.js` — starts the embedded server on a random free port, loads the UI
+- `electron/preload.js` — exposes `window.electronAPI` for native dialogs and external links
+
+Native APIs available in the renderer:
+- `window.electronAPI.openFileDialog(options)` — system file picker
+- `window.electronAPI.saveFileDialog(options)` — system save dialog
+- `window.electronAPI.openExternal(url)` — open URL in default browser
+- `window.electronAPI.getAppVersion()` — app version string
+
 ## Agent Loop
 
 ```

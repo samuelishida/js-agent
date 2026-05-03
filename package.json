@@ -1,10 +1,16 @@
 {
   "name": "agent",
   "version": "0.1.0",
+  "description": "JS Agent — AI assistant desktop app",
+  "author": "JS Agent Team",
   "private": true,
   "type": "module",
+  "main": "electron/main.js",
   "scripts": {
     "start": "node proxy/dev-server.js",
+    "electron": "electron .",
+    "electron:pack": "electron-builder --dir",
+    "electron:build": "electron-builder",
     "build:snapshot": "node scripts/build-snapshot.mjs",
     "test:tools-smoke": "node scripts/test-tools-smoke.mjs",
     "test:smoke": "node scripts/test-smoke.mjs",
@@ -18,8 +24,44 @@
     "node": ">=18.0.0"
   },
   "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0",
     "esbuild": "^0.25.12",
     "pkg": "^5.8.1"
+  },
+  "build": {
+    "appId": "com.jsagent.desktop",
+    "productName": "JS Agent",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "index.html",
+      "assets/**/*",
+      "src/**/*",
+      "proxy/**/*",
+      "agent-sandbox/**/*",
+      "scripts/**/*",
+      "package.json",
+      "electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": ".env",
+        "to": ".env"
+      }
+    ],
+    "mac": {
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Development"
+    }
   },
   "dependencies": {
     "docx": "^9.6.1",

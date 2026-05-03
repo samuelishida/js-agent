@@ -2,10 +2,20 @@
 // Session CRUD: create, read, update, delete, activate, persist.
 // Reads/writes window.chatSessions and window.activeSessionId (set up by state.js).
 
+/** @typedef {import('../../types/index.js').SessionMessage} SessionMessage */
+
+/** @type {string} */
 const CHAT_SESSIONS_KEY = 'agent_chat_sessions_v1';
+/** @type {string} */
 const ACTIVE_SESSION_KEY = 'agent_active_session_v1';
+/** @type {number} */
 const SESSION_SCHEMA_VERSION = 2;
 
+/**
+ * Normalize session stats.
+ * @param {any} value - Raw stats
+ * @returns {{rounds: number, tools: number, resets: number, msgs: number}} Normalized stats
+ */
 function normalizeSessionStats(value) {
   return {
     rounds: Number(value?.rounds || 0),
@@ -15,6 +25,10 @@ function normalizeSessionStats(value) {
   };
 }
 
+/**
+ * Load sessions from localStorage.
+ * @returns {Array<{id: string, title: string, createdAt: string, updatedAt: string, messages: SessionMessage[], stats: Object, context: Object}>} Sessions
+ */
 function loadSessions() {
   const normalizeStats = stats => ({
     rounds: Number(stats?.rounds || 0),
@@ -55,6 +69,10 @@ function loadSessions() {
   } catch { return []; }
 }
 
+/**
+ * Save sessions to localStorage.
+ * @returns {void}
+ */
 function saveSessions() {
   const payload = JSON.stringify({ version: SESSION_SCHEMA_VERSION, sessions: window.chatSessions || [] });
   try {
@@ -72,10 +90,20 @@ function saveSessions() {
   }
 }
 
+/**
+ * Make a session title from source text.
+ * @param {string} [sourceText='New session'] - Source text
+ * @returns {string} Session title
+ */
 function makeSessionTitle(sourceText = 'New session') {
   return String(sourceText || 'New session').trim().slice(0, 48) || 'New session';
 }
 
+/**
+ * Create a new session.
+ * @param {string} [initialTitle='New session'] - Initial title
+ * @returns {{id: string, title: string, createdAt: string, updatedAt: string, messages: SessionMessage[], stats: Object, context: Object}} New session
+ */
 function createSession(initialTitle = 'New session') {
   const session = {
     id: `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -100,11 +128,19 @@ function createSession(initialTitle = 'New session') {
   return session;
 }
 
+/**
+ * Reset live session state.
+ * @returns {void}
+ */
 function resetLiveSessionState() {
   window.messages = [];
   window.sessionStats = { rounds: 0, tools: 0, resets: 0, msgs: 0 };
 }
 
+/**
+ * Clear current session and create new.
+ * @returns {void}
+ */
 function clearSession() {
   createSession();
   resetLiveSessionState();
@@ -115,12 +151,20 @@ function clearSession() {
   if (typeof setStatus === 'function') setStatus('ok', 'idle');
 }
 
+/**
+ * Get the active session.
+ * @returns {{id: string, title: string, createdAt: string, updatedAt: string, messages: SessionMessage[], stats: Object, context: Object}|null} Active session
+ */
 function getActiveSession() {
   return (window.chatSessions || []).find(session => session.id === window.activeSessionId) || null;
 }
 
 let _saveSessionsTimer = null;
 
+/**
+ * Schedule a debounced save of sessions.
+ * @returns {void}
+ */
 function scheduleSaveSessions() {
   if (_saveSessionsTimer) clearTimeout(_saveSessionsTimer);
   _saveSessionsTimer = setTimeout(() => {
@@ -129,6 +173,10 @@ function scheduleSaveSessions() {
   }, 2000);
 }
 
+/**
+ * Flush pending session save immediately.
+ * @returns {void}
+ */
 function flushSaveSessions() {
   if (_saveSessionsTimer) {
     clearTimeout(_saveSessionsTimer);
@@ -137,6 +185,10 @@ function flushSaveSessions() {
   }
 }
 
+/**
+ * Sync session state with active session.
+ * @returns {void}
+ */
 function syncSessionState() {
   let session = getActiveSession();
   if (!session) session = createSession();
@@ -147,6 +199,11 @@ function syncSessionState() {
   if (typeof renderSessionList === 'function') renderSessionList();
 }
 
+/**
+ * Activate a session by ID.
+ * @param {string} sessionId - Session ID
+ * @returns {void}
+ */
 function activateSession(sessionId) {
   const session = (window.chatSessions || []).find(item => item.id === sessionId);
   if (!session) return;
@@ -161,6 +218,11 @@ function activateSession(sessionId) {
   if (typeof setStatus === 'function') setStatus('ok', 'session loaded');
 }
 
+/**
+ * Delete a session by ID.
+ * @param {string} sessionId - Session ID
+ * @returns {void}
+ */
 function deleteSession(sessionId) {
   const nextSessions = (window.chatSessions || []).filter(session => session.id !== sessionId);
   if (nextSessions.length === (window.chatSessions || []).length) return;
@@ -190,6 +252,10 @@ function deleteSession(sessionId) {
   if (typeof setStatus === 'function') setStatus('ok', 'session deleted');
 }
 
+/**
+ * Delete all sessions.
+ * @returns {void}
+ */
 function deleteAllSessions() {
   window.chatSessions = [];
   localStorage.removeItem(CHAT_SESSIONS_KEY);

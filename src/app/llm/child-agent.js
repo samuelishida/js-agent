@@ -1,6 +1,18 @@
+// src/app/llm/child-agent.js
+// Child agent spawning for delegated tasks.
+
 ;(function() {
+  /** @type {Function} */
   var C = function() { return window.CONSTANTS || {}; };
 
+  /**
+   * Spawn a child agent for a delegated task.
+   * @param {Object} opts - Options
+   * @param {string} opts.task - Task description
+   * @param {string[]} [opts.tools=[]] - Allowed tools
+   * @param {number} [opts.maxIterations=10] - Max iterations
+   * @returns {Promise<{success: boolean, task: string, iterations: number, status: string, result: any, toolsSummary: string, childState: Object}>} Child agent result
+   */
   async function spawnAgentChild(opts) {
     var task = (opts && opts.task) || '';
     var tools = (opts && opts.tools) || [];

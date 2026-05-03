@@ -1,11 +1,19 @@
 // src/app/core/tool-cache.js
 // Tool result caching with TTL eviction and BroadcastChannel sync.
 
+/** @typedef {import('../../types/index.js').ToolCall} ToolCall */
+
+/** @type {string} */
 const TOOL_CACHE_KEY = 'agent_tool_cache_v1';
+/** @type {number} */
 const TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
+/** @type {number} */
 const CACHE_SCHEMA_VERSION = 2;
+/** @type {string} */
 const CACHE_SYNC_CHANNEL = 'loopagent-cache-v1';
+/** @type {string[]} */
 const NON_CACHEABLE_TOOL_PREFIXES = ['fs_'];
+/** @type {Set<string>} */
 const NON_CACHEABLE_TOOLS = new Set([
   'notification_request_permission',
   'notification_send',
@@ -36,6 +44,7 @@ const NON_CACHEABLE_TOOLS = new Set([
   'runtime_spawnAgent'
 ]);
 
+/** @type {string} */
 const agentInstanceId = (() => {
   const key = '_agent_instance_id_session';
   try {
@@ -49,8 +58,13 @@ const agentInstanceId = (() => {
   }
 })();
 
+/** @type {BroadcastChannel|null} */
 let cacheSyncChannel = null;
 
+/**
+ * Load tool cache from localStorage.
+ * @returns {{version: number, buckets: Object}} Cache store
+ */
 function loadToolCache() {
   const emptyStore = { version: CACHE_SCHEMA_VERSION, buckets: { tool: {} } };
   try {
@@ -61,6 +75,11 @@ function loadToolCache() {
   } catch { return emptyStore; }
 }
 
+/**
+ * Save tool cache to localStorage.
+ * @param {{version: number, buckets: Object}} cacheStore - Cache store
+ * @returns {void}
+ */
 function saveToolCache(cacheStore) {
   try {
     localStorage.setItem(TOOL_CACHE_KEY, JSON.stringify(cacheStore));
@@ -69,12 +88,24 @@ function saveToolCache(cacheStore) {
   }
 }
 
+/**
+ * Get a cache bucket.
+ * @param {{version: number, buckets: Object}} cacheStore - Cache store
+ * @param {string} [scope='tool'] - Scope name
+ * @returns {Object} Bucket
+ */
 function getCacheBucket(cacheStore, scope = 'tool') {
   if (!cacheStore.buckets || typeof cacheStore.buckets !== 'object') cacheStore.buckets = {};
   if (!cacheStore.buckets[scope] || typeof cacheStore.buckets[scope] !== 'object') cacheStore.buckets[scope] = {};
   return cacheStore.buckets[scope];
 }
 
+/**
+ * Prune expired entries from a cache bucket.
+ * @param {{version: number, buckets: Object}} cacheStore - Cache store
+ * @param {string} [scope='tool'] - Scope name
+ * @returns {boolean} True if changes were made
+ */
 function pruneCacheBucket(cacheStore, scope = 'tool') {
   const bucket = getCacheBucket(cacheStore, scope);
   const now = Date.now();
@@ -89,6 +120,11 @@ function pruneCacheBucket(cacheStore, scope = 'tool') {
   return changed;
 }
 
+/**
+ * Get cache key for a tool call.
+ * @param {ToolCall} call - Tool call
+ * @returns {string} Cache key
+ */
 function getToolCacheKey(call) {
   const args = call.args || {};
   const keys = Object.keys(args).sort();
@@ -97,6 +133,11 @@ function getToolCacheKey(call) {
   return `${call.tool}:${JSON.stringify(sorted)}`;
 }
 
+/**
+ * Check if a tool call is cacheable.
+ * @param {ToolCall} call - Tool call
+ * @returns {boolean} True if cacheable
+ */
 function isCacheableTool(call) {
   const name = String(call?.tool || '');
   if (!name) return false;
@@ -105,6 +146,11 @@ function isCacheableTool(call) {
   return true;
 }
 
+/**
+ * Clear tool cache entries matching predicate.
+ * @param {Function} [predicate=()=>true] - Predicate function
+ * @returns {void}
+ */
 function clearToolCache(predicate = () => true) {
   const cacheStore = loadToolCache();
   const cache = getCacheBucket(cacheStore, 'tool');
@@ -115,6 +161,11 @@ function clearToolCache(predicate = () => true) {
   if (changed) saveToolCache(cacheStore);
 }
 
+/**
+ * Get cached tool result.
+ * @param {ToolCall} call - Tool call
+ * @returns {any|null} Cached result or null
+ */
 function getCachedToolResult(call) {
   if (!isCacheableTool(call)) return null;
   const cacheStore = loadToolCache();
@@ -128,6 +179,12 @@ function getCachedToolResult(call) {
   return entry.payload;
 }
 
+/**
+ * Set cached tool result.
+ * @param {ToolCall} call - Tool call
+ * @param {any} result - Tool result
+ * @returns {void}
+ */
 function setCachedToolResult(call, result) {
   if (!isCacheableTool(call)) return;
   const cacheStore = loadToolCache();
@@ -139,6 +196,10 @@ function setCachedToolResult(call, result) {
   cacheSyncChannel?.postMessage({ type: 'cache-set', scope: 'tool', key, entry, from: agentInstanceId });
 }
 
+/**
+ * Initialize cache sync via BroadcastChannel.
+ * @returns {void}
+ */
 function initCacheSync() {
   if (!('BroadcastChannel' in window) || cacheSyncChannel) return;
   cacheSyncChannel = new BroadcastChannel(CACHE_SYNC_CHANNEL);

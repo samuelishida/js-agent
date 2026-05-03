@@ -1,30 +1,57 @@
 // src/app/core/provider-state.js
 // Model routing, provider activation, cloud readiness, backend state.
 
+/**
+ * Get max rounds from slider.
+ * @returns {number} Max rounds
+ */
 function getMaxRounds() {
   const el = document.getElementById('sl-rounds');
   return el ? parseInt(el.value, 10) : 50;
 }
 
+/**
+ * Get context limit from slider.
+ * @returns {number} Context limit in chars
+ */
 function getCtxLimit() {
   const el = document.getElementById('sl-ctx');
   return el ? parseInt(el.value, 10) * 1000 : 128000;
 }
 
+/**
+ * Get delay from slider.
+ * @returns {number} Delay in ms
+ */
 function getDelay() {
   const el = document.getElementById('sl-delay');
   return el ? parseInt(el.value, 10) : 500;
 }
 
+/**
+ * Get stored cloud model selection.
+ * @returns {string} Model ID
+ */
 function getStoredCloudModelSelection() {
   return localStorage.getItem('agent_cloud_model') || 'gemini/gemini-2.5-flash';
 }
 
+/**
+ * Get selected cloud model label.
+ * @returns {string} Model label
+ */
 function getSelectedCloudModelLabel() {
   const raw = String(document.getElementById('model-select')?.value || getStoredCloudModelSelection()).trim();
   return raw || 'gemini/gemini-2.5-flash';
 }
 
+/**
+ * Activate cloud provider.
+ * @param {Object} [opts] - Options
+ * @param {boolean} [opts.silent=false] - Silent mode
+ * @param {string} [opts.reason=''] - Reason
+ * @returns {void}
+ */
 function activateCloudProvider({ silent = false, reason = '' } = {}) {
   const switchedFromLocal = !!localBackend.enabled;
   const switchedFromOllama = !!(typeof ollamaBackend !== 'undefined' && ollamaBackend.enabled);
@@ -53,6 +80,10 @@ function activateCloudProvider({ silent = false, reason = '' } = {}) {
   }
 }
 
+/**
+ * Save API key.
+ * @returns {void}
+ */
 function saveKey() {
   window.apiKey = document.getElementById('api-key').value.trim();
   localStorage.setItem('cloud_api_key', window.apiKey);
@@ -64,6 +95,10 @@ function saveKey() {
   if (typeof maybeRequestNotifPermission === 'function') maybeRequestNotifPermission();
 }
 
+/**
+ * Save cloud model selection.
+ * @returns {void}
+ */
 function saveCloudModelSelection() {
   const select = document.getElementById('model-select');
   const model = String(select?.value || '').trim();
@@ -73,6 +108,10 @@ function saveCloudModelSelection() {
   if (typeof updateActiveProviderBadge === 'function') updateActiveProviderBadge();
 }
 
+/**
+ * Load cloud model selection.
+ * @returns {void}
+ */
 function loadCloudModelSelection() {
   const select = document.getElementById('model-select');
   if (!select) return;
@@ -83,11 +122,19 @@ function loadCloudModelSelection() {
   if (typeof updateActiveProviderBadge === 'function') updateActiveProviderBadge();
 }
 
+/**
+ * Check if local mode is active.
+ * @returns {boolean} True if local
+ */
 function isLocalModeActive() {
   if (typeof ollamaBackend !== 'undefined' && ollamaBackend.enabled) return true;
   return localBackend.enabled && !!localBackend.url;
 }
 
+/**
+ * Check if Ollama is ready.
+ * @returns {{ready: boolean, reason: string}} Readiness status
+ */
 function isOllamaReady() {
   if (typeof ollamaBackend === 'undefined' || !ollamaBackend.enabled) return { ready: false, reason: '' };
   const isCloud = typeof isSelectedOllamaModelCloud === 'function' && isSelectedOllamaModelCloud();
@@ -98,6 +145,10 @@ function isOllamaReady() {
   return { ready: true, reason: '' };
 }
 
+/**
+ * Get selected cloud provider.
+ * @returns {string} Provider name
+ */
 function getSelectedCloudProvider() {
   const raw = String(document.getElementById('model-select')?.value || '').trim().toLowerCase();
   if (!raw) return 'gemini';
@@ -105,6 +156,10 @@ function getSelectedCloudProvider() {
   return match ? String(match[1] || 'gemini').toLowerCase() : 'gemini';
 }
 
+/**
+ * Get cloud readiness status.
+ * @returns {{ready: boolean, reason: string}} Readiness status
+ */
 function getCloudReadiness() {
   const provider = getSelectedCloudProvider();
   if (provider === 'azure') {
@@ -124,6 +179,10 @@ function getCloudReadiness() {
   return { ready: true, reason: '' };
 }
 
+/**
+ * Check if cloud can be used.
+ * @returns {boolean} True if ready
+ */
 function canUseCloud() {
   return getCloudReadiness().ready;
 }

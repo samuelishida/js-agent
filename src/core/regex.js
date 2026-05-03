@@ -1,18 +1,29 @@
-(() => {
-  const TOOL_BLOCK = /<tool_call(?:\s[^>]*>|>?)\s*([\s\S]*?)\s*<\/tool_call>/i;
-  const TOOL_BLOCK_GLOBAL = /<tool_call(?:\s[^>]*>|>?)\s*([\s\S]*?)\s*<\/tool_call>/gi;
+// src/core/regex.js
+// Regex-based tool call extraction and parsing.
 
-  // Matches <|tool_call>call:name{...} or <|tool_call>name{...} used by some local models.
-  // The args block is shallow (no nested braces) so [^{}]* is sufficient.
+(() => {
+  /** @type {RegExp} */
+  const TOOL_BLOCK = /<tool_call(?:\s[^>]*>|>?)\s*([\s\S]*?)\s*<\/tool_call>/i;
+  /** @type {RegExp} */
+  const TOOL_BLOCK_GLOBAL = /<tool_call(?:\s[^>]*>|>?)\s*([\s\S]*?)\s*<\/tool_call>/gi;
+  /** @type {RegExp} */
   const PIPE_TOOL_BLOCK = /<\|tool_call>(?:call:)?(\w+)\s*\{([^{}]*)\}/i;
 
-  // Normalize <|token|> quote delimiters (e.g. <|"|>) to standard double-quotes,
-  // then parse the result as a JSON object body (without outer braces).
+  /**
+   * Parse pipe-style args.
+   * @param {string} raw - Raw args
+   * @returns {Object} Parsed args
+   */
   function parsePipeArgs(raw) {
     const normalized = String(raw || '').replace(/<\|[^|]*\|>/g, '"');
     return parseJsonSafely(`{${normalized}}`) || {};
   }
 
+  /**
+   * Parse JSON safely.
+   * @param {string} raw - JSON string
+   * @returns {any|null} Parsed value or null
+   */
   function parseJsonSafely(raw) {
     try {
       return JSON.parse(raw);
@@ -21,6 +32,12 @@
     }
   }
 
+  /**
+   * Extract a JSON string value by key.
+   * @param {string} raw - Raw text
+   * @param {string} key - Key to find
+   * @returns {string|undefined} Extracted string
+   */
   function extractJsonString(raw, key) {
     const match = String(raw || '').match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, 'i'));
     if (!match) return undefined;
@@ -32,6 +49,12 @@
     }
   }
 
+  /**
+   * Extract balanced JSON object after a key.
+   * @param {string} raw - Raw text
+   * @param {string} key - Key to find
+   * @returns {string|null} Balanced object or null
+   */
   function extractBalancedObjectAfterKey(raw, key) {
     const value = String(raw || '');
     if (!value) return null;
@@ -86,6 +109,11 @@
     return null;
   }
 
+  /**
+   * Try to parse a tool object from raw text.
+   * @param {string} raw - Raw text
+   * @returns {import('../types/index.js').ToolCall|null} Parsed tool call or null
+   */
   function tryParseToolObject(raw) {
     const parsed = parseJsonSafely(raw);
     if (parsed) {
@@ -135,6 +163,11 @@
     return { tool, args };
   }
 
+  /**
+   * Find a balanced JSON object with a tool field.
+   * @param {string} text - Text to search
+   * @returns {string|null} Balanced object or null
+   */
   function findBalancedJsonObjectWithTool(text) {
     const value = String(text || '');
     // Search for "tool": or "name": — "name" is used by OpenAI/Mistral-style models.
@@ -193,6 +226,11 @@
     return null;
   }
 
+  /**
+   * Extract a standalone tool call from text.
+   * @param {string} text - Text to search
+   * @returns {import('../types/index.js').ToolCall|null} Tool call or null
+   */
   function extractStandaloneToolCall(text) {
     const value = String(text || '').trim();
     if (!value) return null;

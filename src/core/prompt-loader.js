@@ -120,6 +120,12 @@ Policy:
     }
   }
 
+  /**
+   * Render a template with variables.
+   * @param {string} template - Template string
+   * @param {Object} [vars={}] - Variables
+   * @returns {string} Rendered string
+   */
   function render(template, vars = {}) {
     return String(template || '').replace(/\{\{(\w+)\}\}/g, (_, key) => {
       const value = vars[key];
@@ -127,6 +133,12 @@ Policy:
     });
   }
 
+  /**
+   * Load and render a prompt.
+   * @param {string} path - Prompt path
+   * @param {Object} [vars={}] - Variables
+   * @returns {Promise<string>} Rendered prompt
+   */
   async function loadRendered(path, vars = {}) {
     const template = await load(path);
     return render(template, vars);

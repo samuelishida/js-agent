@@ -1,3 +1,10 @@
+// src/app/ui/tools.js
+// Tool group rendering and toggle UI.
+
+/**
+ * Render tool groups in the UI.
+ * @returns {void}
+ */
 function renderToolGroups() {
   const host = document.getElementById('tool-groups');
   if (!host) return;
@@ -16,6 +23,11 @@ function renderToolGroups() {
     </div>`).join('');
 }
 
+/**
+ * Toggle a tool on/off.
+ * @param {string} name - Tool name
+ * @returns {void}
+ */
 function toggleTool(name) {
   enabledTools[name] = !enabledTools[name];
   document.getElementById(`tool-${name}`)?.classList.toggle('active', enabledTools[name]);
@@ -24,6 +36,10 @@ function toggleTool(name) {
   } catch { /* quota / private browsing — ignore */ }
 }
 
+/**
+ * Load persisted enabled tools from localStorage.
+ * @returns {void}
+ */
 function loadPersistedEnabledTools() {
   try {
     const stored = JSON.parse(localStorage.getItem('agent_enabled_tools') || 'null');

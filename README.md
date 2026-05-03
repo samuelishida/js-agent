@@ -65,12 +65,32 @@ User message
   → preflight (intent hints, query plan, deferred prefetches)
   → buildSystemPrompt (orchestrator merges templates + live tool list)
   → LLM call (cloud or local lane)
+    → stream reasoning chunks to UI in real-time (thinking display)
+    → detect final-answer intent from thinking content
   → parse tool calls → execute batches (parallel when safe)
   → apply tool-result context budget
   → inject runtime continuation reminders
   → microcompact older tool results; summarize if context over limit
   → repeat until final answer or round limit
 ```
+
+### Thinking Display
+
+Reasoning/thinking content from models (OpenRouter, Ollama, local) is streamed to the UI in real-time as collapsible "Thinking…" blocks. This gives users visibility into the model's reasoning process before tool calls or final answers.
+
+Thinking-aware guardrails:
+- **`thinkingIndicatesFinalAnswer()`** — detects when the model has decided on a final answer (even if visible text is empty), preventing unnecessary tool-call-repair loops
+- **Deferred-action / fake-execution detection** — skips false-positive guardrails when thinking content confirms the model is delivering a real final answer
+- **Empty-visible fallback** — when the model produces only thinking content with no visible text, the thinking content is used as the final answer
+
+### Error Recovery
+
+The agent loop includes multiple recovery layers to prevent early give-ups:
+
+- **HINT tone on recoverable errors** — `runtime_generateFile` errors use a "this is recoverable, just retry!" tone instead of ERROR, showing the corrected usage inline so the model retries instead of abandoning the task
+- **Tool-call repair** — malformed tool calls are repaired automatically; repair is skipped when the model has already given a final answer (detects apology/final-answer text like "I apologize", "I'm sorry", "I cannot")
+- **Thinking-aware repair** — `shouldAttemptToolCallRepair` checks thinking content before attempting repair, preventing false repair loops on thinking-only output
+- **Rule 16 (system.md)** — requires `skill_load` before first tool use, preventing the model from skipping the file-generation skill and hitting avoidable format errors
 
 ## Project Structure
 
@@ -80,6 +100,10 @@ Agent/
 ├── assets/                 # CSS
 ├── prompts/                # system.md, orchestrator.md, repair.md, summarize.md, safety_guidelines.md
 ├── proxy/dev-server.js     # static server + Ollama Cloud proxy
+├── electron/               # Electron desktop app wrapper
+│   ├── main.js             # main process — embedded server + BrowserWindow
+│   ├── preload.js          # secure bridge for native APIs
+│   └── README.md           # desktop build docs
 ├── scripts/                # build-snapshot.mjs, test-smoke.mjs, test-tools-smoke.mjs
 ├── docs/
 │   └── agentic-search-arch.html
@@ -293,6 +317,14 @@ All local Ollama calls use streaming (`stream: true`) to prevent timeout errors 
 
 Tool outputs are untrusted. The loop detects prompt-injection patterns in tool results and injects `<system-reminder>` blocks into continuation prompts. Permission denials accumulate per run; repeated denials escalate the permission mode (`default` → `ask` → `deny_write`).
 
+### Prompt injection hardening
+
+Multiple layers of defence against prompt injection:
+
+- **Skill content sanitization** — control-channel tags (`<tool_call>`, `<system-reminder>`, `[SYSTEM OVERRIDE]`) are stripped from skill `.md` content before injection into the system prompt, preventing skills from hijacking the agent loop
+- **Natural-language injection detection** — `extractPromptInjectionSignals()` detects jailbreak patterns (DAN mode, "ignore previous instructions", "you are now", etc.) in tool results and user input
+- **Centralized patterns** — `INJECTION_PATTERNS` in `constants.js` consolidates all injection heuristics in one configurable location
+
 ### Filesystem path validation
 
 `tool-execution.js` guards against path traversal:
@@ -302,6 +334,10 @@ Tool outputs are untrusted. The loop detects prompt-injection patterns in tool r
 - Windows 8.3 short names (`~1`, `~A`, etc.) are detected and blocked
 - Glob patterns on write operations are rejected
 - Dangerous removal paths (`/`, `/etc`, `C:\`) are blocked
+
+### File generation safety
+
+`runtime_generateFile` enforces `.js`/`.cjs`/`.mjs` extension when content is provided, preventing Node.js from attempting to execute non-JS paths (`.pdf`, `.docx`) which would throw `ERR_UNKNOWN_FILE_EXTENSION`.
 
 ## Verification
 

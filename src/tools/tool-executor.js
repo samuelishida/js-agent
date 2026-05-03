@@ -442,7 +442,7 @@
         setTimeout(() => URL.revokeObjectURL(url), 5000);
         // Also save to localStorage as fallback
         try { localStorage.setItem('__last_generated_base64__', b64); } catch {}
-        return formatToolResult('runtime_generateFile', `Generated and downloaded ${a.download} (${bytes.length} bytes). File saved to your Downloads folder.`);
+        return formatToolResult('runtime_generateFile', `✅ Generated and auto-downloaded ${a.download} (${bytes.length} bytes) to your Downloads folder. No further action needed.`);
       } catch (e) {
         // Fallback: save to localStorage so fs_download_file can pick it up
         try { localStorage.setItem('__last_generated_base64__', b64); } catch {}

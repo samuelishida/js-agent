@@ -453,12 +453,12 @@
       const looksLikePlainText = !/\b(require\(|import\s|module\.exports|exports\.|const\s|let\s|var\s|function\s|async\s|=>|process\.)/.test(resolvedContent) && resolvedContent.length > 0;
       const hasJsExtension = /\.(js|cjs|mjs)$/i.test(scriptPath);
       if (looksLikeMarkdown || (looksLikePlainText && !hasJsExtension)) {
-        return formatToolResult('runtime_generateFile', `ERROR: runtime_generateFile expects a Node.js script that generates binary output (e.g., using pdfkit, docx, exceljs). The provided content appears to be ${looksLikeMarkdown ? 'Markdown/plaintext' : 'plain text'} and the path "${scriptPath}" does not have a .js/.cjs extension.\n\nTo generate a PDF, provide a script like:\n\nconst PDFDocument = require('pdfkit');\nconst doc = new PDFDocument();\n// ... build PDF ...\nprocess.stdout.write(doc.output());`);
+        return formatToolResult('runtime_generateFile', `HINT: runtime_generateFile needs a Node.js script with a .cjs extension. You passed plain text in a .pdf path — this is recoverable, just retry with the correct format!\n\nCorrect usage:\n  path: "agent-sandbox/gen.cjs"  ← MUST end in .cjs\n  content: "const PDFDocument = require('pdfkit');\\nconst doc = new PDFDocument();\\n// ... build PDF ...\\nprocess.stdout.write(doc.output());"\n  filename: "YVY_Environmental_Report.pdf"  ← desired download name\n\nTry again now with the corrected format.`);
       }
       // SECURITY: If content is a script, the execution path MUST have a JS extension.
       // Otherwise node will throw ERR_UNKNOWN_FILE_EXTENSION (e.g., node "report.pdf").
       if (!hasJsExtension) {
-        return formatToolResult('runtime_generateFile', `ERROR: runtime_generateFile path must have a .js, .cjs, or .mjs extension when content is provided. Received: "${scriptPath}".\n\nUse a script path like "agent-sandbox/gen.cjs" and set filename="${scriptPath}" or outputFilename="${scriptPath}" to control the downloaded file name.`);
+        return formatToolResult('runtime_generateFile', `HINT: The path must end in .cjs when providing script content. You passed "${scriptPath}" which would cause node to fail with ERR_UNKNOWN_FILE_EXTENSION.\n\nCorrect usage:\n  path: "agent-sandbox/gen.cjs"  ← MUST end in .cjs\n  filename: "${scriptPath}"  ← desired download name\n\nTry again now with the corrected format.`);
       }
     }
 

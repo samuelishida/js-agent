@@ -434,6 +434,16 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   if (delay > 0) await sleep(delay);
   throwIfStopRequested();
 
+  // 1.5 Pre-LLM context check — compact before sending to LLM if needed
+  const CompPre = window.AgentCompaction;
+  if (CompPre?.preLlmContextCheck) {
+    const preNotes = CompPre.preLlmContextCheck({ round, ctxLimit: getCtxLimit() });
+    if (preNotes.length) {
+      for (const note of preNotes) addNotice(note);
+      actions.push('pre-llm-compaction');
+    }
+  }
+
   // 2. Call LLM
   setStatus('busy', `round ${round}/${maxRounds}`);
   showThinking(`round ${round}/${maxRounds}`);

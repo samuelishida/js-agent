@@ -15,6 +15,12 @@
   let toolFailureCounts = new Map();
   /** @type {string[]} */
   let promptInjectionSignals = [];
+  /** @type {number} */
+  let lastCompactionRound = 0;
+  /** @type {number} */
+  let lastPreLlmCompactionRound = 0;
+  /** @type {number} */
+  let timeBasedMicrocompactArmedAt = 0;
 
   /** @type {number} */
   const CHAR_TOKEN_RATIO = 3.5;
@@ -64,6 +70,9 @@
     runCompactedResultNoticeSignatures = new Set();
     repeatedToolCallCounts = new Map();
     toolFailureCounts = new Map();
+    lastCompactionRound = 0;
+    lastPreLlmCompactionRound = 0;
+    timeBasedMicrocompactArmedAt = 0;
   }
 
   /**
@@ -292,37 +301,244 @@
     return `Tool summary:\n${lines.join('\n')}`;
   }
 
+  /**
+   * Arm time-based microcompact for the current turn.
+   * Called at the start of each agent loop. If enough time has passed
+   * since the last arm, schedules a microcompact after a delay.
+   * @returns {number|null} Armed timestamp or null
+   */
   function armTimeBasedMicrocompactForTurn() {
-    return null;
+    const policy = C().TIME_BASED_MICROCOMPACT_POLICY || {};
+    const inactivityMs = Number(policy.inactivityMs || 20 * 60 * 1000);
+    const now = Date.now();
+
+    // If already armed recently, skip
+    if (timeBasedMicrocompactArmedAt && (now - timeBasedMicrocompactArmedAt) < inactivityMs) {
+      return timeBasedMicrocompactArmedAt;
+    }
+
+    timeBasedMicrocompactArmedAt = now;
+
+    // Schedule a microcompact after the inactivity window
+    setTimeout(() => {
+      const messages = Array.isArray(window.messages) ? window.messages : [];
+      const compacted = microcompactToolResultMessages(messages, {
+        keepRecent: Number(policy.keepRecentResults || 4),
+        clearOnly: true
+      });
+      if (compacted.clearedCount > 0) {
+        window.messages = compacted.messages;
+        if (window.sessionStats && typeof window.sessionStats === 'object') {
+          window.sessionStats.resets = Number(window.sessionStats.resets || 0) + 1;
+        }
+        if (typeof addNotice === 'function') {
+          addNotice(`Time-based microcompact: cleared ${compacted.clearedCount} older tool result(s), saved ~${compacted.savedChars} chars.`);
+        }
+      }
+    }, inactivityMs);
+
+    return timeBasedMicrocompactArmedAt;
   }
 
-  function applyContextManagementPipeline({ ctxLimit } = {}) {
+  /**
+   * Compact non-tool messages (assistant/user) by summarizing older ones.
+   * Keeps system prompt + recent N messages intact.
+   * @param {import('../../types/index.js').SessionMessage[]} messages - Messages
+   * @param {number} keepRecent - Number of recent messages to keep
+   * @returns {{messages: import('../../types/index.js').SessionMessage[], compactedCount: number, savedChars: number}}
+   */
+  function compactNonToolMessages(messages, keepRecent) {
+    const source = Array.isArray(messages) ? messages : [];
+    const keepCount = Math.max(2, Number(keepRecent || 6));
+
+    // Find non-tool, non-system messages
+    const compactable = [];
+    source.forEach((msg, idx) => {
+      if (msg.role === 'system') return;
+      if (msg.role === 'tool') return;
+      if (/<tool_result\b/i.test(String(msg.content || ''))) return;
+      compactable.push({ idx, msg });
+    });
+
+    if (compactable.length <= keepCount) {
+      return { messages: source, compactedCount: 0, savedChars: 0 };
+    }
+
+    const keepStart = compactable.length - keepCount;
+    let compactedCount = 0;
+    let savedChars = 0;
+
+    const nextMessages = source.map((msg, idx) => {
+      const pos = compactable.findIndex(c => c.idx === idx);
+      if (pos === -1 || pos >= keepStart) return msg;
+
+      const original = String(msg.content || '');
+      // Truncate to first 200 chars + summary marker
+      const truncated = original.slice(0, 200).replace(/\n/g, ' ').trim();
+      const replacement = `[compacted ${msg.role} message] ${truncated}…`;
+      if (original.length <= replacement.length) return msg;
+
+      compactedCount++;
+      savedChars += Math.max(0, original.length - replacement.length);
+      return { ...msg, content: replacement };
+    });
+
+    return { messages: nextMessages, compactedCount, savedChars };
+  }
+
+  /**
+   * Apply the full context management pipeline.
+   * Uses multi-tier thresholds:
+   *   - SOFT (82%): compact older tool results only
+   *   - HARD (92%): compact older tool results + non-tool messages
+   *   - CRITICAL (97%): aggressive compaction of everything
+   * Respects minRoundGap to avoid compacting every round.
+   *
+   * @param {Object} [opts]
+   * @param {number} [opts.round] - Current round number
+   * @param {number} [opts.ctxLimit] - Context limit in chars
+   * @param {boolean} [opts.preLlm] - Whether this is a pre-LLM check
+   * @returns {string[]} Compaction notes
+   */
+  function applyContextManagementPipeline({ round, ctxLimit, preLlm } = {}) {
     const messages = Array.isArray(window.messages) ? window.messages : [];
     const limit = Number(ctxLimit || C().DEFAULT_CTX_LIMIT_CHARS || 128000);
     const tokenLimit = Math.floor(limit / CHAR_TOKEN_RATIO);
     const policy = C().CONTEXT_COMPACTION_POLICY || {};
-    const charThreshold = Math.floor(limit * Number(policy.thresholdRatio || 0.82));
-    const tokenThreshold = Math.floor(tokenLimit * Number(policy.thresholdRatio || 0.82));
 
     const charSize = ctxSize(messages);
     const tokenEst = ctxTokenEstimate(messages);
-    if (charSize <= charThreshold && tokenEst <= tokenThreshold) return [];
 
-    const compacted = microcompactToolResultMessages(messages, {
-      keepRecent: Number(C().TOOL_RESULT_CONTEXT_BUDGET?.keepRecentResults || 8),
+    // Multi-tier thresholds
+    const softRatio = Number(policy.thresholdRatio || 0.82);
+    const hardRatio = Math.min(0.97, softRatio + 0.10);
+    const criticalRatio = Math.min(0.99, softRatio + 0.15);
+
+    const softCharThreshold = Math.floor(limit * softRatio);
+    const hardCharThreshold = Math.floor(limit * hardRatio);
+    const criticalCharThreshold = Math.floor(limit * criticalRatio);
+    const softTokenThreshold = Math.floor(tokenLimit * softRatio);
+    const hardTokenThreshold = Math.floor(tokenLimit * hardRatio);
+    const criticalTokenThreshold = Math.floor(tokenLimit * criticalRatio);
+
+    // Determine tier
+    let tier = 'none';
+    if (charSize >= criticalCharThreshold || tokenEst >= criticalTokenThreshold) {
+      tier = 'critical';
+    } else if (charSize >= hardCharThreshold || tokenEst >= hardTokenThreshold) {
+      tier = 'hard';
+    } else if (charSize >= softCharThreshold || tokenEst >= softTokenThreshold) {
+      tier = 'soft';
+    }
+
+    if (tier === 'none') return [];
+
+    // Respect minRoundGap for soft tier (but not for hard/critical or pre-LLM)
+    const minGap = Number(policy.minRoundGap || 2);
+    const currentRound = Number(round || 0);
+    const targetLastRound = preLlm ? lastPreLlmCompactionRound : lastCompactionRound;
+
+    if (tier === 'soft' && !preLlm && currentRound - targetLastRound < minGap) {
+      return [];
+    }
+
+    const notes = [];
+    let totalCleared = 0;
+    let totalSaved = 0;
+
+    // Always compact tool results first
+    const toolKeepRecent = tier === 'critical'
+      ? Math.max(2, Math.floor(Number(C().TOOL_RESULT_CONTEXT_BUDGET?.keepRecentResults || 8) / 3))
+      : tier === 'hard'
+        ? Math.max(3, Math.floor(Number(C().TOOL_RESULT_CONTEXT_BUDGET?.keepRecentResults || 8) / 2))
+        : Number(C().TOOL_RESULT_CONTEXT_BUDGET?.keepRecentResults || 8);
+
+    const toolCompacted = microcompactToolResultMessages(messages, {
+      keepRecent: toolKeepRecent,
       clearOnly: true
     });
 
-    if (!compacted.clearedCount) return [];
+    let workingMessages = toolCompacted.messages;
+    totalCleared += toolCompacted.clearedCount;
+    totalSaved += toolCompacted.savedChars;
 
-    window.messages = compacted.messages;
+    if (toolCompacted.clearedCount) {
+      notes.push(`Compacted ${toolCompacted.clearedCount} older tool result(s) (tier: ${tier}).`);
+    }
+
+    // For hard/critical tiers, also compact non-tool messages
+    if (tier === 'hard' || tier === 'critical') {
+      const nonToolKeep = tier === 'critical' ? 3 : 5;
+      const nonToolCompacted = compactNonToolMessages(workingMessages, nonToolKeep);
+      workingMessages = nonToolCompacted.messages;
+      totalCleared += nonToolCompacted.compactedCount;
+      totalSaved += nonToolCompacted.savedChars;
+
+      if (nonToolCompacted.compactedCount) {
+        notes.push(`Compacted ${nonToolCompacted.compactedCount} older conversation message(s) (tier: ${tier}).`);
+      }
+    }
+
+    // For critical tier, also truncate remaining large tool results
+    if (tier === 'critical') {
+      const budget = C().TOOL_RESULT_CONTEXT_BUDGET || {};
+      const criticalMaxChars = Math.floor(Number(budget.inlineMaxChars || 20000) / 4);
+      let truncCount = 0;
+      workingMessages = workingMessages.map(msg => {
+        if (msg.role !== 'tool' && !/<tool_result\b/i.test(String(msg.content || ''))) return msg;
+        const original = String(msg.content || '');
+        if (original.length <= criticalMaxChars) return msg;
+        truncCount++;
+        return { ...msg, content: original.slice(0, criticalMaxChars) + `\n\n[truncated ${original.length - criticalMaxChars} chars — critical compaction]` };
+      });
+      if (truncCount) {
+        notes.push(`Truncated ${truncCount} large tool result(s) to ${criticalMaxChars} chars (tier: critical).`);
+      }
+    }
+
+    if (!totalCleared && tier !== 'critical') return [];
+
+    window.messages = workingMessages;
     if (window.sessionStats && typeof window.sessionStats === 'object') {
       window.sessionStats.resets = Number(window.sessionStats.resets || 0) + 1;
     }
 
-    return [
-      `Context manager compacted ${compacted.clearedCount} older tool result(s), saved ~${compacted.savedChars} chars (~${Math.ceil(compacted.savedChars / CHAR_TOKEN_RATIO)} tokens).`
-    ];
+    // Update last compaction round
+    if (preLlm) {
+      lastPreLlmCompactionRound = currentRound;
+    } else {
+      lastCompactionRound = currentRound;
+    }
+
+    const savedTokens = Math.ceil(totalSaved / CHAR_TOKEN_RATIO);
+    notes.push(`Total saved: ~${totalSaved} chars (~${savedTokens} tokens).`);
+
+    return notes;
+  }
+
+  /**
+   * Pre-LLM context check — called before sending messages to the LLM.
+   * If context is over the hard threshold, compacts aggressively to
+   * prevent Ollama from silently truncating.
+   *
+   * @param {Object} [opts]
+   * @param {number} [opts.round] - Current round
+   * @param {number} [opts.ctxLimit] - Context limit
+   * @returns {string[]} Compaction notes
+   */
+  function preLlmContextCheck({ round, ctxLimit } = {}) {
+    const messages = Array.isArray(window.messages) ? window.messages : [];
+    const limit = Number(ctxLimit || C().DEFAULT_CTX_LIMIT_CHARS || 128000);
+    const policy = C().CONTEXT_COMPACTION_POLICY || {};
+    const hardRatio = Math.min(0.97, Number(policy.thresholdRatio || 0.82) + 0.10);
+
+    const charSize = ctxSize(messages);
+    const hardThreshold = Math.floor(limit * hardRatio);
+
+    if (charSize < hardThreshold) return [];
+
+    // Force compaction even if minRoundGap hasn't elapsed
+    return applyContextManagementPipeline({ round, ctxLimit, preLlm: true });
   }
 
   window.AgentCompaction = {
@@ -331,6 +547,8 @@
       runMaxOutputTokensRecoveryCount = Math.max(0, Number(value || 0));
     },
     get runCompactedResultNoticeSignatures() { return runCompactedResultNoticeSignatures; },
+    get lastCompactionRound() { return lastCompactionRound; },
+    get lastPreLlmCompactionRound() { return lastPreLlmCompactionRound; },
     ctxSize,
     ctxTokenEstimate,
     estimateTokens,
@@ -343,8 +561,10 @@
     sanitizeToolResult,
     applyToolResultContextBudget,
     microcompactToolResultMessages,
+    compactNonToolMessages,
     buildToolUseSummary,
     armTimeBasedMicrocompactForTurn,
-    applyContextManagementPipeline
+    applyContextManagementPipeline,
+    preLlmContextCheck
   };
 })();

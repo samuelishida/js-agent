@@ -162,6 +162,13 @@ async function agentLoop(userMessage) {
   showThinking('forcing final answer…');
   try {
     throwIfStopRequested();
+
+    // Pre-LLM context check before force-final-answer
+    const CompFinal = window.AgentCompaction;
+    if (CompFinal?.preLlmContextCheck) {
+      CompFinal.preLlmContextCheck({ round: MAX_ROUNDS, ctxLimit: CTX_LIMIT });
+    }
+
     const finalReply = await callLLM(window.messages, getTurnLlmCallOptions());
     throwIfStopRequested();
     const parsedFinalReply = splitModelReply(finalReply);

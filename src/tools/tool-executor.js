@@ -417,14 +417,19 @@
     }
     const result = await callLocalCompatApi('/api/terminal-files', payload);
     const rawOutput = String(result?.result || result?.output || '');
-    // Extract base64 from last non-empty line if present
-    const lines = rawOutput.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-    const lastLine = lines[lines.length - 1] || '';
-    if (lastLine.length > 40 && /^[A-Za-z0-9+/]+={0,2}$/.test(lastLine)) {
+    // Extract base64 from STDOUT line in dev server output format:
+    //   $ node script.cjs
+    //   CWD: ...
+    //   Exit code: 0
+    //   STDOUT: UEsDBAoAAAAA...
+    //   STDERR: (empty)
+    const stdoutMatch = rawOutput.match(/STDOUT:\s*([A-Za-z0-9+/=]{40,})/);
+    const b64 = stdoutMatch ? stdoutMatch[1] : '';
+    if (b64) {
       // Auto-download: decode base64 and trigger browser download immediately.
       // No second tool call needed — the file lands in the user's Downloads folder.
       try {
-        const binaryStr = atob(lastLine);
+        const binaryStr = atob(b64);
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
         const ext = scriptPath.split('.').pop()?.toLowerCase() || 'bin';
@@ -438,12 +443,12 @@
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 5000);
         // Also save to localStorage as fallback
-        try { localStorage.setItem('__last_generated_base64__', lastLine); } catch {}
+        try { localStorage.setItem('__last_generated_base64__', b64); } catch {}
         return formatToolResult('runtime_generateFile', `Generated and downloaded ${a.download} (${bytes.length} bytes). File saved to your Downloads folder.`);
       } catch (e) {
         // Fallback: save to localStorage so fs_download_file can pick it up
-        try { localStorage.setItem('__last_generated_base64__', lastLine); } catch {}
-        return formatToolResult('runtime_generateFile', `base64:${lastLine}\n[Auto-download failed: ${e.message}. Use fs_download_file(filename="output.docx", storageKey="__last_generated_base64__") to download.]`);
+        try { localStorage.setItem('__last_generated_base64__', b64); } catch {}
+        return formatToolResult('runtime_generateFile', `base64:${b64}\n[Auto-download failed: ${e.message}. Use fs_download_file(filename="output.docx", storageKey="__last_generated_base64__") to download.]`);
       }
     }
     return formatToolResult('runtime_generateFile', rawOutput || 'Script executed.');

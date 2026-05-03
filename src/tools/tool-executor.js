@@ -417,14 +417,11 @@
     }
     const result = await callLocalCompatApi('/api/terminal-files', payload);
     const rawOutput = String(result?.result || result?.output || '');
-    // Extract base64 from STDOUT line in dev server output format:
-    //   $ node script.cjs
-    //   CWD: ...
-    //   Exit code: 0
-    //   STDOUT: UEsDBAoAAAAA...
-    //   STDERR: (empty)
-    const stdoutMatch = rawOutput.match(/STDOUT:\s*([A-Za-z0-9+/=]{40,})/);
-    const b64 = stdoutMatch ? stdoutMatch[1] : '';
+    // Extract base64 from STDOUT line in dev server output format.
+    // Base64 may span multiple lines if the output is long.
+    // Format: STDOUT: UEsDBAoAAAAA...\nSTDERR: (empty)
+    const stdoutMatch = rawOutput.match(/STDOUT:\s*([A-Za-z0-9+/=\r\n]{40,}?)(?:\r?\nSTDERR:|$)/);
+    const b64 = stdoutMatch ? stdoutMatch[1].replace(/[\r\n\s]/g, '') : '';
     if (b64) {
       // Auto-download: decode base64 and trigger browser download immediately.
       // No second tool call needed — the file lands in the user's Downloads folder.

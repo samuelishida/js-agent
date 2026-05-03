@@ -421,7 +421,14 @@
     const lines = rawOutput.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
     const lastLine = lines[lines.length - 1] || '';
     if (lastLine.length > 40 && /^[A-Za-z0-9+/]+={0,2}$/.test(lastLine)) {
-      return formatToolResult('runtime_generateFile', `base64:${lastLine}`);
+      // Auto-save base64 to localStorage so fs_download_file can use storageKey
+      try {
+        localStorage.setItem('__last_generated_base64__', lastLine);
+        // Also save with filename hint from path
+        const baseName = scriptPath.replace(/\.[^.]+$/, '');
+        localStorage.setItem(`__b64_${baseName}`, lastLine);
+      } catch { /* quota exceeded — ignore, base64 still in result */ }
+      return formatToolResult('runtime_generateFile', `base64:${lastLine}\n[Saved to localStorage as __last_generated_base64__ — use fs_download_file(filename="output.docx", storageKey="__last_generated_base64__") to download]`);
     }
     return formatToolResult('runtime_generateFile', rawOutput || 'Script executed.');
   }

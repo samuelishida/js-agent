@@ -66,16 +66,54 @@
   }
 
   function buildToolList(enabledTools = []) {
-    return enabledTools
-      .map(name => {
+    // Build categorized tool list from tool groups for better AI discoverability
+    const groups = window.AgentTools?.toolGroups || {};
+    const enabledSet = new Set(enabledTools);
+    const lines = [];
+
+    for (const [groupKey, group] of Object.entries(groups)) {
+      const groupTools = (group.tools || []).filter(t => enabledSet.has(t.name));
+      if (!groupTools.length) continue;
+      lines.push(`## ${group.label}`);
+      for (const tool of groupTools) {
+        const sig = tool.signature || '';
+        lines.push(`- ${tool.name}${sig}: ${tool.description || 'available tool'}`);
+      }
+      lines.push('');
+    }
+
+    // Add any enabled tools not in any group
+    const groupedNames = new Set(
+      Object.values(groups).flatMap(g => (g.tools || []).map(t => t.name))
+    );
+    const ungrouped = enabledTools.filter(t => !groupedNames.has(t));
+    if (ungrouped.length) {
+      lines.push('## Other');
+      for (const name of ungrouped) {
         const tool = window.AgentTools?.registry?.[name];
         const description = tool?.description || BUILTIN_TOOL_DESCRIPTIONS[name] || 'available tool';
         const sig = tool?.signature
           ? String(tool.signature).replace(/^[^(]*/, '')
           : '';
-        return `- ${name}${sig}: ${description}`;
-      })
-      .join('\n');
+        lines.push(`- ${name}${sig}: ${description}`);
+      }
+    }
+
+    // Fallback: if no groups at all, build flat list
+    if (!lines.length) {
+      return enabledTools
+        .map(name => {
+          const tool = window.AgentTools?.registry?.[name];
+          const description = tool?.description || BUILTIN_TOOL_DESCRIPTIONS[name] || 'available tool';
+          const sig = tool?.signature
+            ? String(tool.signature).replace(/^[^(]*/, '')
+            : '';
+          return `- ${name}${sig}: ${description}`;
+        })
+        .join('\n');
+    }
+
+    return lines.join('\n');
   }
 
   function buildOpenAiToolSchemas(enabledTools = []) {

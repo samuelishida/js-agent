@@ -188,7 +188,8 @@ async function main() {
       return 'policy';
     },
     async loadRendered(_, vars) {
-      return vars?.tools_list || 'Available tools: (none)';
+      const tools = vars?.tools_list || '(none)';
+      return `Available tools:\n${tools}`;
     }
   };
 

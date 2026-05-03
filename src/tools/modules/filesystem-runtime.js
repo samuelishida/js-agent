@@ -37,18 +37,20 @@
     async function readSandboxFile(sandboxPath) {
       const cleanPath = String(sandboxPath || '').replace(/^agent-sandbox[\\/]/, '');
       if (!cleanPath) return { ok: false, error: 'No path provided' };
-      const result = await callSandboxApi({
-        command: `cat "agent-sandbox/${cleanPath}"`,
-        files: []
-      });
-      if (result.ok && result.result) {
-        // Extract content after the CWD line
-        const output = String(result.result || '');
-        const match = output.match(/CWD:[^\n]*\n\n([\s\S]*)$/);
-        if (match) return { ok: true, content: match[1] };
-        return { ok: true, content: output };
+      // Try agent-sandbox/ first, then root
+      for (const prefix of [`agent-sandbox/${cleanPath}`, cleanPath]) {
+        const result = await callSandboxApi({
+          command: `cat "${prefix}"`,
+          files: []
+        });
+        if (result.ok && result.result) {
+          const output = String(result.result || '');
+          const match = output.match(/CWD:[^\n]*\n\n([\s\S]*)$/);
+          if (match) return { ok: true, content: match[1] };
+          return { ok: true, content: output };
+        }
       }
-      return { ok: false, error: result.error || 'Failed to read sandbox file' };
+      return { ok: false, error: 'Failed to read sandbox file' };
     }
 
     async function writeSandboxFile(sandboxPath, content) {
@@ -306,8 +308,18 @@
 
     function detectDownloadMime(name) {
       const ext = String(name || '').split('.').pop().toLowerCase();
-      const map = { json: 'application/json', csv: 'text/csv', html: 'text/html', htm: 'text/html', js: 'text/javascript', md: 'text/markdown', xml: 'application/xml', zip: 'application/zip', pdf: 'application/pdf' };
-      return map[ext] || 'text/plain;charset=utf-8';
+      const map = {
+        json: 'application/json', csv: 'text/csv', html: 'text/html', htm: 'text/html',
+        js: 'text/javascript', md: 'text/markdown', xml: 'application/xml', zip: 'application/zip',
+        pdf: 'application/pdf',
+        docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+        webp: 'image/webp', svg: 'image/svg+xml', ico: 'image/x-icon',
+        bmp: 'image/bmp', tiff: 'image/tiff', tif: 'image/tiff'
+      };
+      return map[ext] || 'application/octet-stream';
     }
 
     function base64ToUint8Array(b64) {
@@ -328,9 +340,18 @@
       return s.length > 40;
     }
 
-    async function downloadFile({ path, content = '', filename = '' }) {
+    async function downloadFile({ path, content = '', filename = '', storageKey = '' }) {
       let blob;
       let resolvedName = filename;
+
+      // Support storageKey — read content from localStorage (avoids arg size limits)
+      if (storageKey && !content) {
+        const stored = localStorage.getItem(String(storageKey));
+        if (stored) {
+          content = stored;
+          resolvedName = resolvedName || `${storageKey}.docx`;
+        }
+      }
 
       if (content) {
         // Content provided — trigger browser download directly without needing an authorized root
@@ -355,6 +376,7 @@
           resolvedName = resolvedName || fileName;
         } catch (fsErr) {
           // No authorized root — try reading from agent-sandbox via server
+          // Try both agent-sandbox/ prefixed and bare paths
           const sandboxPath = path.replace(/^agent-sandbox[\\/]/, '');
           const result = await readSandboxFile(sandboxPath);
           if (result.ok) {
@@ -367,7 +389,7 @@
               blob = new Blob([raw], { type: detectDownloadMime(resolvedName) });
             }
           } else {
-            return formatToolResult('fs_download_file', `ERROR: No content or path provided, and no authorized folder. ${fsErr?.message || ''}`);
+            return formatToolResult('fs_download_file', `ERROR: Cannot read file '${path}'. No authorized folder and sandbox read failed: ${result.error || fsErr?.message || 'unknown error'}. Try using content= or storageKey= instead.`);
           }
         }
       } else {

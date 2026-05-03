@@ -385,6 +385,7 @@
     const storageKey = String(args.storageKey || '').trim();
     const cwd = String(args.cwd || '');
     const command = String(args.command || '').trim();
+    const outputFilename = String(args.filename || '').trim();
     if (!scriptPath) throw new Error('runtime_generateFile requires path.');
     // Resolve content: explicit content > storageKey > no content (script on disk)
     let resolvedContent = scriptContent;
@@ -429,14 +430,14 @@
         const binaryStr = atob(b64);
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-        const ext = scriptPath.split('.').pop()?.toLowerCase() || 'bin';
+        const ext = (outputFilename || scriptPath).split('.').pop()?.toLowerCase() || 'bin';
         const mimeMap = { docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation', pdf:'application/pdf', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp', svg:'image/svg+xml', zip:'application/zip', json:'application/json', csv:'text/csv', html:'text/html', txt:'text/plain' };
         const mime = mimeMap[ext] || 'application/octet-stream';
         const blob = new Blob([bytes], { type: mime });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = scriptPath.replace(/^.*[\\/]/, '') || `output.${ext}`;
+        a.download = outputFilename || scriptPath.replace(/^.*[\\/]/, '') || `output.${ext}`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 5000);
         // Also save to localStorage as fallback

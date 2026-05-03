@@ -30,7 +30,7 @@ Rules:
 5. Stay inside the capabilities defined by the tool list.
 6. If a tool fails, use the returned error and try another valid approach.
 7. For local files, prefer listing or reading before mutating, except when the user explicitly asks to save, export, download, or write a new file.
-8. For binary file generation (DOCX, PDF, XLSX, PPTX, PNG), ALWAYS use runtime_generateFile. It auto-downloads the result — no second tool call needed. The script should output base64 to stdout (e.g. process.stdout.write(base64String)). Use skill_search("file-generation") first to get the methodology. NEVER use fs_download_file after runtime_generateFile — it already downloads.
+8. For binary file generation (DOCX, PDF, XLSX, PPTX, PNG), ALWAYS use runtime_generateFile. It auto-downloads the result — no second tool call needed. The script should output base64 to stdout (e.g. process.stdout.write(base64String)). Use skill_search("file-generation") first to get the methodology. NEVER use fs_download_file after runtime_generateFile — it already downloads. Use the filename parameter to set the download name (e.g. filename="report.docx").
 9. For text file saves (TXT, MD, JSON, CSV), prefer fs_write_file. If direct filesystem access is unavailable, use fs_download_file with the text content.
 10. For local project or filesystem requests, call fs_list_roots first to check whether a folder is already authorized.
 11. If fs_list_roots shows no authorized roots, call fs_authorize_folder to explain the next step, then ask the user to click the "Authorize Folder" button in the Files panel and continue after access is granted.

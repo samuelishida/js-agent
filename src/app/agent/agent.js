@@ -3,7 +3,31 @@
 // error recovery to error-recovery.js, tool-call repair to tool-call-repair.js,
 // and session lifecycle to session-lifecycle.js.
 
-/** @typedef {import('../../types/index.js').SessionMessage} SessionMessage */
+/** @type {import('../../types/index.js').SessionMessage} */
+var _SessionMessageAgent;
+
+/** @type {Function} */
+var addMessage;
+/** @type {Function} */
+var addNotice;
+/** @type {Function} */
+var setStatus;
+/** @type {Function} */
+var updateStats;
+/** @type {Function} */
+var updateCtxBar;
+/** @type {Function} */
+var notifyIfHidden;
+/** @type {Function} */
+var showThinking;
+/** @type {Function} */
+var hideThinking;
+/** @type {Function} */
+var splitModelReply;
+/** @type {Function} */
+var stripModelMetaCommentary;
+/** @type {Function} */
+var getToolCallCleanupRegex;
 
 /**
  * Get constants helper.
@@ -89,7 +113,7 @@ async function agentLoop(userMessage) {
       window.messages = roundResult.messages;
       if (typeof window.openConfirmationPanel === 'function') window.openConfirmationPanel();
       setStatus('busy', 'waiting for confirmation…');
-      while ((window.AgentConfirmation?.pending?.() || []).length > 0) {
+      while ((/** @type {any} */ (window).AgentConfirmation?.pending?.() || []).length > 0) {
         throwIfStopRequested();
         await sleep(300);
       }

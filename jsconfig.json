@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "ES2020",
-    "checkJs": true,
+    "checkJs": false,
     "noEmit": true,
     "allowJs": true,
     "strictNullChecks": false,

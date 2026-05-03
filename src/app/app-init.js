@@ -9,8 +9,8 @@ let extensionChannelWarningShown = false;
  * @returns {void}
  */
 function installUnhandledRejectionGuard() {
-  if (window.__agentUnhandledRejectionGuardInstalled) return;
-  window.__agentUnhandledRejectionGuardInstalled = true;
+  if (/** @type {any} */ (window).__agentUnhandledRejectionGuardInstalled) return;
+  /** @type {any} */ (window).__agentUnhandledRejectionGuardInstalled = true;
 
   window.addEventListener('unhandledrejection', event => {
     const message = String(event?.reason?.message || event?.reason || '');
@@ -53,7 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (stored !== null) {
         const sl = document.getElementById(def.id);
         const vl = document.getElementById(def.valId);
-        if (sl) sl.value = stored;
+        if (sl) /** @type {HTMLInputElement} */ (sl).value = stored;
         if (vl) vl.textContent = stored;
       }
     } catch {}
@@ -87,11 +87,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!data) return;
         // Store terminal auth token for use in /api/terminal requests
         if (data.terminalToken) {
-          window.__terminalToken = data.terminalToken;
+          /** @type {any} */ (window).__terminalToken = data.terminalToken;
         }
         // If server has OpenRouter key, activate proxy mode (no local key needed)
         if (data.hasOpenRouterKey && !openrouterBackend.apiKey) {
-          window.__serverHasOpenRouterKey = true;
+          /** @type {any} */ (window).__serverHasOpenRouterKey = true;
           // Enable openrouter backend pointing at the local proxy
           if (!openrouterBackend.enabled) {
             openrouterBackend.enabled = true;
@@ -105,7 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
   } catch {}
 
   // Discover and register MCP server tools (non-blocking; failures are logged only)
-  window.AgentMcpBridge?.discoverAndRegisterMcpTools?.().catch(() => {});
+  /** @type {any} */ (window).AgentMcpBridge?.discoverAndRegisterMcpTools?.().catch(() => {});
 
   // Auto-load built-in skills (methodology/expertise .md files)
   if (window.AgentSkillLoader) {
@@ -134,11 +134,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.localBackend.model) {
       const sel = document.getElementById('local-model-select');
       sel.innerHTML = `<option value="${window.localBackend.model}">${window.localBackend.model}</option>`;
-      sel.value = window.localBackend.model;
+      /** @type {HTMLSelectElement} */ (sel).value = window.localBackend.model;
       document.getElementById('local-model-row').style.display = 'block';
 
       sel?.addEventListener('change', function() {
-        const model = this.value;
+        const model = /** @type {HTMLSelectElement} */ (this).value;
         if (model) {
           window.localBackend.model = model;
           localStorage.setItem('agent_local_backend_model', model);

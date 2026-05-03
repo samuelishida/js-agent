@@ -107,8 +107,8 @@ function normalizeSessionStats(value) {
 /**
  * Bind a property to window with getter/setter.
  * @param {string} name - Property name
- * @param {Function} getter - Getter function
- * @param {Function} setter - Setter function
+ * @param {() => any} getter - Getter function
+ * @param {(v: any) => void} setter - Setter function
  * @returns {void}
  */
 function bindWindowStateProperty(name, getter, setter) {
@@ -187,7 +187,7 @@ async function requestDirectoryAccess() {
     updateFileAccessStatus();
     setStatus('ok', 'folder authorized');
   } catch (error) {
-    addNotice(`File access failed: ${error.message}`);
+    addNotice(`File access failed: ${error instanceof Error ? error.message : String(error)}`);
     setStatus('error', 'file access blocked');
   }
 }
@@ -198,7 +198,7 @@ async function requestDirectoryAccess() {
  * @returns {void}
  */
 function saveGithubToken() {
-  const token = document.getElementById('github-token').value.trim();
+  const token = /** @type {HTMLInputElement} */ (document.getElementById('github-token')).value.trim();
   if (token) {
     localStorage.setItem('github_token', token);
     const status = document.getElementById('github-token-status');

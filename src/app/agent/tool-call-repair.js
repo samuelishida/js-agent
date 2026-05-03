@@ -1,7 +1,17 @@
 // src/app/agent/tool-call-repair.js
 // Malformed tool call detection and LLM-based repair.
 
-/** @typedef {import('../../types/index.js').SessionMessage} SessionMessage */
+/** @type {import('../../types/index.js').SessionMessage} */
+var _SessionMessageRepair;
+
+/** @type {Function} */
+var extractPlannerOptimizedQueryFromMessages;
+/** @type {Function} */
+var looksLikeDeferredActionReply;
+/** @type {Function} */
+var looksLikeToolExecutionClaimWithoutCall;
+/** @type {Function} */
+var splitModelReply;
 
 /**
  * Complete tool call arguments by recovering missing values from context.

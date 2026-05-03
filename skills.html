@@ -32,7 +32,21 @@
 </head>
 <body>
   <h1>JS Agent Skills</h1>
-  <p class="lead">17 built-in skills for the browser-first AI agent. All file generation uses <strong>pure JavaScript</strong> — no Python required.</p>
+  <p class="lead">16 built-in skills for the browser-first AI agent. All file generation uses <strong>pure JavaScript</strong> — no Python required. Skills are <strong>discovered on-demand</strong> via <code>skill_search(query)</code> and <code>skill_load(name)</code> tools.</p>
+
+  <h2>Discovery Tools</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="card-name">skill_search</div>
+      <div class="card-desc">Search available skills by keyword. Returns scored matches with descriptions. Use before <code>skill_load</code> to discover what skills exist for a task.</div>
+      <div class="tag-row"><span class="tag">On-Demand</span><span class="tag">Context-Efficient</span></div>
+    </div>
+    <div class="card">
+      <div class="card-name">skill_load</div>
+      <div class="card-desc">Load a skill's full methodology content by name. Use after <code>skill_search</code> to get complete guidelines before following them.</div>
+      <div class="tag-row"><span class="tag">On-Demand</span><span class="tag">Full Content</span></div>
+    </div>
+  </div>
 
   <h2>File Generation (Binary Outputs)</h2>
   <div class="grid">
@@ -124,6 +138,7 @@
 
   <footer>
     <p>JS Agent — Browser-first AI agent with pure JavaScript execution. No bundler. No Python.</p>
+    <p style="margin-top:8px;">Skills are discovered on-demand via <code>skill_search</code> / <code>skill_load</code> — no passive pre-loading into context.</p>
     <p style="margin-top:8px;"><a href="https://github.com/samuelishida/js-agent">GitHub</a> · <a href="agentic-search-arch.html#skills-catalog">Architecture</a></p>
   </footer>
 </body>

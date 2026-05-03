@@ -421,14 +421,30 @@
     const lines = rawOutput.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
     const lastLine = lines[lines.length - 1] || '';
     if (lastLine.length > 40 && /^[A-Za-z0-9+/]+={0,2}$/.test(lastLine)) {
-      // Auto-save base64 to localStorage so fs_download_file can use storageKey
+      // Auto-download: decode base64 and trigger browser download immediately.
+      // No second tool call needed — the file lands in the user's Downloads folder.
       try {
-        localStorage.setItem('__last_generated_base64__', lastLine);
-        // Also save with filename hint from path
-        const baseName = scriptPath.replace(/\.[^.]+$/, '');
-        localStorage.setItem(`__b64_${baseName}`, lastLine);
-      } catch { /* quota exceeded — ignore, base64 still in result */ }
-      return formatToolResult('runtime_generateFile', `base64:${lastLine}\n[Saved to localStorage as __last_generated_base64__ — use fs_download_file(filename="output.docx", storageKey="__last_generated_base64__") to download]`);
+        const binaryStr = atob(lastLine);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+        const ext = scriptPath.split('.').pop()?.toLowerCase() || 'bin';
+        const mimeMap = { docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation', pdf:'application/pdf', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp', svg:'image/svg+xml', zip:'application/zip', json:'application/json', csv:'text/csv', html:'text/html', txt:'text/plain' };
+        const mime = mimeMap[ext] || 'application/octet-stream';
+        const blob = new Blob([bytes], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = scriptPath.replace(/^.*[\\/]/, '') || `output.${ext}`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        // Also save to localStorage as fallback
+        try { localStorage.setItem('__last_generated_base64__', lastLine); } catch {}
+        return formatToolResult('runtime_generateFile', `Generated and downloaded ${a.download} (${bytes.length} bytes). File saved to your Downloads folder.`);
+      } catch (e) {
+        // Fallback: save to localStorage so fs_download_file can pick it up
+        try { localStorage.setItem('__last_generated_base64__', lastLine); } catch {}
+        return formatToolResult('runtime_generateFile', `base64:${lastLine}\n[Auto-download failed: ${e.message}. Use fs_download_file(filename="output.docx", storageKey="__last_generated_base64__") to download.]`);
+      }
     }
     return formatToolResult('runtime_generateFile', rawOutput || 'Script executed.');
   }

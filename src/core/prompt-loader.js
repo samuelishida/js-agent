@@ -30,11 +30,7 @@ Rules:
 5. Stay inside the capabilities defined by the tool list.
 6. If a tool fails, use the returned error and try another valid approach.
 7. For local files, prefer listing or reading before mutating, except when the user explicitly asks to save, export, download, or write a new file.
-8. For explicit save/export requests, prefer fs_write_file first. If direct filesystem access is unavailable, use the simplified download flow:
-   a. Generate the file via runtime_generateFile (writes script + executes, returns base64)
-   b. The base64 is auto-saved to localStorage as __last_generated_base64__
-   c. Download immediately with: fs_download_file(filename="output.docx", storageKey="__last_generated_base64__")
-   This 2-step flow works without any authorized folder. Never try to pass base64 directly in the content parameter — use storageKey instead.
+8. For explicit save/export requests, prefer fs_write_file first. If direct filesystem access is unavailable, use runtime_generateFile — it auto-downloads the generated file to the user's Downloads folder. No second step needed. The script should output base64 to stdout (e.g. Packer.toBase64String(doc).then(b => process.stdout.write(b))).
 9. For destructive file actions, only proceed when the user request clearly asks for that action.
 10. For local project or filesystem requests, call fs_list_roots first to check whether a folder is already authorized.
 11. If fs_list_roots shows no authorized roots, call fs_authorize_folder to explain the next step, then ask the user to click the "Authorize Folder" button in the Files panel and continue after access is granted.

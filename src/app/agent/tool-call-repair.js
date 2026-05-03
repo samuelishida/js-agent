@@ -127,7 +127,11 @@ function shouldAttemptToolCallRepair({ rawReply = '', cleanReply = '', thinkingB
 
   if (regex?.hasUnprocessedToolCall?.(raw)) return true;
   if (/\u003c\|tool_call\u003e|\u003ctool_call\b/i.test(raw) || /"tool"\s*:/i.test(raw)) return true;
-  if (!visible && Array.isArray(thinkingBlocks) && thinkingBlocks.some(block => String(block || '').trim())) return true;
+
+  // If thinking indicates a final answer, do not repair — let guardrails handle it
+  const thinkingSaysFinal = window.AgentReplyAnalysis?.thinkingIndicatesFinalAnswer?.(thinkingBlocks);
+  if (!visible && Array.isArray(thinkingBlocks) && thinkingBlocks.some(block => String(block || '').trim()) && !thinkingSaysFinal) return true;
+
   if (looksLikeDeferredActionReply(visible)) return true;
   if (looksLikeToolExecutionClaimWithoutCall(visible)) return true;
   if (orchestrator?.hasReasoningLeak?.(visible)) return true;

@@ -192,7 +192,8 @@ function handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionRounds,
     return { finalAnswer: false, messages: updated, consecutiveNonActionRounds: nextConsecutive, shouldContinue: true };
   }
 
-  var thinkingSaysFinal = window.AgentReplyAnalysis?.thinkingIndicatesFinalAnswer?.(parsedReply?.thinkingBlocks || []);
+  var thinkingBlocks = window.AgentReplyAnalysis?.extractThinkingBlocks?.(rawReply || '') || [];
+  var thinkingSaysFinal = window.AgentReplyAnalysis?.thinkingIndicatesFinalAnswer?.(thinkingBlocks);
 
   if (looksLikeDeferredActionReply(cleanReply) && !thinkingSaysFinal) {
     const nextConsecutive = consecutiveNonActionRounds + 1;
@@ -466,6 +467,7 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   }
 
   const { rawReply, parsedReply, reply } = llmResult;
+  const safeParsedReply = parsedReply || { visible: String(reply || ''), thinkingBlocks: [], raw: String(rawReply || '') };
   hideThinking();
 
   // 3. Parse / repair tool calls
@@ -474,7 +476,7 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   let toolCalls = TE?.resolveToolCallsFromModelReply ? TE.resolveToolCallsFromModelReply(reply, rawReply) : [];
 
   if (!toolCalls.length) {
-    const repaired = await tryRepairToolCalls({ userMessage, rawReply, reply, parsedReply, messages });
+    const repaired = await tryRepairToolCalls({ userMessage, rawReply, reply, parsedReply: safeParsedReply, messages });
     if (repaired.toolCalls.length) {
       addNotice(`Repair pass normalized malformed output into valid tool call(s): ${repaired.toolCalls.map(c => c.tool).join(', ')}.`);
       toolCalls = repaired.toolCalls;
@@ -485,7 +487,7 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
 
   // 4. Handle no tool calls (final answer or continuation)
   if (!toolCalls.length) {
-    const noToolResult = handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionRounds, messages });
+    const noToolResult = handleNoToolCalls({ reply: String(repaired?.reply || reply || ''), rawReply, round, consecutiveNonActionRounds, messages });
 
     if (noToolResult.finalAnswer) {
       const finalText = noToolResult.finalText;
@@ -513,7 +515,7 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   // 6. Execute batches
   const toolContent = stripModelMetaCommentary(String(reply || '').replace(/\u003ctool_call(?:\s[^\u003e]*\u003e|\u003e?)\s*[\s\S]*?\u003c\/tool_call\u003e/gi, ''));
   if (toolContent) {
-    addMessage('agent', toolContent, round, false, false, parsedReply.thinkingBlocks || []);
+    addMessage('agent', toolContent, round, false, false, safeParsedReply.thinkingBlocks || []);
   }
 
   messages.push({ role: 'assistant', content: rawReply || reply });

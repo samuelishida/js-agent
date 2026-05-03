@@ -107,7 +107,7 @@
     try {
       return handler({ ...runSessionContext, ...payload, runPermissionMode });
     } catch (error) {
-      console.warn(`[Permissions] Hook '${key}' failed:`, error?.message || error);
+      console.warn(`[Permissions] Hook '${key}' failed:`, error instanceof Error ? error.message : error);
       return null;
     }
   }
@@ -135,7 +135,7 @@
       return {
         allowed: false,
         decided: true,
-        reason: error?.message || 'Permission hook failed.'
+        reason: error instanceof Error ? error.message : 'Permission hook failed.'
       };
     }
   }

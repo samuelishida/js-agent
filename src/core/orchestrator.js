@@ -20,7 +20,7 @@
     if (cachedSafetyGuidelines) return cachedSafetyGuidelines;
     try {
       const content = await window.AgentPrompts?.load?.(DEFAULT_PROMPTS.safety) || '';
-      cachedSafetyGuidelines = parseSafetyGuidelines(content);
+      cachedSafetyGuidelines = parseSafetyGuidelines(content) || /** @type {any} */ ({});
     } catch (error) {
       cachedSafetyGuidelines = getDefaultSafetyGuidelines();
     }
@@ -362,7 +362,7 @@
       }
     }
 
-    return `ERROR executing ${call.tool}: ${lastError?.message || 'unknown failure'}`;
+    return `ERROR executing ${call.tool}: ${lastError instanceof Error ? lastError.message : 'unknown failure'}`;
   }
 
   function canonicalToolName(name) {

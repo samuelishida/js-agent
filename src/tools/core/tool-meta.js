@@ -2,8 +2,8 @@
 // Tool metadata: classification, execution meta, dependency tracking.
 
 (() => {
-  /** @type {Object} */
-  const root = (window.AgentToolCore = window.AgentToolCore || {});
+  /** @type {any} */
+  const root = (/** @type {any} */ (window).AgentToolCore = /** @type {any} */ (window).AgentToolCore || {});
 
   /** @type {Set<string>} */
   const SAFE_CLASSIFIED_TOOLS = new Set([

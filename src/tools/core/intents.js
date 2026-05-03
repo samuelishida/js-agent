@@ -2,8 +2,8 @@
 // Intent detection: currencies, weather, filesystem, generation, etc.
 
 (() => {
-  /** @type {Object} */
-  const root = (window.AgentToolCore = window.AgentToolCore || {});
+  /** @type {any} */
+  const root = (/** @type {any} */ (window).AgentToolCore = /** @type {any} */ (window).AgentToolCore || {});
 
   /**
    * Extract entities from text.

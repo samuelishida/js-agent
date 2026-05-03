@@ -59,7 +59,7 @@
  * @typedef {Object} SkillEntry
  * @property {string} name - Skill name
  * @property {string} description - Skill description
- * @property {Object} frontmatter - Parsed YAML frontmatter
+ * @property {Object} [frontmatter] - Parsed YAML frontmatter
  * @property {string} content - Skill body content
  * @property {string} source - Source URL or identifier
  */

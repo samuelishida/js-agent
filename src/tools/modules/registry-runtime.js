@@ -2,6 +2,9 @@
   window.AgentToolModules = window.AgentToolModules || {};
 
   window.AgentToolModules.createRegistryRuntime = function createRegistryRuntime(handlers = {}) {
+    /**
+     * @param {{name: string, signature: string, description: string, run: Function, retries?: number, fallbacks?: any[]}} config
+     */
     function defineTool({ name, signature, description, run, retries = 1, fallbacks }) {
       return {
         name,

@@ -113,7 +113,7 @@
       const raw = localStorage.getItem(key);
       return raw ? JSON.parse(raw) : fallback;
     } catch (err) {
-      console.warn(`[SkillLoader] localStorage read error for ${key}:`, err.message);
+      console.warn(`[SkillLoader] localStorage read error for ${key}:`, err instanceof Error ? err.message : String(err));
       return fallback;
     }
   }
@@ -129,7 +129,7 @@
       localStorage.setItem(key, JSON.stringify(value));
       return true;
     } catch (err) {
-      console.warn(`[SkillLoader] localStorage write error for ${key}:`, err.message);
+      console.warn(`[SkillLoader] localStorage write error for ${key}:`, err instanceof Error ? err.message : String(err));
       return false;
     }
   }
@@ -282,7 +282,7 @@
       if (skill) saveCache(); // update cache after successful fetch
       return skill;
     } catch (err) {
-      console.warn(`[SkillLoader] Failed to load skill from ${url}: ${err.message}`);
+      console.warn(`[SkillLoader] Failed to load skill from ${url}: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
   }
@@ -344,7 +344,7 @@
       saveCache();
       return results;
     } catch (err) {
-      console.warn(`[SkillLoader] Failed to load manifest from ${manifestUrl}: ${err.message}`);
+      console.warn(`[SkillLoader] Failed to load manifest from ${manifestUrl}: ${err instanceof Error ? err.message : String(err)}`);
       console.log('[SkillLoader] Falling back to cached skills');
       return listSkills();
     }
@@ -529,7 +529,8 @@
   }
 
   // ── Export ─────────────────────────────────────────────────────────────
-  window.AgentSkillLoader = {
+  /** @type {any} */
+  const api = {
     registerSkill,
     registerSkillFromUrl,
     registerSkillsFromManifest,
@@ -553,4 +554,6 @@
     loadCustomSkills,
     deleteCustomSkill
   };
+  /** @type {any} */
+  window.AgentSkillLoader = api;
 })();

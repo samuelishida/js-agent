@@ -9,12 +9,12 @@
 (() => {
   'use strict';
 
-  const Planner = window.AgentToolPlanner || {};
-  const Preflight = window.AgentToolPreflight || {};
-  const Broadcast = window.AgentToolBroadcast || {};
-  const Executor = window.AgentToolExecutor || {};
-  const Memory = window.AgentToolMemory || {};
-  const Registry = window.AgentToolRegistry || {};
+  const Planner = /** @type {any} */ (window).AgentToolPlanner || {};
+  const Preflight = /** @type {any} */ (window).AgentToolPreflight || {};
+  const Broadcast = /** @type {any} */ (window).AgentToolBroadcast || {};
+  const Executor = /** @type {any} */ (window).AgentToolExecutor || {};
+  const Memory = /** @type {any} */ (window).AgentToolMemory || {};
+  const Registry = /** @type {any} */ (window).AgentToolRegistry || {};
   const GithubRuntimeFactory = window.AgentToolModules?.createGithubRuntime;
 
   // ── Shared state (used by fs runtime and preflight) ──────────────────────

@@ -7,7 +7,7 @@
 (() => {
   'use strict';
 
-  const toolCore = window.AgentToolCore || {};
+  const toolCore = /** @type {any} */ (window).AgentToolCore || {};
   const intentCore = toolCore.intents || {};
   const toolMetaCore = toolCore.toolMeta || {};
 
@@ -179,8 +179,8 @@
     const urls = extractEntities(userMessage).urls.slice(0, 1);
     const pair = detectFxPair(userMessage);
 
-    const Executor = window.AgentToolExecutor;
-    const Planner = window.AgentToolPlanner;
+    const Executor = /** @type {any} */ (window).AgentToolExecutor;
+    const Planner = /** @type {any} */ (window).AgentToolPlanner;
 
     if (pair && Executor?.searchFxRate) {
       tasks.push(async () => {
@@ -216,10 +216,10 @@
 
   async function buildInitialContext(userMessage, context = {}) {
     const blocks = [];
-    const Memory = window.AgentToolMemory;
-    const Planner = window.AgentToolPlanner;
-    const Executor = window.AgentToolExecutor;
-    const Broadcast = window.AgentToolBroadcast;
+    const Memory = /** @type {any} */ (window).AgentToolMemory;
+    const Planner = /** @type {any} */ (window).AgentToolPlanner;
+    const Executor = /** @type {any} */ (window).AgentToolExecutor;
+    const Broadcast = /** @type {any} */ (window).AgentToolBroadcast;
 
     const compatContext = Memory?.buildRuntimeContextBlock?.() || '';
     if (compatContext) blocks.push(compatContext);
@@ -250,7 +250,7 @@
     return blocks.length ? `<initial_context>\n${blocks.join('\n\n')}\n</initial_context>\n\n${userMessage}` : userMessage;
   }
 
-  window.AgentToolPreflight = {
+  /** @type {any} */ (window).AgentToolPreflight = {
     isFollowUpContinuation,
     getRecentConversationSignals,
     buildPreflightPlan,

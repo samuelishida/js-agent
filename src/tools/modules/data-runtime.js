@@ -69,7 +69,7 @@
         localStorage.setItem(k, v);
         return formatToolResult('storage_set', `Saved ${k} (${v.length} chars)`);
       } catch (e) {
-        const msg = e?.message || String(e);
+        const msg = e instanceof Error ? e.message : String(e);
         if (msg.includes('quota') || msg.includes('QuotaExceededError') || msg.includes('exceeded')) {
           return formatToolResult('storage_set', `ERROR: localStorage quota exceeded for key '${k}'. Value is ${v.length} chars — use runtime_generateFile with content= instead of storageKey.`);
         }
@@ -192,7 +192,7 @@
       return formatToolResult('task_get', JSON.stringify(task, null, 2));
     }
 
-    async function taskList({ status, limit = 50 } = {}) {
+    async function taskList({ status, limit = 50 } = /** @type {{status?: string, limit?: number}} */ ({})) {
       const max = Math.max(1, Math.min(500, Number(limit) || 50));
       const wanted = String(status || '').trim().toLowerCase();
       const tasks = loadTasks()
@@ -258,16 +258,17 @@
           throw new Error('spawnAgent is not available in this runtime.');
         }
 
+        const resultObj = typeof childResult === 'string' ? JSON.parse(childResult) : childResult;
         return formatToolResult('runtime_spawnAgent', JSON.stringify({
           success: true,
           task: childConfig.task,
-          iterations: childResult.iterations || 0,
-          status: childResult.status || 'completed',
-          result: childResult.result || '',
-          toolsSummary: childResult.toolsSummary || []
+          iterations: resultObj.iterations || 0,
+          status: resultObj.status || 'completed',
+          result: resultObj.result || '',
+          toolsSummary: resultObj.toolsSummary || []
         }, null, 2));
       } catch (error) {
-        return formatToolResult('runtime_spawnAgent', `ERROR: ${error.message}`);
+        return formatToolResult('runtime_spawnAgent', `ERROR: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 

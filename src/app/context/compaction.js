@@ -402,8 +402,9 @@
    */
   function applyContextManagementPipeline({ round, ctxLimit, preLlm } = {}) {
     const messages = Array.isArray(window.messages) ? window.messages : [];
-    const limit = Number(ctxLimit || C().DEFAULT_CTX_LIMIT_CHARS || 128000);
-    const tokenLimit = Math.floor(limit / CHAR_TOKEN_RATIO);
+    const limit = Number(ctxLimit || C().DEFAULT_CTX_LIMIT_TOKENS || 32000);
+    const CHAR_TOKEN_RATIO = 3.5;
+    const limitChars = Math.floor(limit * CHAR_TOKEN_RATIO);
     const policy = C().CONTEXT_COMPACTION_POLICY || {};
 
     const charSize = ctxSize(messages);
@@ -414,12 +415,12 @@
     const hardRatio = Math.min(0.97, softRatio + 0.10);
     const criticalRatio = Math.min(0.99, softRatio + 0.15);
 
-    const softCharThreshold = Math.floor(limit * softRatio);
-    const hardCharThreshold = Math.floor(limit * hardRatio);
-    const criticalCharThreshold = Math.floor(limit * criticalRatio);
-    const softTokenThreshold = Math.floor(tokenLimit * softRatio);
-    const hardTokenThreshold = Math.floor(tokenLimit * hardRatio);
-    const criticalTokenThreshold = Math.floor(tokenLimit * criticalRatio);
+    const softCharThreshold = Math.floor(limitChars * softRatio);
+    const hardCharThreshold = Math.floor(limitChars * hardRatio);
+    const criticalCharThreshold = Math.floor(limitChars * criticalRatio);
+    const softTokenThreshold = Math.floor(limitTokens * softRatio);
+    const hardTokenThreshold = Math.floor(limitTokens * hardRatio);
+    const criticalTokenThreshold = Math.floor(limitTokens * criticalRatio);
 
     // Determine tier
     let tier = 'none';
@@ -528,12 +529,14 @@
    */
   function preLlmContextCheck({ round, ctxLimit } = {}) {
     const messages = Array.isArray(window.messages) ? window.messages : [];
-    const limit = Number(ctxLimit || C().DEFAULT_CTX_LIMIT_CHARS || 128000);
+    const limitTokens = Number(ctxLimit || C().DEFAULT_CTX_LIMIT_TOKENS || 32000);
     const policy = C().CONTEXT_COMPACTION_POLICY || {};
+    const CHAR_TOKEN_RATIO = 3.5;
+    const limitChars = Math.floor(limitTokens * CHAR_TOKEN_RATIO);
     const hardRatio = Math.min(0.97, Number(policy.thresholdRatio || 0.82) + 0.10);
 
     const charSize = ctxSize(messages);
-    const hardThreshold = Math.floor(limit * hardRatio);
+    const hardThreshold = Math.floor(limitChars * hardRatio);
 
     if (charSize < hardThreshold) return [];
 

@@ -7,16 +7,23 @@
  */
 function getMaxRounds() {
   const el = document.getElementById('sl-rounds');
-  return el ? parseInt(el.value, 10) : 50;
+  return el ? parseInt(el.value, 10) : 5;
 }
 
 /**
- * Get context limit from slider.
- * @returns {number} Context limit in chars
+ * Get context limit in tokens from slider.
+ * Slider value is in KB (4-512 KB range), converted to approximate tokens.
+ * @returns {number} Context limit in tokens
  */
 function getCtxLimit() {
+  const cfg = window.CONSTANTS || {};
+  const DEFAULT = cfg.DEFAULT_CTX_LIMIT_TOKENS || 32000;
+  const MAX = cfg.MAX_CTX_LIMIT_TOKENS || 128000;
   const el = document.getElementById('sl-ctx');
-  return el ? parseInt(el.value, 10) * 1000 : 128000;
+  if (!el) return DEFAULT;
+  // Slider range: min=4 (≈5k tokens) to max=512 (≈640k tokens), 1 KB ≈ 750 tokens
+  const kb = parseInt(el.value, 10);
+  return Math.min(MAX, Math.max(5000, Math.round(kb * 750)));
 }
 
 /**

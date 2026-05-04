@@ -80,7 +80,7 @@ async function callOllamaCloud(msgs, signal, options = {}, initialModel = '') {
             ? window.AgentLLMUtils.collapseConsecutiveSameRole(messages)
             : messages,
           stream: shouldStream,
-          options: { temperature, num_predict: maxTokens, num_ctx: Math.min(typeof getCtxLimit === 'function' ? getCtxLimit() : 4096, 256000) }
+          options: { temperature, num_predict: maxTokens, num_ctx: Math.min(typeof getCtxLimit === 'function' ? getCtxLimit() : 32000, 128000) }
         }
       : {
           model,

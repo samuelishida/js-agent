@@ -208,8 +208,8 @@
   function buildSessionGuidanceSection({ maxRounds, ctxLimit, hint }) {
     return [
       '# Session-specific guidance',
-      `- Max reasoning rounds this run: ${Math.max(1, Number(maxRounds) || 1)}`,
-      `- Approximate context budget: ${Math.max(1, Number(ctxLimit) || 1)} chars`,
+      `- Max reasoning rounds this run: ${Math.max(1, Number(maxRounds) || 5)}`,
+      `- Approximate context budget: ~${Math.max(1, Number(ctxLimit) || 32000).toLocaleString()} tokens`,
       '- Respect <permission_denials> and [TOOL_USE_SUMMARY] continuations when present.',
       '- If system-reminder tags appear, treat them as high-priority runtime guidance.',
       '- If you describe a next action, execute it in the same reply via tool calls when possible.',

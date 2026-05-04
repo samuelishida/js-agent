@@ -297,11 +297,12 @@ All local Ollama calls use streaming (`stream: true`) to prevent timeout errors 
 
 ## Context Management
 
-- **Context budget:** configurable 8k–256k characters (default 32k). Max tokens scale automatically with model context size (~25% of effective context).
+- **Context budget:** configurable ~5k–640k tokens (slider: 4–512 KB, ≈750 tokens/KB; default ~32k). Max output tokens scale automatically with model context size (~25% of effective context).
 - **Tool-result budget:** 20 KB inline max, 5 KB preview chunks, keeps 15 recent results. Search tools (`web_search`, `web_fetch`, `read_page`) get a 50% boost.
 - **Microcompact:** older `<tool_result>` blocks are replaced with digests on each round.
 - **LLM summarization:** triggered when context exceeds 82% of limit; cached and reused (`context_summary` scope). Deterministic tail-compression fallback if summarization fails.
 - **Time-based clearing:** stale results cleared after 20 min of inactivity.
+- **Token-aware thresholds:** context compaction uses actual token estimates (via `estimateTokens`) plus character-ratio hybrid, so the budget is respected correctly regardless of token-to-char variance.
 
 ### Model context size inference
 
@@ -312,6 +313,11 @@ All local Ollama calls use streaming (`stream: true`) to prevent timeout errors 
 - Ollama `/api/show` probe: reads `num_ctx` from model parameters
 
 `max_tokens` is set to `min(context_size, context_budget) * 0.25`, with a floor of 512.
+
+### Round & loop limits
+
+- **Round limit:** configurable 1–100 rounds per run (default: 5; slider in Runtime Settings).
+- **Context budget slider:** 4–512 KB range ≈ ~5k–640k tokens; displayed as approximate token count in the topbar badge.
 
 ## Safety
 

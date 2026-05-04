@@ -473,8 +473,11 @@
     var Comp = window.AgentCompaction;
     var size = Comp && Comp.ctxSize ? Comp.ctxSize(window.messages) : (Array.isArray(window.messages) ? window.messages.reduce(function(n, m) { return n + (m.content || '').length; }, 0) : 0);
     var limitEl = document.getElementById('sl-ctx');
-    var limit = limitEl ? parseInt(limitEl.value, 10) * 1000 : 128000;
-    var pct = Math.min(100, (size / limit) * 100);
+    var cfg = window.CONSTANTS || {};
+    var DEFAULT_CTX = cfg.DEFAULT_CTX_LIMIT_TOKENS || 32000;
+    var MAX_CTX = cfg.MAX_CTX_LIMIT_TOKENS || 128000;
+    var limit = limitEl ? Math.min(MAX_CTX, Math.max(5000, Math.round(parseInt(limitEl.value, 10) * 750))) : DEFAULT_CTX;
+    var pct = Math.min(100, (size / (limit * 3.5)) * 100);
     var bar = document.getElementById('ctx-bar');
     var label = document.getElementById('ctx-pct');
     if (bar) {
@@ -512,7 +515,9 @@
     var badgeCtx = document.getElementById('badge-ctx');
     var slCtx = document.getElementById('sl-ctx');
     if (badgeCtx && slCtx) {
-      badgeCtx.textContent = 'context ' + slCtx.value + 'k';
+      // Convert KB slider value to approximate token count (~750 tokens/KB)
+      var tokens = Math.round(parseInt(slCtx.value, 10) * 750);
+      badgeCtx.textContent = '~' + (tokens >= 1000 ? Math.round(tokens / 1000) + 'k' : tokens) + 't';
     }
   }
 

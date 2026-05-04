@@ -263,9 +263,9 @@
     // ── Misc ─────────────────────────────────────────────────────────
     MAX_TOOL_CALLS_PER_REPLY: 5,
     MAX_STORED_REPLACEMENTS: 300,
-    DEFAULT_ROUND_LIMIT: 10,
-    DEFAULT_CTX_LIMIT_CHARS: 128000,
-    MAX_CTX_LIMIT_CHARS: 256000,
+    DEFAULT_ROUND_LIMIT: 5,
+    DEFAULT_CTX_LIMIT_TOKENS: 32000,
+    MAX_CTX_LIMIT_TOKENS: 128000,
     DEFAULT_DELAY_MS: 500,
 
     // ── Rate limiting ───────────────────────────────────────────────

@@ -292,8 +292,8 @@ function getCachedToolResult(call) { return window.AgentToolCache?.getCachedTool
 function setCachedToolResult(call, result) { return window.AgentToolCache?.setCachedToolResult(call, result); }
 
 // Provider State
-function getMaxRounds() { return window.AgentProviderState?.getMaxRounds() ?? 50; }
-function getCtxLimit() { return window.AgentProviderState?.getCtxLimit() ?? 128000; }
+function getMaxRounds() { return window.AgentProviderState?.getMaxRounds() ?? 5; }
+function getCtxLimit() { return window.AgentProviderState?.getCtxLimit() ?? 32000; }
 function getDelay() { return window.AgentProviderState?.getDelay() ?? 500; }
 function getStoredCloudModelSelection() { return window.AgentProviderState?.getStoredCloudModelSelection() ?? 'gemini/gemini-2.5-flash'; }
 function getSelectedCloudModelLabel() { return window.AgentProviderState?.getSelectedCloudModelLabel() ?? 'gemini/gemini-2.5-flash'; }

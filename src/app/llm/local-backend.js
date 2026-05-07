@@ -557,11 +557,11 @@ function inferContextLength(modelName, modelMeta) {
   if (sizeMatch) {
     const b = parseInt(sizeMatch[1], 10);
     if (b >= 70) return 128 * 1024;
-    if (b >= 30) return 32 * 1024;
-    if (b >= 14) return 16 * 1024;
-    return 8 * 1024;
+    if (b >= 30) return 128 * 1024;
+    if (b >= 14) return 64 * 1024;
+    return 32 * 1024;
   }
-  return 8 * 1024;
+  return 32 * 1024;
 }
 
 // ── OpenRouter backend ───────────────────────────────────────────────────────
@@ -711,7 +711,7 @@ function getMaxTokensForModel() {
   const ctxLen = getModelContextLength();
   const ctxLimit = typeof getCtxLimit === 'function' ? getCtxLimit() : 32000;
   const effectiveCtx = Math.min(ctxLen, ctxLimit);
-  return Math.max(512, Math.floor(effectiveCtx * 0.25));
+  return Math.max(4096, Math.floor(effectiveCtx * 0.25));
 }
 
 function loadOllamaBackendState() {

@@ -418,9 +418,9 @@
     const softCharThreshold = Math.floor(limitChars * softRatio);
     const hardCharThreshold = Math.floor(limitChars * hardRatio);
     const criticalCharThreshold = Math.floor(limitChars * criticalRatio);
-    const softTokenThreshold = Math.floor(limitTokens * softRatio);
-    const hardTokenThreshold = Math.floor(limitTokens * hardRatio);
-    const criticalTokenThreshold = Math.floor(limitTokens * criticalRatio);
+    const softTokenThreshold = Math.floor(limit * softRatio);
+    const hardTokenThreshold = Math.floor(limit * hardRatio);
+    const criticalTokenThreshold = Math.floor(limit * criticalRatio);
 
     // Determine tier
     let tier = 'none';

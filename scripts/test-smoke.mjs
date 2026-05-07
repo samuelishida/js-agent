@@ -1279,23 +1279,23 @@ async function main() {
     const fn = globalThis.window.inferContextLength;
     if (!fn) { console.log('  (skipped — function not exported)'); return; }
     assert.equal(fn('llama3:70b', null), 128 * 1024, '70b+ → 128k');
-    assert.equal(fn('llama3:33b', null), 32 * 1024, '30b+ → 32k');
-    assert.equal(fn('llama3:14b', null), 16 * 1024, '14b+ → 16k');
-    assert.equal(fn('llama3:8b', null), 8 * 1024, '<14b → 8k default');
+    assert.equal(fn('llama3:33b', null), 128 * 1024, '30b+ → 128k');
+    assert.equal(fn('llama3:14b', null), 64 * 1024, '14b+ → 64k');
+    assert.equal(fn('llama3:8b', null), 32 * 1024, '<14b → 32k default');
   });
 
   await group('inferContextLength — num_ctx from params', () => {
     const fn = globalThis.window.inferContextLength;
     if (!fn) { console.log('  (skipped — function not exported)'); return; }
     assert.equal(fn('model', { parameters: 'num_ctx 131072\nnum_predict 4096' }), 131072, 'num_ctx takes priority');
-    assert.equal(fn('model', { parameters: '' }), 8 * 1024, 'empty params → default');
+    assert.equal(fn('model', { parameters: '' }), 32 * 1024, 'empty params → default');
   });
 
   await group('inferContextLength — default fallback', () => {
     const fn = globalThis.window.inferContextLength;
     if (!fn) { console.log('  (skipped — function not exported)'); return; }
-    assert.equal(fn('', null), 8 * 1024, 'empty name → 8k default');
-    assert.equal(fn('unknown-model', null), 8 * 1024, 'no size hint → 8k default');
+    assert.equal(fn('', null), 32 * 1024, 'empty name → 32k default');
+    assert.equal(fn('unknown-model', null), 32 * 1024, 'no size hint → 32k default');
   });
 
   await group('getMaxTokensForModel — scales with context', () => {

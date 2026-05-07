@@ -603,11 +603,14 @@
         <div class="card-bd">
           <div class="card-desc">
             Tool outputs are budgeted before storage. A runtime continuation prompt is then injected to
-            keep the model on-policy before the next LLM call.
+            keep the model on-policy before the next LLM call. Context management is token-aware: uses
+            actual token estimates (via `estimateTokens`) plus character-ratio hybrid to respect the budget
+            correctly regardless of token-to-char variance.
           </div>
           <div class="card-det">
             <ul class="sl" style="margin-top:8px">
               <li><strong>Budget</strong> — truncates each result to max chars before appending to history</li>
+              <li><strong>Token-aware thresholds</strong> — compaction triggers based on token estimates, not just chars</li>
               <li><strong>Microcompact</strong> — replaces old <code>&lt;tool_result&gt;</code> with one-line digests</li>
               <li><strong>Reminders</strong> — tool summary, denials, compaction notes, injection warnings</li>
               <li><strong>Summarize</strong> — LLM context compression, guarded by cooldown + cache reuse</li>

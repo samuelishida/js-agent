@@ -135,5 +135,161 @@
  * @property {string[]} [promptInjectionNotes] - Prompt injection notes
  */
 
+// ─── RunGraph Types ─────────────────────────────────────────────
+
+/**
+ * @typedef {'pending'|'running'|'completed'|'failed'|'stopped'|'max_rounds'} RunStatus
+ */
+
+/**
+ * @typedef {'pending'|'running'|'completed'|'failed'|'retry'|'cancelled'} TaskStatus
+ */
+
+/**
+ * @typedef {'generated'|'downloaded'|'attached'|'tool_result'|'inline'} ArtifactKind
+ */
+
+/**
+ * @typedef {Object} RunGraph
+ * @property {string} id - Run id
+ * @property {string} sessionId - Session id
+ * @property {string} [rootTaskId] - Root task id
+ * @property {RunStatus} status - Run status
+ * @property {string} goal - User goal / first message
+ * @property {string} userMessage - Original user message
+ * @property {string} createdAt - ISO timestamp
+ * @property {string} updatedAt - ISO timestamp
+ * @property {number} rounds - Round count
+ * @property {Record<string, Task>} tasks - Tasks by id
+ * @property {Observation[]} observations - Observations
+ * @property {Artifact[]} artifacts - Artifacts
+ * @property {RunEvent[]} events - Events
+ * @property {{tokensIn?: number, tokensOut?: number, toolCalls?: number, durationMs?: number}} metrics - Metrics
+ * @property {string[]} errors - Error messages
+ * @property {string} [finalAnswer] - Final answer text
+ */
+
+/**
+ * @typedef {Object} Task
+ * @property {string} id - Task id
+ * @property {string} [parentId] - Parent task id
+ * @property {'root'|'llm'|'tool'|'repair'|'confirmation'|'compaction'|'final_answer'} kind - Task kind
+ * @property {string} title - Human-readable title
+ * @property {TaskStatus} status - Task status
+ * @property {number} round - Round number
+ * @property {string} [toolName] - Tool name (for tool tasks)
+ * @property {Record<string, any>} [toolArgs] - Tool arguments
+ * @property {string} startedAt - ISO timestamp
+ * @property {string} [endedAt] - ISO timestamp
+ * @property {string[]} [resultObservationIds] - Linked observation ids
+ * @property {string[]} [artifactIds] - Linked artifact ids
+ * @property {string} [error] - Error message
+ * @property {string} [retryOf] - Original task id if this is a retry
+ */
+
+/**
+ * @typedef {Object} Observation
+ * @property {string} id - Observation id
+ * @property {string} taskId - Source task id
+ * @property {number} round - Round number
+ * @property {'tool_result'|'llm_output'|'compaction'|'repair'|'confirmation'|'error'|'final_answer'} source - Source
+ * @property {string} summary - Compact summary
+ * @property {string} content - Raw content (may be large)
+ * @property {string} contentHash - SHA-256-like truncated hash for dedup
+ * @property {string} promptSafeContent - Content suitable for prompt injection
+ * @property {boolean} isError - Whether this is an error observation
+ * @property {string} createdAt - ISO timestamp
+ * @property {Record<string, any>} [metadata] - Extra metadata
+ */
+
+/**
+ * @typedef {Object} Artifact
+ * @property {string} id - Artifact id
+ * @property {string} [taskId] - Source task id
+ * @property {ArtifactKind} kind - Artifact kind
+ * @property {string} name - File name
+ * @property {string} mimeType - MIME type
+ * @property {number} size - Byte size
+ * @property {string} source - Source tool / module
+ * @property {string} [preview] - Text preview
+ * @property {string} [contentRef] - Reference to stored content (artifact store key)
+ * @property {string} [downloadName] - Suggested download name
+ * @property {string} createdAt - ISO timestamp
+ * @property {Record<string, any>} [metadata] - Extra metadata
+ */
+
+/**
+ * @typedef {Object} RunEvent
+ * @property {string} id - Event id
+ * @property {string} runId - Run id
+ * @property {'run_started'|'run_completed'|'run_failed'|'run_stopped'|'run_max_rounds'|'round_started'|'pre_llm_compaction'|'llm_started'|'llm_completed'|'tool_calls_parsed'|'repair_attempted'|'confirmation_pending'|'round_continued'|'round_finalized'|'tool_started'|'tool_completed'|'tool_failed'|'observation_added'|'artifact_registered'|'task_started'|'task_completed'|'task_failed'|'task_retry'} type - Event type
+ * @property {string} timestamp - ISO timestamp
+ * @property {number} [round] - Round number
+ * @property {string} [taskId] - Task id
+ * @property {string} [message] - Human-readable message
+ * @property {'debug'|'info'|'warn'|'error'} [level] - Log level
+ * @property {Record<string, any>} [data] - Structured data
+ */
+
 // Export nothing — this file is only for JSDoc
 export {};
+
+// ─── MCP Types ────────────────────────────────────────────────
+
+/**
+ * @typedef {'http'|'stdio'|'sse'|'streamable_http'} McpTransport
+ */
+
+/**
+ * @typedef {Object} McpToolFilter
+ * @property {'all'|'none'|'include'} mode - Filter mode
+ * @property {string[]} [names] - Tool names to include when mode is 'include'
+ */
+
+/**
+ * @typedef {Object} McpResourceFilter
+ * @property {'all'|'none'|'include'} mode - Filter mode
+ * @property {string[]} [uris] - Resource URIs to include when mode is 'include'
+ */
+
+/**
+ * @typedef {Object} McpPromptFilter
+ * @property {'all'|'none'|'include'} mode - Filter mode
+ * @property {string[]} [names] - Prompt names to include when mode is 'include'
+ */
+
+/**
+ * @typedef {Object} McpServerConfigV2
+ * @property {string} id - Server id
+ * @property {string} name - Server display name
+ * @property {McpTransport} transport - Transport type
+ * @property {boolean} enabled - Whether enabled
+ * @property {string} [url] - Server URL (for http/sse)
+ * @property {string} [command] - Command to spawn (for stdio)
+ * @property {string[]} [args] - Command arguments (for stdio)
+ * @property {Record<string,string>} [env] - Environment variables (for stdio)
+ * @property {Record<string,string>} [headers] - HTTP headers (for http)
+ * @property {string} [authRef] - Reference to stored auth secret
+ * @property {McpToolFilter} [toolFilter] - Tool filter
+ * @property {McpResourceFilter} [resourceFilter] - Resource filter
+ * @property {McpPromptFilter} [promptFilter] - Prompt filter
+ * @property {string} [riskPolicy] - Risk policy override
+ * @property {number} createdAt - Creation timestamp
+ * @property {number} updatedAt - Last update timestamp
+ */
+
+/**
+ * @typedef {Object} McpServerStatus
+ * @property {string} serverId - Server id
+ * @property {'idle'|'connecting'|'connected'|'error'|'disconnected'} state - Connection state
+ * @property {string} [protocolVersion] - MCP protocol version
+ * @property {Object} [serverInfo] - Server info from initialize
+ * @property {Object} [capabilities] - Server capabilities
+ * @property {Object[]} tools - Available tools snapshot
+ * @property {Object[]} resources - Available resources snapshot
+ * @property {Object[]} prompts - Available prompts snapshot
+ * @property {string} [lastError] - Last error message
+ * @property {number} [lastRefreshAt] - Last refresh timestamp
+ * @property {number} [latencyMs] - Last request latency
+ * @property {number} refreshRevision - Monotonic refresh counter
+ */

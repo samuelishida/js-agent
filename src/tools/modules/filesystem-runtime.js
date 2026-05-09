@@ -341,9 +341,18 @@
       return s.length > 40;
     }
 
-    async function downloadFile({ path, content = '', filename = '', storageKey = '' }) {
+    async function downloadFile({ path, content = '', filename = '', storageKey = '', artifactId = '' }) {
       let blob;
       let resolvedName = filename;
+
+      // Support artifactId — read content from artifact registry (preferred over storageKey)
+      if (artifactId && !content) {
+        const artifact = window.AgentArtifacts?.get?.(String(artifactId));
+        if (artifact?.data) {
+          content = artifact.data;
+          resolvedName = resolvedName || artifact.name;
+        }
+      }
 
       // Support storageKey — read content from localStorage (avoids arg size limits)
       if (storageKey && !content) {
@@ -355,7 +364,7 @@
       }
 
       // Auto-fallback: check __last_generated_base64__ if no content/path provided
-      if (!content && !path && !storageKey) {
+      if (!content && !path && !storageKey && !artifactId) {
         const lastGen = localStorage.getItem('__last_generated_base64__');
         if (lastGen) {
           content = lastGen;

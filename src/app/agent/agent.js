@@ -91,6 +91,23 @@ async function agentLoop(userMessage, attachments = []) {
     userMessage: String(userMessage || '')
   });
 
+  // ── Phase 2 RunGraph: create run and register user attachments ──
+  const RG = window.AgentRunGraph;
+  const activeRun = RG ? RG.createRun({ sessionId: window.currentSessionId || 'default', goal: userMessage, userMessage }) : null;
+  const runId = activeRun?.id;
+  if (activeRun) {
+    for (const att of (attachments || [])) {
+      RG.registerArtifact(activeRun, {
+        kind: att.kind === 'image' ? 'attached' : 'attached',
+        name: att.name,
+        mimeType: att.mimeType,
+        size: att.size,
+        source: 'user_attachment',
+        preview: att.textPreview || att.textContent?.slice(0, 400) || undefined
+      });
+    }
+  }
+
   const Comp = window.AgentCompaction;
   Comp?.armTimeBasedMicrocompactForTurn?.(({ messages: mcMessages }) => {
     window.messages = mcMessages;
@@ -111,10 +128,25 @@ async function agentLoop(userMessage, attachments = []) {
   if (unresolvedPlaceholders) {
     throw new Error(`System prompt has unresolved template placeholders: ${unresolvedPlaceholders.join(', ')}`);
   }
+  // Persist full attachments so providers can resolve them across turns and sessions
+  // (images need dataUrl; text files need textContent). Strip only excessively large text.
+  const persistedAttachments = (attachments || []).map(a => {
+    if (a.kind === 'image') {
+      return { id: a.id, name: a.name, mimeType: a.mimeType, kind: a.kind, size: a.size, dataUrl: a.dataUrl };
+    }
+    // Text/file attachments: keep full textContent up to 24k chars, plus preview
+    const textContent = a.textContent || '';
+    const cappedText = textContent.length > 24000 ? textContent.slice(0, 24000) + '\n…[truncated]' : textContent;
+    return {
+      id: a.id, name: a.name, mimeType: a.mimeType, kind: a.kind, size: a.size,
+      textContent: cappedText,
+      textPreview: a.textPreview || cappedText.slice(0, 400)
+    };
+  });
   window.messages = [
     { role: 'system', content: sysPrompt },
     ...window.messages.filter(m => m.role !== 'system').slice(-20),
-    { role: 'user', content: turnInputMessage, attachments: attachments.map(a => ({ id: a.id, name: a.name, mimeType: a.mimeType, kind: a.kind, size: a.size })) }
+    { role: 'user', content: turnInputMessage, attachments: persistedAttachments }
   ];
 
   let round = 0;
@@ -138,6 +170,7 @@ async function agentLoop(userMessage, attachments = []) {
 
     if (roundResult.actions?.includes('pending-confirmations')) {
       window.messages = roundResult.messages;
+      if (activeRun) RG.emitEvent(activeRun, { type: 'confirmation_pending', round, level: 'warn', message: 'Waiting for user confirmation' });
       if (typeof window.openConfirmationPanel === 'function') window.openConfirmationPanel();
       setStatus('busy', 'waiting for confirmation…');
       while ((/** @type {any} */ (window).AgentConfirmation?.pending?.() || []).length > 0) {
@@ -145,6 +178,7 @@ async function agentLoop(userMessage, attachments = []) {
         await sleep(300);
       }
       if (typeof window.closeConfirmationPanel === 'function') window.closeConfirmationPanel();
+      if (activeRun) RG.emitEvent(activeRun, { type: 'round_continued', round, level: 'info', message: 'Confirmation resolved — continuing' });
       continue;
     }
 
@@ -165,6 +199,7 @@ async function agentLoop(userMessage, attachments = []) {
       setStatus('ok', `done in ${round} round${round > 1 ? 's' : ''}`);
       notifyIfHidden(finalMarkdown);
       updateCtxBar();
+      if (activeRun) RG.setTerminalStatus(activeRun, 'completed', finalMarkdown);
       return;
     }
 
@@ -176,6 +211,7 @@ async function agentLoop(userMessage, attachments = []) {
 
   // Exhausted rounds — force final answer
   addNotice('max_rounds (' + MAX_ROUNDS + ') reached. Forcing final answer.');
+  if (activeRun) RG.setTerminalStatus(activeRun, 'max_rounds');
   const noEvidenceWarning = (TE?.runSuccessfulToolCount || 0) === 0
     ? 'No successful tool evidence was gathered in this run. Do not fabricate facts; clearly state uncertainty and what could not be verified.'
     : 'Use only the verified tool evidence already gathered in this run.';
@@ -220,11 +256,13 @@ async function agentLoop(userMessage, attachments = []) {
     hideThinking();
     if (e?.code === 'RUN_STOPPED' || e?.name === 'AbortError') {
       setStatus('ok', 'stopped');
+      if (activeRun) RG.setTerminalStatus(activeRun, 'stopped');
       updateCtxBar();
       return;
     }
     addMessage('error', `Final answer failed: ${e.message}`, MAX_ROUNDS);
     setStatus('error', 'final answer failed');
+    if (activeRun) RG.setTerminalStatus(activeRun, 'failed', e.message);
   } finally {
     window.currentTurnAttachments = [];
   }

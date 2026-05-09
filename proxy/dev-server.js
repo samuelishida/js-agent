@@ -587,6 +587,26 @@ async function proxyOpenRouter(req, res, parsedUrl) {
   upstreamReq.end();
 }
 
+// ── MCP proxy helpers ──────────────────────────────────────────────────────
+
+function isPrivateNetwork(url) {
+  const hostname = String(url || '').trim().toLowerCase();
+  // Extract hostname from a full URL if needed
+  let h;
+  try { h = new URL(url).hostname.toLowerCase(); } catch { h = hostname; }
+  // Private IPv4 ranges
+  if (/^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.|127\.)/.test(h)) return true;
+  if (h === 'localhost') return false; // localhost is explicitly allowed below
+  if (h.startsWith('fc') || h.startsWith('fd')) return true; // IPv6 ULA
+  return false;
+}
+
+function isLocalhost(url) {
+  let h;
+  try { h = new URL(url).hostname.toLowerCase(); } catch { h = String(url).toLowerCase(); }
+  return /^(localhost|127\.\d+\.\d+\.\d+|\[?::1\]?)$/.test(h);
+}
+
 async function handleMcpProxy(req, res) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
@@ -631,6 +651,16 @@ async function handleMcpProxy(req, res) {
     const parsed = new URL(serverUrl);
     if (!['http:', 'https:'].includes(parsed.protocol)) {
       send(res, 400, JSON.stringify({ error: 'serverUrl must use http or https' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+
+    // SSRF: block private network targets unless explicitly trusted local
+    const trustedLocal = body.trustedLocal === true;
+    if (!isLocalhost(serverUrl) && isPrivateNetwork(serverUrl) && !trustedLocal) {
+      send(res, 403, JSON.stringify({ error: 'SSRF: private network targets are blocked' }), {
         'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Origin': '*'
       });

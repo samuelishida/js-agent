@@ -465,6 +465,19 @@ function buildOpenAiStyleMessages(msgs) {
     }
 
     const resolved = (m.attachments || []).map(aMeta => {
+      if (aMeta.dataUrl) return aMeta;
+      // If attachment references an artifact, resolve full data from registry
+      if (aMeta.artifactId && window.AgentArtifacts?.get) {
+        const artifact = window.AgentArtifacts.get(String(aMeta.artifactId));
+        if (artifact?.data) {
+          return {
+            ...aMeta,
+            dataUrl: artifact.dataUrl || `data:${artifact.mimeType || 'application/octet-stream'};base64,${artifact.data}`,
+            mimeType: artifact.mimeType,
+            size: artifact.size
+          };
+        }
+      }
       const full = (window.currentTurnAttachments || []).find(f => f.id === aMeta.id);
       return full || aMeta;
     });

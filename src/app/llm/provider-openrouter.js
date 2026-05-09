@@ -38,6 +38,7 @@ async function callOpenRouter(msgs, signal, options = {}, initialModel = '') {
   function buildOpenRouterMessage(m) {
     const role = m.role === 'tool' ? 'user' : m.role;
     const resolved = (m.attachments || []).map(aMeta => {
+      if (aMeta.dataUrl) return aMeta;
       const full = (window.currentTurnAttachments || []).find(f => f.id === aMeta.id);
       return full || aMeta;
     });

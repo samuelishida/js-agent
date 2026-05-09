@@ -5,7 +5,7 @@ description: Create new skills, modify and improve existing skills, and measure 
 
 # Skill Creator
 
-> **Browser compatibility note**: The `node scripts/...` and `nohup` commands below require the **dev server** (`node proxy/dev-server.js`) which provides the `runtime_generateFile` sandbox. In a pure browser environment without the sandbox, skip eval runs and focus on drafting the skill content directly. All skill drafts can be saved to localStorage via `storage_set` and later exported with `fs_download_file`.
+> **Browser compatibility note**: The `node scripts/...` and `nohup` commands below require the **dev server** (`node proxy/dev-server.js`). For generated review bundles or binary outputs, use one `runtime_generateFile(path="agent-sandbox/gen.cjs", content=script, filename="output.ext")` call and let it auto-run/auto-download. In a pure browser environment without the sandbox, skip eval runs and export plain Markdown/JSON drafts directly with `fs_download_file`; do not stage generator scripts through `storage_set`.
 
 A skill for creating new skills and iteratively improving them.
 

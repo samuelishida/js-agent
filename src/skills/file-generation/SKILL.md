@@ -15,7 +15,7 @@ Generate binary files (DOCX, PDF, XLSX, PPTX) using Node.js scripts executed via
 ```javascript
 // Tool: runtime_generateFile
 // path: "agent-sandbox/gen.cjs"
-// content: "const PDFDocument = require('pdfkit');\nconst doc = new PDFDocument();\ndoc.text('Hello');\ndoc.end();\nconst chunks=[];\ndoc.on('data',c=>chunks.push(c));\ndoc.on('end',()=>process.stdout.write(Buffer.concat(chunks).toString('base64')));"
+// content: "const PDFDocument = require('pdfkit');\nconst doc = new PDFDocument();\nconst chunks=[];\ndoc.on('data',c=>chunks.push(c));\ndoc.on('end',()=>process.stdout.write(Buffer.concat(chunks).toString('base64')));\ndoc.text('Hello');\ndoc.end();"
 // filename: "output.pdf"
 ```
 
@@ -130,13 +130,13 @@ pres.writeFile({ fileName: 'agent-sandbox/temp.pptx' }).then(() => {
 | `MODULE_NOT_FOUND` | Script uses wrong require path | Use `require('docx')` not relative paths |
 | `Exit code: 1` | Syntax error in script | Test script in terminal first |
 | `ERR_UNKNOWN_FILE_EXTENSION` | Path does not end in `.cjs` | Use `"agent-sandbox/gen.cjs"` |
-| `Command too long` | Passing script inline exceeds limit | Use `runtime_generateFile` with `content` parameter |
+| Downloaded `.cjs` or `.js` name | Missing `filename` or older runtime | Retry with `filename="output.pdf"` or update runtime |
 
 ## What NOT To Do
 
 ❌ **Don't** pass base64 in tool arguments — truncated at ~4096 chars
 ❌ **Don't** use `fs_write_file` for binary content — writes to virtual FS
-❌ **Don't** use `storage_set` with full script — may truncate
+❌ **Don't** use `storage_set` for generator scripts — pass the script in `content`
 ❌ **Don't** call `runtime_runTerminal` after `runtime_generateFile` — already auto-executes
 ❌ **Don't** call `fs_download_file` after `runtime_generateFile` — already auto-downloads
 

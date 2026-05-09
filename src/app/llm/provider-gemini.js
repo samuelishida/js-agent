@@ -34,6 +34,9 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
   function buildGeminiParts(m) {
     const parts = [{ text: String(m.content || '').replace(/\u003cthink[\s\S]*?\u003c\/think\u003e/gi, '') }];
     const resolved = (m.attachments || []).map(aMeta => {
+      // If the attachment already has full data (after Phase 1 persist fix), use it directly
+      if (aMeta.dataUrl) return aMeta;
+      // Fallback to currentTurnAttachments for backward compat during transition
       const full = (window.currentTurnAttachments || []).find(f => f.id === aMeta.id);
       return full || aMeta;
     });

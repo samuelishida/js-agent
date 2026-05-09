@@ -62,10 +62,25 @@ async function callLocal(msgs, signal, options = {}) {
       }
       return { role: 'user', content: sanitizeLocalMessageContent(`\u003ctool_result\u003e\n${m.content}\n\u003c/tool_result\u003e`) };
     }
-    return {
-      role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
-      content: sanitizeLocalMessageContent(m.content)
-    };
+
+    // Resolve attachments for local multimodal support
+    const resolved = (m.attachments || []).map(aMeta => {
+      if (aMeta.dataUrl) return aMeta;
+      const full = (window.currentTurnAttachments || []).find(f => f.id === aMeta.id);
+      return full || aMeta;
+    });
+    const imageAttachments = resolved.filter(a => a.kind === 'image' && a.dataUrl);
+
+    let content = sanitizeLocalMessageContent(m.content);
+    if (imageAttachments.length) {
+      const parts = [{ type: 'text', text: content }];
+      for (const a of imageAttachments) {
+        parts.push({ type: 'image_url', image_url: { url: a.dataUrl } });
+      }
+      return { role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user', content: parts };
+    }
+
+    return { role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user', content };
   });
 
   function normalizeLocalMessages(messages) {

@@ -8,33 +8,31 @@ These are instructions for creating design philosophies - aesthetic movements th
 
 ## ⚠️ Browser Compatibility
 
-This skill provides canvas design methodology and guidelines. File generation can run via the **dev server** (`runtime_generateFile`) or directly in a pure browser using `fs_download_file` with base64 content.
+This skill provides canvas design methodology and guidelines. Prefer the browser-friendly dev-server flow: `runtime_generateFile` runs one Node.js generator script and auto-downloads the final `.png` or `.pdf` artifact.
 
 | Environment | File Generation |
 |-------------|-----------------|
-| Dev server (`node proxy/dev-server.js`) | ✅ `runtime_generateFile` works |
-| Pure browser (file:// or static server) | ✅ Use `fs_download_file` with base64 content — native .png/.pdf download |
+| Dev server (`node proxy/dev-server.js`) | Use `runtime_generateFile(path="agent-sandbox/gen.cjs", content=script, filename="output.png")` |
+| Pure browser (file:// or static server) | Use `fs_download_file` directly only when final content already exists in browser memory |
 
-**In pure browser mode**, generate the image/PDF as base64 and pass it to `fs_download_file(filename="output.png", content="<base64>")` for a native download. The dev server is only needed if you want to run Node.js/Python scripts server-side.
+**In pure browser mode**, do not create a staging script. Generate the final HTML/SVG/text/blob content in browser memory and download it with `fs_download_file`. For Node libraries such as `pdfkit` or `canvas`, use the dev-server path below.
 
 ## ⚠️ File Generation Paths
 
-**Dev server path (scripted):** use `runtime_generateFile` to run a script and emit base64 (only when the dev server is running).
-**Pure browser path (direct):** use `fs_download_file` with base64 content to download the native file.
+**Dev server path (scripted):** use `runtime_generateFile` once. The script writes base64 to stdout; the tool infers/downloads the final artifact from `filename`.
+**Pure browser path (direct):** use `fs_download_file` only for already-complete final content, not as a follow-up to `runtime_generateFile`.
 
-**Avoid `runtime_runTerminal`** — it triggers a confirmation gate that blocks the agent.
+**Avoid `runtime_runTerminal`** for file generation. `runtime_generateFile` already writes, runs, captures output, and downloads.
 
 **Dev server example:**
 
 ```
 runtime_generateFile(
-  path="agent-sandbox/generate_canvas.js",
+  path="agent-sandbox/generate_canvas.cjs",
   content="<JavaScript script using pdfkit or node-canvas>",
-  command="node agent-sandbox/generate_canvas.js"
+  filename="output.png"
 )
 ```
-
-Then download: `fs_download_file(filename="output.png", content="<base64 from result>")`
 
 Complete this in two steps:
 1. Design Philosophy Creation (.md file)

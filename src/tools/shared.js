@@ -124,7 +124,7 @@
     { name: 'runtime_glob', signature: 'runtime_glob(pattern, exclude?)', description: 'Finds files matching a glob pattern.', run: Executor.runtimeGlob },
     { name: 'runtime_searchCode', signature: 'runtime_searchCode(query, glob?, isRegex?, caseSensitive?, contextLines?, maxResults?)', description: 'Searches code/text files with optional glob and context.', run: Executor.runtimeSearchCode },
     { name: 'runtime_runTerminal', signature: 'runtime_runTerminal(command, cwd?)', description: 'Runs a terminal command through the local dev server bridge.', run: Executor.runtimeRunTerminal },
-    { name: 'runtime_generateFile', signature: 'runtime_generateFile(path, content?, cwd?, command?, storageKey?, filename?)', description: 'Generate binary files (DOCX, PDF, XLSX, PPTX, PNG). Writes a Node.js script to the sandbox, executes it, and AUTO-DOWNLOADS the result to the user\'s Downloads folder. The file lands in Downloads — do NOT call fs_download_file or runtime_runTerminal after this. Script must end with process.stdout.write(base64String). Available packages: docx, pdfkit, exceljs, pptxgenjs, archiver, jszip. Use .cjs extension. ALWAYS pass filename="output.ext" (e.g. filename="report.docx") so the download has the correct name.', run: Executor.runtimeGenerateFile },
+    { name: 'runtime_generateFile', signature: 'runtime_generateFile(path, content, filename?, cwd?, command?)', description: 'Generate binary files (DOCX, PDF, XLSX, PPTX, PNG). Pass a Node.js generator script ending in .cjs as content; it writes base64 to stdout, auto-downloads the final file, and registers an artifact. Always pass filename="output.ext" for the desired download name. Do not use storage_set, runtime_runTerminal, or fs_download_file after this unless auto-download fails.', run: Executor.runtimeGenerateFile },
     { name: 'runtime_webFetch', signature: 'runtime_webFetch(url)', description: 'Fetches a URL and returns readable text.', run: Executor.runtimeWebFetch },
     { name: 'runtime_getDiagnostics', signature: 'runtime_getDiagnostics(path?, severity?)', description: 'Gets diagnostics from the local dev server bridge when available.', run: Executor.runtimeGetDiagnostics },
     { name: 'runtime_fileDiff', signature: 'runtime_fileDiff(path, newContent)', description: 'Computes a line-by-line diff of a file before editing.', run: Executor.runtimeFileDiff },
@@ -165,7 +165,16 @@
   // ── Snapshot tools ──────────────────────────────────────────────────────
   Registry.registerSnapshotTools(registry, toolGroups, Executor.formatToolResult);
 
-  // ── Export ───────────────────────────────────────────────────────────────
+    // ── Artifact tools ─────────────────────────────────────────────────────
+    window.AgentArtifacts = window.AgentArtifacts || {};
+    Object.assign(window.AgentArtifacts, {
+      register: (opts) => Executor.registerArtifact(opts),
+      get: (id) => Executor.getArtifact(id),
+      list: (opts) => Executor.listArtifacts(opts),
+      resolve: (id) => Executor.resolveArtifactData(id)
+    });
+
+    // ── Export ───────────────────────────────────────────────────────────────
   window.AgentTools = {
     state,
     registry,

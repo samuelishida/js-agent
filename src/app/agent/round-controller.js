@@ -275,9 +275,11 @@ function validateToolCalls({ toolCalls, messages, userMessage }) {
  * @param {number} opts.round
  * @param {number} opts.delay
  * @param {SessionMessage[]} opts.messages
- * @returns {{ messages: SessionMessage[], roundToolSummaryChunks: string[], roundPromptInjectionNotes: string[], roundSawPermissionDenied: boolean }}
+ * @param {import('../../types/index.js').RunGraph|null} [opts.graph]
+ * @param {Object|null} [opts.RG]
+ * @returns {{ messages: SessionMessage[], roundToolSummaryChunks: string[], roundPromptInjectionNotes: string[], roundSawPermissionDenied: boolean, pendingConfirmations?: boolean, pendingConfirmationsCount?: number }}
  */
-async function executeToolBatches({ validToolCalls, reply, rawReply, round, delay, messages }) {
+async function executeToolBatches({ validToolCalls, reply, rawReply, round, delay, messages, graph, RG }) {
   const TE = window.AgentToolExecution;
   const Comp = window.AgentCompaction;
   const Perm = window.AgentPermissions || {};
@@ -295,11 +297,17 @@ async function executeToolBatches({ validToolCalls, reply, rawReply, round, dela
       showThinking(`executing ${batch.calls.length} read-only tools…`);
       if (delay > 0) await sleep(Math.min(250, delay));
       batchResults = await Promise.all(batch.calls.map(async call => {
+        const task = graph && RG ? RG.startTask(graph, { kind: 'tool', title: `${call.tool}`, round, toolName: call.tool, toolArgs: call.args }) : null;
+        RG?.emitEvent?.(graph, { type: 'tool_started', round, taskId: task?.id, level: 'info', message: `Tool started: ${call.tool}` });
         try {
           const result = await (TE?.executeTool ? TE.executeTool(call) : 'ERROR: executeTool not available');
-          return { call, result };
+          if (task) RG.completeTask(graph, task.id);
+          RG?.emitEvent?.(graph, { type: 'tool_completed', round, taskId: task?.id, level: 'info', message: `Tool completed: ${call.tool}` });
+          return { call, result, taskId: task?.id };
         } catch (error) {
-          return { call, result: `ERROR executing ${call.tool}: ${error?.message || 'unknown failure'}` };
+          if (task) RG.failTask(graph, task.id, error?.message || 'unknown failure');
+          RG?.emitEvent?.(graph, { type: 'tool_failed', round, taskId: task?.id, level: 'error', message: `Tool failed: ${call.tool} — ${error?.message || 'unknown failure'}` });
+          return { call, result: `ERROR executing ${call.tool}: ${error?.message || 'unknown failure'}`, taskId: task?.id };
         }
       }));
       hideThinking();
@@ -307,14 +315,20 @@ async function executeToolBatches({ validToolCalls, reply, rawReply, round, dela
       for (const call of batch.calls) {
         showThinking(`executing ${call.tool}…`);
         if (delay > 0) await sleep(delay * 0.5);
+        const task = graph && RG ? RG.startTask(graph, { kind: 'tool', title: `${call.tool}`, round, toolName: call.tool, toolArgs: call.args }) : null;
+        RG?.emitEvent?.(graph, { type: 'tool_started', round, taskId: task?.id, level: 'info', message: `Tool started: ${call.tool}` });
         let result;
         try {
           result = TE?.executeTool ? await TE.executeTool(call) : 'ERROR: executeTool not available';
+          if (task) RG.completeTask(graph, task.id);
+          RG?.emitEvent?.(graph, { type: 'tool_completed', round, taskId: task?.id, level: 'info', message: `Tool completed: ${call.tool}` });
         } catch (error) {
           result = `ERROR executing ${call.tool}: ${error?.message || 'unknown failure'}`;
+          if (task) RG.failTask(graph, task.id, error?.message || 'unknown failure');
+          RG?.emitEvent?.(graph, { type: 'tool_failed', round, taskId: task?.id, level: 'error', message: `Tool failed: ${call.tool} — ${error?.message || 'unknown failure'}` });
         }
         hideThinking();
-        batchResults.push({ call, result });
+        batchResults.push({ call, result, taskId: task?.id });
       }
     }
 
@@ -368,6 +382,20 @@ async function executeToolBatches({ validToolCalls, reply, rawReply, round, dela
       const safeResult = Comp?.sanitizeToolResult ? Comp.sanitizeToolResult(contextSafeResult) : String(contextSafeResult || '');
       messages.push({ role: 'tool', tool_call_id: toolCall.call_id || toolCall.id || '', ...(toolCall.tool ? { name: toolCall.tool } : {}), content: safeResult });
 
+      // Register observation in graph
+      const obsTask = graph && RG ? (Object.values(graph.tasks).find(t => t.kind === 'tool' && t.toolName === toolCall.tool && t.round === round && t.status === 'running') || null) : null;
+      if (graph && RG) {
+        const isErr = /^ERROR\b/i.test(String(result || ''));
+        RG.addObservation(graph, {
+          taskId: obsTask?.id || '',
+          round,
+          source: isErr ? 'error' : 'tool_result',
+          summary: `${toolCall.tool} → ${isErr ? 'ERROR' : 'OK'}`,
+          content: safeResult.slice(0, 2000),
+          isError: isErr
+        });
+      }
+
       if (failureState.repeated) {
         messages.push({
           role: 'user',
@@ -388,7 +416,7 @@ async function executeToolBatches({ validToolCalls, reply, rawReply, round, dela
       const confirmationMessages = pendingConfirmations.map(item => `[CONFIRMATION_PENDING] ${item.message}`);
       messages.push({ role: 'user', content: confirmationMessages.join('\n\n') });
       addNotice(`Waiting for user confirmation on ${pendingConfirmations.length} tool call(s).`);
-      return { messages, roundToolSummaryChunks, roundPromptInjectionNotes, roundSawPermissionDenied: true, pendingConfirmations: true };
+      return { messages, roundToolSummaryChunks, roundPromptInjectionNotes, roundSawPermissionDenied: true, pendingConfirmations: true, pendingConfirmationsCount: pendingConfirmations.length };
     }
 
     roundSawPermissionDenied = roundSawPermissionDenied || sawPermissionDenied;
@@ -419,9 +447,24 @@ async function executeToolBatches({ validToolCalls, reply, rawReply, round, dela
  * @param {number} opts.consecutiveNonActionRounds
  * @returns {Promise<RoundResult>}
  */
+/**
+ * Helper to get the active run graph, if any.
+ * @returns {import('../../types/index.js').RunGraph|null}
+ */
+function getActiveGraph() {
+  return window.AgentRunGraph ? window.AgentRunGraph.getActiveRun() : null;
+}
+
 async function executeRound({ userMessage, messages, round, maxRounds, delay, consecutiveNonActionRounds }) {
   const actions = [];
   const cfg = window.CONSTANTS || {};
+  const RG = window.AgentRunGraph;
+  const graph = getActiveGraph();
+
+  if (graph) {
+    graph.rounds = Math.max(graph.rounds, round);
+    RG.emitEvent(graph, { type: 'round_started', round, level: 'info', message: `Round ${round} started` });
+  }
 
   // 1. Drain steering buffer
   const steering = drainSteering(messages);
@@ -441,6 +484,7 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
     if (preNotes.length) {
       for (const note of preNotes) addNotice(note);
       actions.push('pre-llm-compaction');
+      if (graph) RG.emitEvent(graph, { type: 'pre_llm_compaction', round, level: 'info', message: `Pre-LLM compaction: ${preNotes.length} note(s)` });
     }
     messages = preLlmMessages;
   }
@@ -448,6 +492,10 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   // 2. Call LLM
   setStatus('busy', `round ${round}/${maxRounds}`);
   showThinking(`round ${round}/${maxRounds}`);
+  if (graph) {
+    RG.startTask(graph, { kind: 'llm', title: `LLM call round ${round}`, round });
+    RG.emitEvent(graph, { type: 'llm_started', round, level: 'info', message: 'LLM call started' });
+  }
 
   var prevStreamingCb = window.AgentLLMUtils?.streamingCallback;
   let llmResult;
@@ -466,12 +514,22 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   if (llmResult.recovered && llmResult.recoveredMessages) {
     hideThinking();
     if (llmResult.notice) addNotice(llmResult.notice);
+    if (graph) {
+      const task = Object.values(graph.tasks).find(t => t.kind === 'llm' && t.round === round && t.status === 'running');
+      if (task) RG.failTask(graph, task.id, llmResult.error?.message || 'LLM error recovered');
+      RG.emitEvent(graph, { type: 'round_continued', round, level: 'warn', message: 'Round continued after error recovery' });
+    }
     return { finalAnswer: false, messages: llmResult.recoveredMessages, actions: [...actions, 'error-recovered'], shouldContinue: true };
   }
 
   if (llmResult.error) {
     hideThinking();
     const error = llmResult.error;
+    if (graph) {
+      const task = Object.values(graph.tasks).find(t => t.kind === 'llm' && t.round === round && t.status === 'running');
+      if (task) RG.failTask(graph, task.id, error.message);
+      RG.emitEvent(graph, { type: 'round_finalized', round, level: 'error', message: `LLM error: ${error.message}` });
+    }
 
     if (error?.code === 'OLLAMA_INCOMPLETE_OUTPUT' || error?.code === 'LOCAL_INCOMPLETE_OUTPUT') {
       return { finalAnswer: true, finalText: error.message, messages, actions: [...actions, 'incomplete-output'] };
@@ -483,6 +541,11 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   const { rawReply, parsedReply, reply } = llmResult;
   const safeParsedReply = parsedReply || { visible: String(reply || ''), thinkingBlocks: [], raw: String(rawReply || '') };
   hideThinking();
+  if (graph) {
+    const task = Object.values(graph.tasks).find(t => t.kind === 'llm' && t.round === round && t.status === 'running');
+    if (task) RG.completeTask(graph, task.id);
+    RG.emitEvent(graph, { type: 'llm_completed', round, level: 'info', message: 'LLM call completed' });
+  }
 
   // 3. Parse / repair tool calls
   const TE = window.AgentToolExecution;
@@ -495,9 +558,13 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
     if (repaired.toolCalls.length) {
       addNotice(`Repair pass normalized malformed output into valid tool call(s): ${repaired.toolCalls.map(c => c.tool).join(', ')}.`);
       toolCalls = repaired.toolCalls;
+      if (graph) RG.emitEvent(graph, { type: 'repair_attempted', round, level: 'warn', message: `Tool call repair succeeded: ${repaired.toolCalls.map(c => c.tool).join(', ')}` });
     } else if (String(repaired.reply || '').trim()) {
       addNotice('Repair pass normalized malformed output into a contract-compliant reply.');
+      if (graph) RG.emitEvent(graph, { type: 'repair_attempted', round, level: 'warn', message: 'Repair pass normalized reply (no tools)' });
     }
+  } else if (graph) {
+    RG.emitEvent(graph, { type: 'tool_calls_parsed', round, level: 'info', message: `Parsed ${toolCalls.length} tool call(s): ${toolCalls.map(c => c.tool).join(', ')}` });
   }
 
   // 4. Handle no tool calls (final answer or continuation)
@@ -507,10 +574,12 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
     if (noToolResult.finalAnswer) {
       const finalText = noToolResult.finalText;
       const updatedMessages = [...messages, { role: 'assistant', content: finalText }];
+      if (graph) RG.emitEvent(graph, { type: 'round_finalized', round, level: 'info', message: 'Round finalized with final answer' });
       return { finalAnswer: true, finalText, messages: updatedMessages, consecutiveNonActionRounds: noToolResult.consecutiveNonActionRounds, actions: [...actions, 'final-answer'] };
     }
 
     if (noToolResult.shouldContinue) {
+      if (graph) RG.emitEvent(graph, { type: 'round_continued', round, level: 'info', message: 'Round continued (no action)' });
       return { finalAnswer: false, messages: noToolResult.messages, consecutiveNonActionRounds: noToolResult.consecutiveNonActionRounds, actions: [...actions, 'no-action-continuation'], shouldContinue: true };
     }
   }
@@ -524,6 +593,7 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
       role: 'user',
       content: `All proposed tool calls were blocked or invalid (${blockedReasons.join('; ') || 'no valid call'}). Do not repeat them. Choose different valid tools with complete args or provide a final answer.`
     });
+    if (graph) RG.emitEvent(graph, { type: 'round_continued', round, level: 'warn', message: `All ${toolCalls.length} tool call(s) blocked` });
     return { finalAnswer: false, messages, consecutiveNonActionRounds: 0, actions: [...actions, 'all-blocked'], shouldContinue: true };
   }
 
@@ -541,10 +611,11 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
     addMessage('tool', `? ${toolCall.tool}(${JSON.stringify(toolCall.args)})`, round, true);
   }
 
-  const batchResult = await executeToolBatches({ validToolCalls, reply, rawReply, round, delay, messages });
+  const batchResult = await executeToolBatches({ validToolCalls, reply, rawReply, round, delay, messages, graph, RG });
   messages = batchResult.messages;
 
   if (batchResult.pendingConfirmations) {
+    if (graph) RG.emitEvent(graph, { type: 'confirmation_pending', round, level: 'warn', message: `Waiting for ${batchResult.pendingConfirmationsCount || '?'} confirmation(s)` });
     return { finalAnswer: false, messages, consecutiveNonActionRounds: 0, actions: [...actions, 'pending-confirmations'], shouldContinue: true };
   }
 
@@ -554,6 +625,9 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
     ? Comp.applyContextManagementPipeline({ messages, round, userMessage, ctxLimit: getCtxLimit() })
     : { messages, notes: [] };
   messages = compactedMessages;
+  if (compactionNotes.length && graph) {
+    RG.emitEvent(graph, { type: 'round_finalized', round, level: 'info', message: `Compaction applied: ${compactionNotes.length} note(s)` });
+  }
 
   // 8. Build continuation prompt
   const { orchestrator } = getRuntimeModules();
@@ -567,6 +641,8 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   if (continuationPrompt) {
     messages.push({ role: 'user', content: continuationPrompt });
   }
+
+  if (graph) RG.emitEvent(graph, { type: 'round_finalized', round, level: 'info', message: `Round ${round} finalized` });
 
   return {
     finalAnswer: false,

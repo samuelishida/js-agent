@@ -6,7 +6,7 @@ license: Complete terms in LICENSE.txt
 
 # Web Application Testing
 
-> **Browser compatibility note**: The `node scripts/with_server.js` helper below requires the **dev server** (`node proxy/dev-server.js`) which provides the `runtime_generateFile` sandbox. In a pure browser environment without the sandbox, Playwright scripts cannot run. Use `runtime_generateFile` to execute them if the sandbox is available. In pure browser mode, guide the user to write Playwright scripts manually or use browser DevTools for testing.
+> **Browser compatibility note**: The `node scripts/with_server.js` helper below requires the **dev server** (`node proxy/dev-server.js`). In a pure browser environment without the sandbox, Playwright scripts cannot run; guide the user toward manual DevTools checks or browser-native inspection. When a test workflow must produce a downloadable report/screenshot bundle, use one `runtime_generateFile(path="agent-sandbox/gen.cjs", content=script, filename="report.ext")` call and let it auto-run/auto-download; do not chain `runtime_runTerminal` or follow-up `fs_download_file`.
 
 To test local web applications, write native Node.js Playwright scripts.
 

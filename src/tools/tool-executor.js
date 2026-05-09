@@ -426,6 +426,177 @@
   const attachmentReadText = attRuntime.attachmentReadText || (() => formatToolResult('attachment_read_text', '(not available)'));
   const registerAttachments = attRuntime.registerAttachments || (() => {});
 
+  // ── Artifact registry (lightweight, in-memory + localStorage fallback) ─────
+
+  const ARTIFACTS_KEY = 'agent_artifacts_v1';
+  const artifacts = new Map();
+
+  function loadArtifacts() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(ARTIFACTS_KEY) || '[]');
+      if (Array.isArray(raw)) {
+        for (const a of raw) { if (a?.id) artifacts.set(a.id, a); }
+      }
+    } catch {}
+  }
+  function saveArtifacts() {
+    try {
+      const arr = Array.from(artifacts.values()).slice(-200);
+      localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(arr));
+    } catch {}
+  }
+  function registerArtifact({ id, name, mimeType, size, source, data, preview }) {
+    const artifact = {
+      id: String(id || `art_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`),
+      name: String(name || 'artifact'),
+      mimeType: String(mimeType || 'application/octet-stream'),
+      size: Number(size) || 0,
+      source: String(source || 'tool'),
+      createdAt: new Date().toISOString(),
+      data: String(data || ''),
+      preview: String(preview || '').slice(0, 500)
+    };
+    artifacts.set(artifact.id, artifact);
+    saveArtifacts();
+    return artifact;
+  }
+  function getArtifact(id) { return artifacts.get(String(id || '')) || null; }
+  function listArtifacts({ limit = 30 } = {}) {
+    const arr = Array.from(artifacts.values()).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return arr.slice(0, Math.max(1, Number(limit) || 30));
+  }
+  function resolveArtifactData(ref) {
+    // ref can be artifactId, storageKey, or literal base64
+    if (!ref) return null;
+    const byId = artifacts.get(String(ref));
+    if (byId) return byId.data || null;
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem(String(ref));
+      if (stored) return stored;
+      const lastGen = localStorage.getItem('__last_generated_base64__');
+      if (lastGen) return lastGen;
+    }
+    return null;
+  }
+
+  const GENERATED_MIME_BY_EXT = {
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    pdf: 'application/pdf',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    zip: 'application/zip',
+    json: 'application/json',
+    csv: 'text/csv',
+    html: 'text/html',
+    txt: 'text/plain',
+    bin: 'application/octet-stream'
+  };
+
+  function base64ToUint8Array(b64) {
+    const binaryStr = atob(String(b64 || ''));
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+    return bytes;
+  }
+
+  function safeDownloadName(name) {
+    const base = String(name || '').replace(/^.*[\\/]/, '').trim();
+    return base.replace(/[<>:"/\\|?*\x00-\x1F]+/g, '_') || '';
+  }
+
+  function isScriptExtension(ext) {
+    return /^(js|cjs|mjs)$/i.test(String(ext || ''));
+  }
+
+  function extensionOf(name) {
+    const value = String(name || '').trim();
+    const match = value.match(/\.([a-z0-9]+)$/i);
+    return match ? match[1].toLowerCase() : '';
+  }
+
+  function basenameWithoutExtension(name) {
+    return safeDownloadName(name).replace(/\.[^.]+$/, '') || 'generated';
+  }
+
+  function inferGeneratedExtension(bytes, preferredName = '', scriptPath = '') {
+    const preferredExt = extensionOf(preferredName);
+    if (preferredExt && !isScriptExtension(preferredExt)) return preferredExt;
+
+    if (bytes?.length >= 4) {
+      if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) return 'pdf';
+      if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) return 'png';
+      if (bytes[0] === 0xFF && bytes[1] === 0xD8) return 'jpg';
+      if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return 'gif';
+      if (bytes[0] === 0x50 && bytes[1] === 0x4B) {
+        const hint = `${preferredName} ${scriptPath}`.toLowerCase();
+        if (/\bdocx\b/.test(hint)) return 'docx';
+        if (/\bxlsx\b/.test(hint)) return 'xlsx';
+        if (/\bpptx\b/.test(hint)) return 'pptx';
+        return 'zip';
+      }
+    }
+
+    return 'bin';
+  }
+
+  function resolveGeneratedDownloadName({ outputFilename, scriptPath, bytes }) {
+    const requested = safeDownloadName(outputFilename);
+    const requestedExt = extensionOf(requested);
+    const inferredExt = inferGeneratedExtension(bytes, requested, scriptPath);
+    if (requested && requestedExt && !isScriptExtension(requestedExt)) return requested;
+
+    const base = basenameWithoutExtension(requested || scriptPath || 'generated');
+    return `${base}.${inferredExt}`;
+  }
+
+  loadArtifacts();
+
+  window.AgentArtifacts = {
+    register: (opts) => registerArtifact(opts),
+    get: (id) => getArtifact(id),
+    preview: (id) => {
+      const a = getArtifact(id);
+      return a ? { id: a.id, name: a.name, mimeType: a.mimeType, size: a.size, preview: a.preview, createdAt: a.createdAt } : null;
+    },
+    readText: (id) => {
+      const a = getArtifact(id);
+      if (!a) return null;
+      // If the artifact is base64 data, try to decode to text for text/* types
+      if (a.data && /^text\//i.test(a.mimeType)) {
+        try { return atob(a.data); } catch { return a.data; }
+      }
+      return a.preview || a.data || null;
+    },
+    download: (id, fallbackName = '') => {
+      const a = getArtifact(id);
+      if (!a?.data) return false;
+      const bytes = base64ToUint8Array(a.data);
+      if (!bytes) return false;
+      const mimeMap = { docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation', pdf:'application/pdf', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp', svg:'image/svg+xml', zip:'application/zip', json:'application/json', csv:'text/csv', html:'text/html', txt:'text/plain' };
+      const ext = (a.name || fallbackName).split('.').pop()?.toLowerCase() || 'bin';
+      const mime = mimeMap[ext] || a.mimeType || 'application/octet-stream';
+      const blob = new Blob([bytes], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fallbackName || a.name || `artifact.${ext}`;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      return true;
+    },
+    forget: (id) => { artifacts.delete(String(id)); saveArtifacts(); return true; },
+    list: (opts) => listArtifacts(opts).map(a => ({ id: a.id, name: a.name, mimeType: a.mimeType, size: a.size, preview: a.preview, createdAt: a.createdAt }))
+  };
+
   // ── Compat runtime wrappers ──────────────────────────────────────────────
 
   async function callLocalCompatApi(path, payload = {}) {
@@ -507,30 +678,46 @@
       // Auto-download: decode base64 and trigger browser download immediately.
       // No second tool call needed — the file lands in the user's Downloads folder.
       try {
-        const binaryStr = atob(b64);
-        const bytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-        const ext = (outputFilename || scriptPath).split('.').pop()?.toLowerCase() || 'bin';
-        const mimeMap = { docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation', pdf:'application/pdf', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp', svg:'image/svg+xml', zip:'application/zip', json:'application/json', csv:'text/csv', html:'text/html', txt:'text/plain' };
-        const mime = mimeMap[ext] || 'application/octet-stream';
+        const bytes = base64ToUint8Array(b64);
+        const downloadName = resolveGeneratedDownloadName({ outputFilename, scriptPath, bytes });
+        const ext = extensionOf(downloadName) || 'bin';
+        const mime = GENERATED_MIME_BY_EXT[ext] || 'application/octet-stream';
         const blob = new Blob([bytes], { type: mime });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = outputFilename || scriptPath.replace(/^.*[\\/]/, '') || `output.${ext}`;
-        // Append to DOM so click works reliably across browsers, then clean up
+        a.download = downloadName;
         a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(url), 5000);
-        // Also save to localStorage as fallback
-        try { localStorage.setItem('__last_generated_base64__', b64); } catch {}
-        return formatToolResult('runtime_generateFile', `✅ Generated and auto-downloaded ${a.download} (${bytes.length} bytes) to your Downloads folder. No further action needed.`);
+        // Register artifact so tools can reference it by id
+        const artifact = registerArtifact({
+          id: `art_gen_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          name: downloadName,
+          mimeType: mime,
+          size: bytes.length,
+          source: 'runtime_generateFile',
+          data: b64,
+          preview: `Generated ${downloadName} (${bytes.length} bytes)`
+        });
+        return formatToolResult('runtime_generateFile', `✅ Generated and auto-downloaded ${artifact.name} (${artifact.size} bytes). Artifact id: ${artifact.id}`);
       } catch (e) {
-        // Fallback: save to localStorage so fs_download_file can pick it up
+        // Fallback: save to localStorage + artifact registry
         try { localStorage.setItem('__last_generated_base64__', b64); } catch {}
-        return formatToolResult('runtime_generateFile', `base64:${b64}\n[Auto-download failed: ${e.message}. Use fs_download_file(filename="output.docx", storageKey="__last_generated_base64__") to download.]`);
+        const fallbackName = resolveGeneratedDownloadName({ outputFilename, scriptPath, bytes: null });
+        const fallbackExt = extensionOf(fallbackName) || 'bin';
+        const artifact = registerArtifact({
+          id: `art_gen_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          name: fallbackName,
+          mimeType: GENERATED_MIME_BY_EXT[fallbackExt] || 'application/octet-stream',
+          size: Math.floor(b64.length * 0.75),
+          source: 'runtime_generateFile',
+          data: b64,
+          preview: 'Base64 fallback (auto-download failed)'
+        });
+        return formatToolResult('runtime_generateFile', `Artifact id: ${artifact.id}\n[Auto-download failed: ${e.message}. Use fs_download_file(artifactId="${artifact.id}") or storageKey="__last_generated_base64__" to download.]`);
       }
     }
     // If node failed, make the error actionable instead of just dumping raw output
@@ -712,6 +899,11 @@
     attachmentPreview,
     attachmentReadText,
     registerAttachments,
+    // Artifact tools
+    registerArtifact,
+    getArtifact,
+    listArtifacts,
+    resolveArtifactData,
     // Skill tools
     skillSearch,
     skillLoad

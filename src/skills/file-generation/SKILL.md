@@ -8,25 +8,26 @@ license: Proprietary
 
 Generate binary files (DOCX, PDF, XLSX, PPTX) using Node.js scripts executed via the dev server sandbox.
 
-## ⚠️ Critical: Two-Phase Generation
+## One-Step Generation
 
-Binary file generation requires TWO separate tool calls:
-1. **Phase 1**: Write script to disk via `runtime_generateFile` (no output returned)
-2. **Phase 2**: Execute script via `runtime_runTerminal` → captures base64 from stdout
+`runtime_generateFile` accepts a Node.js script as `content`, executes it on the dev server, captures base64 from stdout, and **auto-downloads** the resulting file to the user's Downloads folder.
 
-**NEVER try to pass base64 in tool arguments — it will be truncated!**
+```javascript
+// Tool: runtime_generateFile
+// path: "agent-sandbox/gen.cjs"
+// content: "const PDFDocument = require('pdfkit');\nconst doc = new PDFDocument();\ndoc.text('Hello');\ndoc.end();\nconst chunks=[];\ndoc.on('data',c=>chunks.push(c));\ndoc.on('end',()=>process.stdout.write(Buffer.concat(chunks).toString('base64')));"
+// filename: "output.pdf"
+```
 
-**For large scripts**: Pass the script content directly in the `content` parameter of `runtime_generateFile`. Do NOT use `storage_set` + `storageKey` for large scripts — localStorage has a ~5MB quota and will fail. The `content` parameter handles scripts of any size.
+The file lands in Downloads automatically — no follow-up tool call needed.
 
 ## Decision Tree
 
 ```
 User wants a binary file output?
 ├── YES → Use this skill (file-generation)
-│         1. Write generator script via runtime_generateFile (content=script, path="agent-sandbox/gen.cjs")
-│         2. Execute via runtime_runTerminal (command="node agent-sandbox/gen.cjs")
-│         3. Parse base64 from stdout in tool result
-│         4. Serve via fs_download_file(content=base64)
+│         1. Call runtime_generateFile(path="agent-sandbox/gen.cjs", content=script, filename="output.pdf")
+│         2. Tool result confirms download
 │
 └── NO → Use other skills (web_fetch, read_file, etc.)
 ```
@@ -40,9 +41,9 @@ Script path format: `agent-sandbox/gen.cjs` (NOT `gen.js`)
 
 ## Step-by-Step Workflow
 
-### Step 1: Write the Generator Script
+### Step 1: Build the Generator Script
 
-Use `runtime_generateFile` with your Node.js script as `content`:
+Write a Node.js script that writes base64 to stdout via `process.stdout.write(base64)`:
 
 ```javascript
 // filepath: agent-sandbox/gen_docx.cjs
@@ -60,24 +61,16 @@ const doc = new Document({
 Packer.toBase64String(doc).then(b64 => process.stdout.write(b64));
 ```
 
-**Key**: Script MUST write base64 to stdout via `process.stdout.write(b64)` or `console.log(b64)`.
-
-### Step 2: Execute and Capture Base64
+### Step 2: Generate and Download
 
 ```javascript
-// Tool: runtime_runTerminal
-// Command: node agent-sandbox/gen_docx.cjs
-```
-
-The tool result will contain `base64:<long_string>` in the output. Extract this.
-
-### Step 3: Serve the File
-
-```javascript
-// Tool: fs_download_file
+// Tool: runtime_generateFile
+// path: "agent-sandbox/gen_docx.cjs"
+// content: "<the script above>"
 // filename: "report.docx"
-// content: "<extracted_base64>"
 ```
+
+The tool result will confirm the download and provide the file size.
 
 ## Library Templates
 
@@ -136,14 +129,15 @@ pres.writeFile({ fileName: 'agent-sandbox/temp.pptx' }).then(() => {
 |-------|-------|-----|
 | `MODULE_NOT_FOUND` | Script uses wrong require path | Use `require('docx')` not relative paths |
 | `Exit code: 1` | Syntax error in script | Test script in terminal first |
-| `storage_set ERROR: quota exceeded` | Script content too long for localStorage | Use `runtime_generateFile` with `content` instead |
-| `Command too long` | Command exceeds 4096 chars | Use `runtime_generateFile` to write script first |
+| `ERR_UNKNOWN_FILE_EXTENSION` | Path does not end in `.cjs` | Use `"agent-sandbox/gen.cjs"` |
+| `Command too long` | Passing script inline exceeds limit | Use `runtime_generateFile` with `content` parameter |
 
 ## What NOT To Do
 
 ❌ **Don't** pass base64 in tool arguments — truncated at ~4096 chars
 ❌ **Don't** use `fs_write_file` for binary content — writes to virtual FS
 ❌ **Don't** use `storage_set` with full script — may truncate
-❌ **Don't** use `runtime_runTerminal` with long inline scripts — hits command limit
+❌ **Don't** call `runtime_runTerminal` after `runtime_generateFile` — already auto-executes
+❌ **Don't** call `fs_download_file` after `runtime_generateFile` — already auto-downloads
 
-✅ **Do** write script via `runtime_generateFile`, execute via `runtime_runTerminal`
+✅ **Do** write script via `runtime_generateFile` and let it auto-execute + auto-download

@@ -464,7 +464,11 @@ function buildOpenAiStyleMessages(msgs) {
       return { role: 'user', content: `\u003ctool_result${m.name ? ` tool="${m.name}"` : ''}\u003e\n${content}\n\u003c/tool_result\u003e` };
     }
 
-    const imageAttachments = (m.attachments || []).filter(a => a.kind === 'image' && a.dataUrl);
+    const resolved = (m.attachments || []).map(aMeta => {
+      const full = (window.currentTurnAttachments || []).find(f => f.id === aMeta.id);
+      return full || aMeta;
+    });
+    const imageAttachments = resolved.filter(a => a.kind === 'image' && a.dataUrl);
     if (imageAttachments.length) {
       const parts = [{ type: 'text', text: content }];
       for (const a of imageAttachments) {

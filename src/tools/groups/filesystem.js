@@ -33,7 +33,7 @@
       { name: 'fs_preview_file', signature: 'fs_preview_file(path)' },
       { name: 'attachment_list', signature: 'attachment_list()' },
       { name: 'attachment_preview', signature: 'attachment_preview(id)' },
-      { name: 'attachment_read_text', signature: 'attachment_read_text(id)' }
+      { name: 'attachment_read_text', signature: 'attachment_read_text(id, offset?, limit?)' }
     ]
   };
 })();

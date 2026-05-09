@@ -37,7 +37,11 @@ async function callOpenRouter(msgs, signal, options = {}, initialModel = '') {
 
   function buildOpenRouterMessage(m) {
     const role = m.role === 'tool' ? 'user' : m.role;
-    const imageAttachments = (m.attachments || []).filter(a => a.kind === 'image' && a.dataUrl);
+    const resolved = (m.attachments || []).map(aMeta => {
+      const full = (window.currentTurnAttachments || []).find(f => f.id === aMeta.id);
+      return full || aMeta;
+    });
+    const imageAttachments = resolved.filter(a => a.kind === 'image' && a.dataUrl);
     if (imageAttachments.length) {
       const parts = [{ type: 'text', text: String(m.content || '') }];
       for (const a of imageAttachments) {

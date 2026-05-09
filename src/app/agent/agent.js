@@ -54,7 +54,7 @@ function buildAttachmentContextBlock(attachments) {
   if (!attachments?.length) return '';
   const lines = attachments.map((a, i) => {
     const preview = a.textPreview ? `\nPreview (first ${a.textPreview.length} chars):\n${a.textPreview}` : '';
-    return `${i + 1}. [${a.kind}] ${a.name} (${a.mimeType}, ${a.size} bytes)${preview}`;
+    return `${i + 1}. [${a.kind}] ${a.name} (id: ${a.id})${preview}`;
   });
   return `\u003cattachments\u003e\n${lines.join('\n')}\n\u003c/attachments\u003e`;
 }
@@ -72,6 +72,7 @@ async function agentLoop(userMessage, attachments = []) {
   if (attachments?.length && window.AgentToolExecutor?.registerAttachments) {
     window.AgentToolExecutor.registerAttachments(attachments);
   }
+  window.currentTurnAttachments = attachments || [];
   const { tools, orchestrator } = getRuntimeModules();
   const cfg = C();
   const MAX_ROUNDS = getMaxRounds();
@@ -224,6 +225,8 @@ async function agentLoop(userMessage, attachments = []) {
     }
     addMessage('error', `Final answer failed: ${e.message}`, MAX_ROUNDS);
     setStatus('error', 'final answer failed');
+  } finally {
+    window.currentTurnAttachments = [];
   }
   updateCtxBar();
 }

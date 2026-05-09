@@ -148,6 +148,11 @@
         return /^image\/(png|jpeg|jpg|gif|webp|bmp)$/i.test(String(mime || ''));
       }
 
+      function isTextByExtension(name) {
+        const ext = String(name || '').split('.').pop().toLowerCase();
+        return /^(txt|md|json|js|ts|css|html|htm|xml|csv|log|yml|yaml|cjs|mjs|jsx|tsx|sh|bash|py|rb|go|rs|java|kt|swift|cpp|c|h|hpp|cs|php|pl|sql|ini|cfg|conf|dart|lua|nim|r|scala|groovy|gradle|dockerfile|makefile)$/i.test(ext);
+      }
+
       function capTextPreview(text) {
         const max = 4000;
         return text.length > max ? text.slice(0, max) + '…' : text;
@@ -187,8 +192,10 @@
           if (kind === 'image') {
             att.dataUrl = await readFileAsDataURL(file);
             att.textPreview = '[image attached]';
-          } else if (/^text\//i.test(file.type) || file.type === 'application/json' || file.type === 'application/javascript') {
-            att.textPreview = capTextPreview(await readFileAsText(file));
+          } else if (/^text\//i.test(file.type) || file.type === 'application/json' || file.type === 'application/javascript' || isTextByExtension(file.name)) {
+            const fullText = await readFileAsText(file);
+            att.textContent = fullText;
+            att.textPreview = capTextPreview(fullText);
           } else {
             att.textPreview = '(binary file — no text preview)';
           }

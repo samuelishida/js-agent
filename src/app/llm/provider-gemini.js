@@ -33,7 +33,11 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
 
   function buildGeminiParts(m) {
     const parts = [{ text: String(m.content || '').replace(/\u003cthink[\s\S]*?\u003c\/think\u003e/gi, '') }];
-    for (const a of (m.attachments || []).filter(a => a.kind === 'image' && a.dataUrl)) {
+    const resolved = (m.attachments || []).map(aMeta => {
+      const full = (window.currentTurnAttachments || []).find(f => f.id === aMeta.id);
+      return full || aMeta;
+    });
+    for (const a of resolved.filter(a => a.kind === 'image' && a.dataUrl)) {
       const base64 = String(a.dataUrl).split(',')[1] || '';
       if (base64) parts.push({ inlineData: { mimeType: a.mimeType, data: base64 } });
     }

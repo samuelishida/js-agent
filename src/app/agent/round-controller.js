@@ -244,7 +244,7 @@ function handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionRounds,
  * @param {any[]} toolCalls
  * @returns {{ validToolCalls: any[], blockedReasons: string[] }}
  */
-function validateToolCalls(toolCalls) {
+function validateToolCalls({ toolCalls, messages, userMessage }) {
   const Comp = window.AgentCompaction;
   const validToolCalls = [];
   const blockedReasons = [];
@@ -516,7 +516,7 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   }
 
   // 5. Validate tool calls
-  const { validToolCalls, blockedReasons } = validateToolCalls(toolCalls);
+  const { validToolCalls, blockedReasons } = validateToolCalls({ toolCalls, messages, userMessage });
 
   if (!validToolCalls.length) {
     messages.push({ role: 'assistant', content: rawReply || reply });

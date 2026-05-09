@@ -463,6 +463,19 @@ function buildOpenAiStyleMessages(msgs) {
       }
       return { role: 'user', content: `\u003ctool_result${m.name ? ` tool="${m.name}"` : ''}\u003e\n${content}\n\u003c/tool_result\u003e` };
     }
+
+    const imageAttachments = (m.attachments || []).filter(a => a.kind === 'image' && a.dataUrl);
+    if (imageAttachments.length) {
+      const parts = [{ type: 'text', text: content }];
+      for (const a of imageAttachments) {
+        parts.push({ type: 'image_url', image_url: { url: a.dataUrl } });
+      }
+      return {
+        role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
+        content: parts
+      };
+    }
+
     return {
       role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
       content

@@ -31,19 +31,32 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
   const maxTokens = Math.max(64, Number(options.maxTokens) || 4096);
   const temperature = Number.isFinite(options.temperature) ? Number(options.temperature) : 0.7;
 
+  function buildGeminiParts(m) {
+    const parts = [{ text: String(m.content || '').replace(/\u003cthink[\s\S]*?\u003c\/think\u003e/gi, '') }];
+    for (const a of (m.attachments || []).filter(a => a.kind === 'image' && a.dataUrl)) {
+      const base64 = String(a.dataUrl).split(',')[1] || '';
+      if (base64) parts.push({ inlineData: { mimeType: a.mimeType, data: base64 } });
+    }
+    return parts;
+  }
+
   const rawContents = msgs
     .filter(m => m.role !== 'system')
-    .map(m => {
-      const text = String(m.content || '').replace(/\u003cthink[\s\S]*?\u003c\/think\u003e/gi, '');
-      return { role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text }] };
-    });
+    .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: buildGeminiParts(m) }));
   const contents = [];
   for (const entry of rawContents) {
     const prev = contents[contents.length - 1];
     if (prev && prev.role === entry.role) {
-      prev.parts[0].text += '\n\n' + entry.parts[0].text;
+      const prevTextPart = prev.parts.find(p => p.text);
+      const entryTextPart = entry.parts.find(p => p.text);
+      if (prevTextPart && entryTextPart) {
+        prevTextPart.text += '\n\n' + entryTextPart.text;
+      }
+      for (const p of entry.parts) {
+        if (!p.text) prev.parts.push(p);
+      }
     } else {
-      contents.push({ role: entry.role, parts: [{ text: entry.parts[0].text }] });
+      contents.push({ role: entry.role, parts: [...entry.parts] });
     }
   }
   const systemInstruction = msgs.find(m => m.role === 'system');
@@ -108,7 +121,7 @@ async function callGeminiDirect(msgs, signal, options = {}, initialModel = '') {
   }
   // If there are thought parts, wrap them in <think> tags
   if (thinkingText.trim()) {
-    let combined = '<tool_call>\n' + thinkingText.trim() + '\n<\/think>\n';
+    let combined = '\u003cthink\u003e\n' + thinkingText.trim() + '\n\u003c/think\u003e\n';
     if (visibleText.trim()) combined += '\n' + visibleText.trim();
     return combined;
   }

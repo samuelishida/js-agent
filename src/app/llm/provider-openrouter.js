@@ -35,12 +35,22 @@ async function callOpenRouter(msgs, signal, options = {}, initialModel = '') {
   const maxTokens = Math.max(512, Number(options.maxTokens) || 4096);
   const temperature = Number.isFinite(options.temperature) ? options.temperature : 0.7;
 
+  function buildOpenRouterMessage(m) {
+    const role = m.role === 'tool' ? 'user' : m.role;
+    const imageAttachments = (m.attachments || []).filter(a => a.kind === 'image' && a.dataUrl);
+    if (imageAttachments.length) {
+      const parts = [{ type: 'text', text: String(m.content || '') }];
+      for (const a of imageAttachments) {
+        parts.push({ type: 'image_url', image_url: { url: a.dataUrl } });
+      }
+      return { role, content: parts };
+    }
+    return { role, content: String(m.content || '') };
+  }
+
   const body = {
     model,
-    messages: msgs.map(m => ({
-      role: m.role === 'tool' ? 'user' : m.role,
-      content: String(m.content || '')
-    })),
+    messages: msgs.map(buildOpenRouterMessage),
     max_tokens: maxTokens,
     temperature,
     stream: false

@@ -18,7 +18,7 @@
   const GithubRuntimeFactory = window.AgentToolModules?.createGithubRuntime;
 
   // ── Shared state (used by fs runtime and preflight) ──────────────────────
-  const state = { roots: new Map(), defaultRootId: null, uploads: new Map() };
+  const state = { roots: new Map(), defaultRootId: null, uploads: new Map(), attachments: new Map() };
 
   // ── Registry assembly ────────────────────────────────────────────────────
   const registryModuleFactory = window.AgentToolModules?.createRegistryRuntime;
@@ -95,7 +95,10 @@
         tool_search: args => Registry.toolSearch(registry, args, Executor.formatToolResult),
         snapshot_tool_catalog: args => Registry.snapshotToolCatalog(args, Executor.formatToolResult),
         skill_search: args => Executor.skillSearch(args),
-        skill_load: args => Executor.skillLoad(args)
+        skill_load: args => Executor.skillLoad(args),
+        attachment_list: () => Executor.attachmentList(),
+        attachment_preview: args => Executor.attachmentPreview(args),
+        attachment_read_text: args => Executor.attachmentReadText(args)
       })
     : { registry: {}, toolGroups: {} };
 
@@ -131,7 +134,10 @@
     { name: 'runtime_lsp', signature: 'runtime_lsp(action, path?, line?, col?, query?)', description: 'LSP compatibility placeholder for the browser runtime.', run: Executor.runtimeLsp },
     { name: 'runtime_spawnAgent', signature: 'runtime_spawnAgent(task, tools?, maxIterations?)', description: 'Runs a focused sub-agent task using the worker runtime.', run: Executor.runtimeSpawnAgent },
     { name: 'skill_search', signature: 'skill_search(query?)', description: 'Search available skills (methodology/expertise docs) by keyword. Returns scored matches with descriptions. Use before skill_load to discover what skills exist.', run: Executor.skillSearch },
-    { name: 'skill_load', signature: 'skill_load(name)', description: 'Load a skill\'s full content by name. Use after skill_search to get the complete methodology/guidelines for a specific skill.', run: Executor.skillLoad }
+    { name: 'skill_load', signature: 'skill_load(name)', description: 'Load a skill\'s full content by name. Use after skill_search to get the complete methodology/guidelines for a specific skill.', run: Executor.skillLoad },
+    { name: 'attachment_list', signature: 'attachment_list()', description: 'List current turn attachments (files/images the user uploaded).', run: Executor.attachmentList },
+    { name: 'attachment_preview', signature: 'attachment_preview(id)', description: 'Preview a specific attachment by its id.', run: Executor.attachmentPreview },
+    { name: 'attachment_read_text', signature: 'attachment_read_text(id)', description: 'Read the full text preview of a specific attachment by its id.', run: Executor.attachmentReadText }
   ];
 
   compatTools.forEach(tool => Registry.registerCompatTool(registry, toolGroups, tool));

@@ -78,7 +78,8 @@ async function sendMessage() {
   }
   const input = document.getElementById('msg-input');
   const text = input.value.trim();
-  if (!text) return;
+  const attachments = window.pendingAttachments || [];
+  if (!text && !attachments.length) return;
 
   if (!isLocalModeActive()) {
     const cloudReadiness = typeof getCloudReadiness === 'function'
@@ -108,16 +109,16 @@ async function sendMessage() {
   const inputStatus = document.getElementById('input-status');
   if (inputStatus) inputStatus.textContent = 'processing…';
 
-  const curSession = getActiveSession() || createSession(text);
+  const curSession = getActiveSession() || createSession(text || 'Attachment');
   if (!curSession.messages?.length) {
-    curSession.title = makeSessionTitle(text);
+    curSession.title = makeSessionTitle(text || 'Attachment');
   }
-  addMessage('user', text, null);
+  addMessage('user', text || '(attachment sent)', null);
   saveSessions();
   renderSessionList();
 
   try {
-    await agentLoop(text);
+    await agentLoop(text, attachments);
   } catch (e) {
     hideThinking();
     if (e?.code === 'RUN_STOPPED' || e?.name === 'AbortError') {
@@ -135,6 +136,7 @@ async function sendMessage() {
     setStopButtonState(false);
     if (inputStatus) inputStatus.textContent = `${window.sessionStats.msgs} message${window.sessionStats.msgs!==1?'s':''} sent`;
     input.focus();
+    if (typeof window.clearPendingAttachments === 'function') window.clearPendingAttachments();
   }
 }
 

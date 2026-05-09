@@ -377,11 +377,17 @@
 
   // ── FS runtime ──────────────────────────────────────────────────────────
 
-  const state = window.AgentTools?.state || { roots: new Map(), defaultRootId: null, uploads: new Map() };
+  const state = window.AgentTools?.state || { roots: new Map(), defaultRootId: null, uploads: new Map(), attachments: new Map() };
+  if (!state.attachments) state.attachments = new Map();
 
   const fsModuleFactory = window.AgentToolModules?.createFilesystemRuntime;
   const fsRuntime = typeof fsModuleFactory === 'function'
     ? fsModuleFactory({ state, formatToolResult, supportsFsAccess, supportsTextPreview })
+    : {};
+
+  const attModuleFactory = window.AgentToolModules?.createAttachmentRuntime;
+  const attRuntime = typeof attModuleFactory === 'function'
+    ? attModuleFactory({ state, formatToolResult })
     : {};
 
   const authorizeFolder = fsRuntime.authorizeFolder || missingFsRuntime('authorizeFolder');
@@ -412,6 +418,13 @@
   const pickDirectory = fsRuntime.pickDirectory || missingFsRuntime('pickDirectory');
   const searchCode = fsRuntime.searchCode || missingFsRuntime('searchCode');
   const multiEditFiles = fsRuntime.multiEditFiles || missingFsRuntime('multiEditFiles');
+
+  // ── Attachment runtime ─────────────────────────────────────────────────
+
+  const attachmentList = attRuntime.attachmentList || (() => formatToolResult('attachment_list', '(not available)'));
+  const attachmentPreview = attRuntime.attachmentPreview || (() => formatToolResult('attachment_preview', '(not available)'));
+  const attachmentReadText = attRuntime.attachmentReadText || (() => formatToolResult('attachment_read_text', '(not available)'));
+  const registerAttachments = attRuntime.registerAttachments || (() => {});
 
   // ── Compat runtime wrappers ──────────────────────────────────────────────
 
@@ -694,6 +707,11 @@
     runtimeLsp,
     runtimeFileDiff,
     runtimeSpawnAgent,
+    // Attachment tools
+    attachmentList,
+    attachmentPreview,
+    attachmentReadText,
+    registerAttachments,
     // Skill tools
     skillSearch,
     skillLoad

@@ -250,7 +250,7 @@ function validateToolCalls(toolCalls) {
   const blockedReasons = [];
 
   for (const candidateCall of toolCalls) {
-    const normalizedCandidate = completeToolCallArgs(candidateCall, { messages: window.messages, userMessage: '' });
+    const normalizedCandidate = completeToolCallArgs(candidateCall, { messages, userMessage });
     if (!normalizedCandidate) continue;
 
     const repeatState = Comp?.recordRepeatedToolCall ? Comp.recordRepeatedToolCall(normalizedCandidate) : { repeated: false };
@@ -450,15 +450,18 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   showThinking(`round ${round}/${maxRounds}`);
 
   var prevStreamingCb = window.AgentLLMUtils?.streamingCallback;
-  window.AgentLLMUtils && (window.AgentLLMUtils.streamingCallback = function(contentDelta, fullContent, reasoningDelta) {
-    if (reasoningDelta && window.updateStreamingThinking) {
-      window.updateStreamingThinking(contentDelta, reasoningDelta);
-    }
-  });
+  let llmResult;
+  try {
+    window.AgentLLMUtils && (window.AgentLLMUtils.streamingCallback = function(contentDelta, fullContent, reasoningDelta) {
+      if (reasoningDelta && window.updateStreamingThinking) {
+        window.updateStreamingThinking(contentDelta, reasoningDelta);
+      }
+    });
 
-  const llmResult = await callLlmWithRecovery({ messages, round, maxRounds, delay });
-
-  if (window.AgentLLMUtils) window.AgentLLMUtils.streamingCallback = prevStreamingCb;
+    llmResult = await callLlmWithRecovery({ messages, round, maxRounds, delay });
+  } finally {
+    if (window.AgentLLMUtils) window.AgentLLMUtils.streamingCallback = prevStreamingCb;
+  }
 
   if (llmResult.recovered && llmResult.recoveredMessages) {
     hideThinking();

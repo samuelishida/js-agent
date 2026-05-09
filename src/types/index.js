@@ -40,6 +40,7 @@
  * @typedef {Object} SessionMessage
  * @property {'system'|'user'|'assistant'|'tool'} role - Message role
  * @property {string|Array<{type: string, text?: string}>} content - Message content
+ * @property {Attachment[]} [attachments] - Optional file/image attachments
  * @property {string} [toolCallId] - Associated tool call id
  * @property {string} [name] - Tool name
  */
@@ -51,6 +52,19 @@
  * @property {number} startTime - Session start timestamp
  * @property {number} lastActivity - Last activity timestamp
  * @property {number} [totalTokens] - Total tokens used
+ */
+
+/**
+ * @typedef {Object} Attachment
+ * @property {string} id - Generated id
+ * @property {string} name - File name
+ * @property {string} mimeType - MIME type
+ * @property {number} size - Byte size
+ * @property {'file'|'image'} kind - Kind
+ * @property {'user'|'tool'} source - Who attached
+ * @property {'pending'|'ready'|'error'} status - Status
+ * @property {string} [textPreview] - Capped text preview
+ * @property {string} [dataUrl] - Image data URL (images only)
  */
 
 // ─── Skill Types ──────────────────────────────────────────────

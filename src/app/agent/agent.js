@@ -46,13 +46,32 @@ function maybeExtractLongTermMemory(userMessage, assistantMessage) {
 }
 
 /**
+ * Build an attachment context block for the prompt.
+ * @param {import('../../types/index.js').Attachment[]} attachments
+ * @returns {string} Context block or empty string
+ */
+function buildAttachmentContextBlock(attachments) {
+  if (!attachments?.length) return '';
+  const lines = attachments.map((a, i) => {
+    const preview = a.textPreview ? `\nPreview (first ${a.textPreview.length} chars):\n${a.textPreview}` : '';
+    return `${i + 1}. [${a.kind}] ${a.name} (${a.mimeType}, ${a.size} bytes)${preview}`;
+  });
+  return `\u003cattachments\u003e\n${lines.join('\n')}\n\u003c/attachments\u003e`;
+}
+
+/**
  * Main agent loop entry point.
  * @param {string} userMessage - User input message
+ * @param {import('../../types/index.js').Attachment[]} [attachments=[]] - File/image attachments
  * @returns {Promise<void>}
  */
-async function agentLoop(userMessage) {
+async function agentLoop(userMessage, attachments = []) {
   assertRuntimeReady();
   throwIfStopRequested();
+
+  if (attachments?.length && window.AgentToolExecutor?.registerAttachments) {
+    window.AgentToolExecutor.registerAttachments(attachments);
+  }
   const { tools, orchestrator } = getRuntimeModules();
   const cfg = C();
   const MAX_ROUNDS = getMaxRounds();
@@ -80,7 +99,8 @@ async function agentLoop(userMessage) {
   const enrichedMessage = await tools.buildInitialContext(userMessage, { messages: window.messages });
   const memoryBlock = window.AgentMemory?.buildContextBlock?.(userMessage, window.messages) || '';
   const compatBlock = window.AgentToolMemory?.buildRuntimeContextBlock?.() || '';
-  const memoryContextBlock = [memoryBlock, compatBlock].filter(Boolean).join('\n\n');
+  const attachmentBlock = buildAttachmentContextBlock(attachments);
+  const memoryContextBlock = [memoryBlock, compatBlock, attachmentBlock].filter(Boolean).join('\n\n');
   const turnInputMessage = memoryContextBlock ? `${memoryContextBlock}\n\n${enrichedMessage}` : enrichedMessage;
   throwIfStopRequested();
 
@@ -93,7 +113,7 @@ async function agentLoop(userMessage) {
   window.messages = [
     { role: 'system', content: sysPrompt },
     ...window.messages.filter(m => m.role !== 'system').slice(-20),
-    { role: 'user', content: turnInputMessage }
+    { role: 'user', content: turnInputMessage, attachments: attachments.map(a => ({ id: a.id, name: a.name, mimeType: a.mimeType, kind: a.kind, size: a.size })) }
   ];
 
   let round = 0;

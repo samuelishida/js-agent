@@ -299,8 +299,9 @@
       const handles = await window.showOpenFilePicker({ multiple: true });
       const names = [];
       for (const handle of handles) {
-        state.uploads.set(handle.name, handle);
-        names.push(handle.name);
+        const id = `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        state.uploads.set(id, { id, handle, name: handle.name });
+        names.push(`${handle.name} (id: ${id})`);
       }
 
       return formatToolResult('fs_upload_pick', names.length ? names.join('\n') : 'No files selected.');
@@ -1070,15 +1071,15 @@
     }
 
     async function savePickedUpload({ uploadName, destinationPath }) {
-      const handle = state.uploads.get(String(uploadName || ''));
-      if (!handle) {
+      const entry = state.uploads.get(String(uploadName || ''));
+      if (!entry) {
         throw new Error('Upload not found in session. Run fs_upload_pick first.');
       }
 
-      const file = await handle.getFile();
+      const file = await entry.handle.getFile();
       const destination = await resolveFile(destinationPath, true);
       await writeFile(destination.handle, await file.arrayBuffer());
-      return formatToolResult('fs_save_upload', `Saved upload ${uploadName} -> ${destinationPath}`);
+      return formatToolResult('fs_save_upload', `Saved upload ${entry.name || uploadName} -> ${destinationPath}`);
     }
 
     return {

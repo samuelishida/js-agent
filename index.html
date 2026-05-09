@@ -75,15 +75,18 @@
 <!-- INPUT AREA -->
 <div class="input-area">
   <div class="input-wrapper">
-    <textarea id="msg-input" 
+    <textarea id="msg-input"
               placeholder="Ask me anything…"
               rows="1"
               onkeydown="handleKey(event)"
               oninput="autoResize(this)"></textarea>
+    <button class="btn-attach" id="btn-attach" onclick="triggerFileInput()" title="Attach file" type="button">Attach</button>
     <button class="btn-send" id="btn-send" onclick="sendMessage()" title="Send Message">Send</button>
     <button class="btn-stop" id="btn-stop" onclick="requestStop()" title="Stop" disabled style="display:none">Stop</button>
     <button class="steering-btn" id="btn-steering-toggle" onclick="toggleSteeringUI()" title="Toggle steering input" style="display:none;padding:2px 6px;font-size:10px">Steer</button>
   </div>
+  <div id="attachment-chips" class="attachment-chips"></div>
+  <input type="file" id="file-input" multiple accept="*/*" style="display:none" onchange="handleFileInput(event)">
   <div class="input-help">
     <span><kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line</span>
   </div>
@@ -126,6 +129,144 @@
       const visible = document.getElementById('steering-input-row')?.style.display !== 'flex';
       window.setSteeringUIVisible(visible);
     };
+  </script>
+
+  <!-- Attachment composer wiring -->
+  <script>
+    (function() {
+      window.pendingAttachments = window.pendingAttachments || [];
+
+      window.triggerFileInput = function() {
+        document.getElementById('file-input')?.click();
+      };
+
+      function generateAttachmentId() {
+        return 'att_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      }
+
+      function isImageMime(mime) {
+        return /^image\/(png|jpeg|jpg|gif|webp|bmp)$/i.test(String(mime || ''));
+      }
+
+      function capTextPreview(text) {
+        const max = 4000;
+        return text.length > max ? text.slice(0, max) + '…' : text;
+      }
+
+      async function readFileAsDataURL(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
+      }
+
+      async function readFileAsText(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsText(file);
+        });
+      }
+
+      async function createAttachment(file) {
+        const id = generateAttachmentId();
+        const kind = isImageMime(file.type) ? 'image' : 'file';
+        const att = {
+          id,
+          name: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          size: file.size,
+          kind,
+          source: 'user',
+          status: 'pending'
+        };
+        try {
+          if (kind === 'image') {
+            att.dataUrl = await readFileAsDataURL(file);
+            att.textPreview = '[image attached]';
+          } else if (/^text\//i.test(file.type) || file.type === 'application/json' || file.type === 'application/javascript') {
+            att.textPreview = capTextPreview(await readFileAsText(file));
+          } else {
+            att.textPreview = '(binary file — no text preview)';
+          }
+          att.status = 'ready';
+        } catch (e) {
+          att.status = 'error';
+          att.textPreview = 'Error reading file: ' + e.message;
+        }
+        return att;
+      }
+
+      function renderAttachmentChips() {
+        const container = document.getElementById('attachment-chips');
+        if (!container) return;
+        container.innerHTML = window.pendingAttachments.map(att =>
+          `<div class="attachment-chip" data-id="${att.id}">
+            <span class="attachment-name">${att.name}</span>
+            <span class="attachment-meta">${att.kind} · ${(att.size / 1024).toFixed(1)} KB</span>
+            <button class="attachment-remove" onclick="removeAttachment('${att.id}')" title="Remove">×</button>
+          </div>`
+        ).join('');
+      }
+
+      window.removeAttachment = function(id) {
+        window.pendingAttachments = window.pendingAttachments.filter(a => a.id !== id);
+        renderAttachmentChips();
+      };
+
+      window.handleFileInput = async function(event) {
+        const files = event.target?.files;
+        if (!files?.length) return;
+        for (const file of files) {
+          const att = await createAttachment(file);
+          window.pendingAttachments.push(att);
+        }
+        renderAttachmentChips();
+        event.target.value = '';
+      };
+
+      // Drag and drop on textarea
+      const textarea = document.getElementById('msg-input');
+      if (textarea) {
+        textarea.addEventListener('dragover', function(e) {
+          e.preventDefault();
+          textarea.classList.add('drag-active');
+        });
+        textarea.addEventListener('dragleave', function() {
+          textarea.classList.remove('drag-active');
+        });
+        textarea.addEventListener('drop', async function(e) {
+          e.preventDefault();
+          textarea.classList.remove('drag-active');
+          const files = e.dataTransfer?.files;
+          if (!files?.length) return;
+          for (const file of files) {
+            const att = await createAttachment(file);
+            window.pendingAttachments.push(att);
+          }
+          renderAttachmentChips();
+        });
+        // Paste files / images
+        textarea.addEventListener('paste', async function(e) {
+          const files = e.clipboardData?.files;
+          if (!files?.length) return;
+          e.preventDefault();
+          for (const file of files) {
+            const att = await createAttachment(file);
+            window.pendingAttachments.push(att);
+          }
+          renderAttachmentChips();
+        });
+      }
+
+      window.clearPendingAttachments = function() {
+        window.pendingAttachments = [];
+        renderAttachmentChips();
+      };
+    })();
   </script>
 </div>
 
@@ -503,6 +644,7 @@
 
 <!-- ── 3. Runtime module factories ────────────────────────────────────── -->
 <script src="src/tools/modules/filesystem-runtime.js" defer></script>
+<script src="src/tools/modules/attachment-runtime.js" defer></script>
 <script src="src/tools/modules/data-runtime.js" defer></script>
 <script src="src/tools/modules/registry-runtime.js" defer></script>
 <script src="src/tools/modules/web-runtime.js" defer></script>
@@ -531,6 +673,9 @@
 
 <!-- ── 5. Orchestrator ─────────────────────────────────────────────────── -->
 <script src="src/core/orchestrator.js" defer></script>
+
+<!-- ── 6a. Browser capabilities ──────────────────────────────────────── -->
+<script src="src/app/core/browser-capabilities.js" defer></script>
 
 <!-- ── 6. App state and cache ─────────────────────────────────────────── -->
 <script src="src/app/core/state.js" defer></script>

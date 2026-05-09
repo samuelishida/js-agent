@@ -30,7 +30,10 @@
       { name: 'fs_tree', signature: 'fs_tree(path, maxDepth?)' },
       { name: 'fs_download_file', signature: 'fs_download_file(filename, content?, path?, storageKey?)' },
       { name: 'fs_upload_pick', signature: 'fs_upload_pick()' },
-      { name: 'fs_preview_file', signature: 'fs_preview_file(path)' }
+      { name: 'fs_preview_file', signature: 'fs_preview_file(path)' },
+      { name: 'attachment_list', signature: 'attachment_list()' },
+      { name: 'attachment_preview', signature: 'attachment_preview(id)' },
+      { name: 'attachment_read_text', signature: 'attachment_read_text(id)' }
     ]
   };
 })();

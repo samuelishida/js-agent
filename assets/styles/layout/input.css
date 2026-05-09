@@ -6,7 +6,6 @@
   padding: 8px var(--spacing-lg);
   display: flex;
   flex-direction: column;
-  gap: 4px;
   justify-content: flex-end;
   align-items: stretch;
   flex-shrink: 0;

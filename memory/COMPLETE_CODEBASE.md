@@ -2,13 +2,13 @@
 
 ## Files Modified
 
-### 1. src/app/agent.js
-### 2. src/core/orchestrator.js  
-### 3. index.html
+1. src/app/agent.js
+2. src/core/orchestrator.js
+3. index.html
 
 ---
 
-## Key Functions and Their Signatures
+## Key Functions + Signatures
 
 ### agent.js
 
@@ -69,9 +69,9 @@ function steerToolCall(toolName, args) {
   for (const key of pathKeys) {
     if (typeof args[key] === 'string') {
       args[key] = args[key]
-        .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
-        .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '')
-        .replace(/<permission_denials>[\s\S]*?<\/permission_denials>/gi, '')
+        .replace(/\u003ctool_call\u003e[\s\S]*?\u003c\/tool_call\u003e/gi, '')
+        .replace(/\u003csystem-reminder\u003e[\s\S]*?\u003c\/system-reminder\u003e/gi, '')
+        .replace(/\u003cpermission_denials\u003e[\s\S]*?\u003c\/permission_denials\u003e/gi, '')
         .trim();
     }
   }
@@ -81,9 +81,9 @@ function steerToolCall(toolName, args) {
 function sanitizeToolResult(text) {
   const raw = String(text || '');
   return raw
-    .replace(/<tool_call\s*>[\s\S]*?<\/tool_call\s*>/gi, '[tool_call content removed by injection guard]')
-    .replace(/<system-reminder\s*>[\s\S]*?<\/system-reminder\s*>/gi, '[system-reminder removed by injection guard]')
-    .replace(/<permission_denials\s*>[\s\S]*?<\/permission_denials\s*>/gi, '[permission_denials removed by injection guard]')
+    .replace(/\u003ctool_call\s*\u003e[\s\S]*?\u003c\/tool_call\s*\u003e/gi, '[tool_call content removed by injection guard]')
+    .replace(/\u003csystem-reminder\s*\u003e[\s\S]*?\u003c\/system-reminder\s*\u003e/gi, '[system-reminder removed by injection guard]')
+    .replace(/\u003cpermission_denials\s*\u003e[\s\S]*?\u003c\/permission_denials\s*\u003e/gi, '[permission_denials removed by injection guard]')
     .replace(/\[(?:SYSTEM|ASSISTANT|USER)\s+OVERRIDE\]/gi, '[OVERRIDE_BLOCKED]')
     .replace(/\bNEW\s+SYSTEM\s+PROMPT\b/gi, '[BLOCKED]');
 }
@@ -96,39 +96,23 @@ function extractPromptInjectionSignals(toolCall, result) {
   const findings = [];
   const toolName = String(toolCall?.tool || 'tool');
   const rules = [
-    {
-      pattern: /ignore\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions|prompts?|rules?)/i,
-      label: 'Instruction override attempt detected'
-    },
-    {
-      pattern: /(?:reveal|show|print|leak)\s+(?:the\s+)?(?:system\s+prompt|hidden\s+prompt|developer\s+message)/i,
-      label: 'Prompt exfiltration language detected'
-    },
-    {
-      pattern: /(?:you are now|act as|pretend to be)\s+(?:a\s+)?(?:system|developer|root|jailbroken)/i,
-      label: 'Role hijacking language detected'
-    },
-    {
-      pattern: /(?:disable|bypass|override).{0,40}(?:safety|guardrail|policy|restrictions?)/i,
-      label: 'Safety bypass language detected'
-    },
-    {
-      pattern: /<tool_call\s*>|<system-reminder\s*>|<permission_denials\s*>|\[TOOL_USE_SUMMARY\]/i,
-      label: 'Control-channel tag injection detected in tool output'
-    },
-    {
-      pattern: /\[(?:SYSTEM|ASSISTANT|USER)\s+OVERRIDE\]|\bNEW\s+SYSTEM\s+PROMPT\b/i,
-      label: 'Role/system override marker detected in tool output'
-    },
-    {
-      pattern: /(?:base64|hex|rot13|url.?encod).{0,30}(?:decode|convert).{0,40}(?:instruct|prompt|command)/i,
-      label: 'Encoded instruction injection pattern detected'
-    }
+    { pattern: /ignore\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions|prompts?|rules?)/i,
+      label: 'Instruction override attempt detected' },
+    { pattern: /(?:reveal|show|print|leak)\s+(?:the\s+)?(?:system\s+prompt|hidden\s+prompt|developer\s+message)/i,
+      label: 'Prompt exfiltration language detected' },
+    { pattern: /(?:you are now|act as|pretend to be)\s+(?:a\s+)?(?:system|developer|root|jailbroken)/i,
+      label: 'Role hijacking language detected' },
+    { pattern: /(?:disable|bypass|override).{0,40}(?:safety|guardrail|policy|restrictions?)/i,
+      label: 'Safety bypass language detected' },
+    { pattern: /\u003ctool_call\s*\u003e|\u003csystem-reminder\s*\u003e|\u003cpermission_denials\s*\u003e|\[TOOL_USE_SUMMARY\]/i,
+      label: 'Control-channel tag injection detected in tool output' },
+    { pattern: /\[(?:SYSTEM|ASSISTANT|USER)\s+OVERRIDE\]|\bNEW\s+SYSTEM\s+PROMPT\b/i,
+      label: 'Role/system override marker detected in tool output' },
+    { pattern: /(?:base64|hex|rot13|url.?encod).{0,30}(?:decode|convert).{0,40}(?:instruct|prompt|command)/i,
+      label: 'Encoded instruction injection pattern detected' }
   ];
   for (const rule of rules) {
-    if (rule.pattern.test(sample)) {
-      findings.push(`${toolName}: ${rule.label}`);
-    }
+    if (rule.pattern.test(sample)) findings.push(`${toolName}: ${rule.label}`);
   }
   return findings;
 }
@@ -141,7 +125,7 @@ function applyToolResultContextBudget(call, result) {
   return compacted;
 }
 
-messages.push({ role: 'user', content: `<tool_result tool="${toolCall.tool}">\n${sanitizeToolResult(contextSafeResult)}\n</tool_result>` });
+messages.push({ role: 'user', content: `\u003ctool_result tool="${toolCall.tool}"\u003e\n${sanitizeToolResult(contextSafeResult)}\n\u003c/tool_result\u003e` });
 
 // StabilizeStringify depth guard
 function stableStringify(value, _depth = 0) {
@@ -179,7 +163,7 @@ function loadPersistedToolResultReplacements() {
       }))
       .filter(item => {
         if (!item.signature || !item.replacement) return false;
-        const injectionPattern = /<tool_call\s*>|<system-reminder\s*>|\[SYSTEM\s+OVERRIDE\]/i;
+        const injectionPattern = /\u003ctool_call\s*\u003e|\u003csystem-reminder\s*\u003e|\[SYSTEM\s+OVERRIDE\]/i;
         return !injectionPattern.test(item.replacement);
       })
       .slice(-300);
@@ -252,11 +236,10 @@ function buildRuntimeContinuationPrompt({
 
   const blocks = [];
   if (toolSummary) {
-    // Sanitize tool summary before including in continuation prompt
     blocks.push(`[TOOL_USE_SUMMARY]\n${String(sanitizeToolResult(toolSummary)).trim()}`);
   }
   if (denialLines.length) {
-    blocks.push(['<permission_denials>', ...denialLines, '</permission_denials>'].join('\n'));
+    blocks.push(['\u003cpermission_denials\u003e', ...denialLines, '\u003c/permission_denials\u003e'].join('\n'));
   }
   if (compactLines.length) {
     blocks.push(['[CONTEXT_COMPACTION]', ...compactLines].join('\n'));
@@ -280,11 +263,11 @@ function buildRuntimeContinuationPrompt({
 ## index.html — Steering UI
 
 ```html
-<button class="steering-btn" id="btn-steering-toggle" onclick="toggleSteeringUI()" title="Toggle steering input" style="display:none;padding:2px 6px;font-size:10px">⚡Steer</button>
+<button class="steering-btn" id="btn-steering-toggle" onclick="toggleSteeringUI()" title="Toggle steering input" style="display:none;padding:2px 6px;font-size:10px">Steer</button>
 
-<div class="steering-input-row" id="steering-input-row" style="display:none;margin:4px;border:1px solid var(--border);border-radius:6px;padding:4px;background:var(--bg-secondary)">
+<div class="steering-input-row" id="steering-input-row" style="display:none;margin:4px;border:1px solid var(--border);border-radius:var(--radius);padding:4px;background:var(--bg-secondary)">
   <div class="steering-container" style="display:flex;gap:4px">
-    <input type="text" id="steering-input" placeholder="Inject steering message (e.g., \"Investigate src/core/orchestrator.js first\")…">
+    <input type="text" id="steering-input" placeholder="Inject steering message">
     <button id="btn-steering-clear" onclick="clearSteering()" title="Clear steering buffer" style="padding:2px 6px;font-size:11px">Clear</button>
     <button id="btn-steering-send" onclick="sendSteering()" title="Inject steering message" style="padding:2px 6px;font-size:11px">Send</button>
   </div>
@@ -292,7 +275,6 @@ function buildRuntimeContinuationPrompt({
 </div>
 
 <script>
-  // Make steering functions globally available for external injection
   window.setSteeringUIVisible = function(visible) {
     const row = document.getElementById('steering-input-row');
     const toggleBtn = document.getElementById('btn-steering-toggle');
@@ -300,9 +282,8 @@ function buildRuntimeContinuationPrompt({
     if (toggleBtn) toggleBtn.style.display = visible ? 'inline-block' : 'none';
   };
 
-  // Toggle steering UI visibility (for slash commands or settings)
   window.toggleSteeringUI = function() {
-    const visible = !document.getElementById('steering-input-row')?.style.display === 'flex';
+    const visible = document.getElementById('steering-input-row')?.style.display !== 'flex';
     window.setSteeringUIVisible(visible);
   };
 </script>
@@ -320,32 +301,32 @@ function buildRuntimeContinuationPrompt({
 | `window.AgentSteering.send()` | Send steering message from input |
 | `window.setSteeringUIVisible(bool)` | Show/hide steering input |
 | `window.toggleSteeringUI()` | Toggle steering UI visibility |
-| `window.AgentMemory.onTurnComplete({userMessage, assistantMessage, messages})` | Post-turn memory extraction hook (pluggable) |
+| `window.AgentMemory.onTurnComplete({userMessage, assistantMessage, messages})` | Post-turn memory extraction hook |
 
 ---
 
 ## Test Plan
 
-1. **Steering injection test**: Type a message into steering input, click Send, verify the next LLM reply follows the instruction
-2. **Prompt injection test**: Try submitting a file result containing `<tool_call>` tags, verify they're stripped from history
+1. **Steering injection test**: Type message in steering input, click Send, verify next LLM reply follows instruction
+2. **Prompt injection test**: Submit file result containing `<tool_call>` tags, verify stripped from history
 3. **Calc tool test**: Submit `1+1*2`, `Object.keys()`, `eval('1+1')`, verify only first succeeds
-4. **Deep nesting test**: Submit deeply nested JSON to ensure stableStringify handles depth 12 correctly
-5. **sanitizeToolResult test**: Pass a result containing control-channel XML and verify it's stripped
+4. **Deep nesting test**: Submit deeply nested JSON, ensure stableStringify handles depth 12 correctly
+5. **sanitizeToolResult test**: Pass result with control-channel XML, verify stripped
 
 ---
 
 ## Final Notes
 
-All items from the original bug report have been addressed:
+All items from original bug report addressed:
 
-- ✅ Steering buffer wired with drain at each iteration
-- ✅ Tool call steering blocks dangerous commands and strips injected XML
-- ✅ Post-turn memory hook fires after final answer
-- ✅ sanitizeToolResult applied to all tool results entering history
-- ✅ Prompt injection detector has 7 rules (including 2 new ones)
-- ✅ stableStringify protects against stack overflow via depth guard
-- ✅ calc tool uses allowlist-based evaluation
-- ✅ loadPersistedToolResultReplacements hardened against tampering
-- ✅ buildRuntimeContinuationPrompt sanitizes toolSummary
-- ✅ summarizeContext sanitizes hist string
-- ✅ Steering UI button and input added to index.html
+- Steering buffer wired with drain at each iteration
+- Tool call steering blocks dangerous commands and strips injected XML
+- Post-turn memory hook fires after final answer
+- sanitizeToolResult applied to all tool results entering history
+- Prompt injection detector has 7 rules (2 new)
+- stableStringify protects against stack overflow via depth guard
+- calc tool uses allowlist-based evaluation
+- loadPersistedToolResultReplacements hardened against tampering
+- buildRuntimeContinuationPrompt sanitizes toolSummary
+- summarizeContext sanitizes hist string
+- Steering UI button and input added to index.html

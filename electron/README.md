@@ -1,57 +1,43 @@
 # JS Agent — Electron Desktop App
 
-This folder contains the Electron wrapper that turns the JS Agent web UI into a native desktop application.
+Electron wrapper for JS Agent web UI. Frontend requires zero changes.
 
 ## Architecture
 
-- **`electron/main.js`** — Electron main process. Starts the embedded `proxy/dev-server.js` as a child process, then loads the UI via `http://localhost:<port>`.
-- **`electron/preload.js`** — Secure preload script exposing a minimal `window.electronAPI` to the renderer.
+- `electron/main.js` — Main process. Starts embedded `proxy/dev-server.js`, loads UI via `http://localhost:<port>`
+- `electron/preload.js` — Secure preload script. Exposes minimal `window.electronAPI` to renderer
 
-The frontend code in `src/` and `index.html` requires **zero changes** — all API calls (`/api/env`, `/api/terminal`, etc.) continue to work because the UI is loaded over HTTP against the embedded server.
+All API calls (`/api/env`, `/api/terminal`, etc.) work because UI loaded over HTTP against embedded server.
 
 ## Quick Start
 
-### 1. Install dependencies
-
 ```bash
 npm install
+npm run electron          # dev mode (auto-opens DevTools)
+npm run electron:build    # build production installers
 ```
 
-### 2. Run in development
-
-```bash
-npm run electron
-```
-
-This starts the embedded server on a random free port and opens the Electron window. DevTools are auto-opened in development.
-
-### 3. Build for production
-
-```bash
-npm run electron:build
-```
-
-Outputs per-platform installers to `dist-electron/`:
+Output per-platform:
 
 | Platform | Output |
 |----------|--------|
-| Windows  | `.exe` (NSIS installer) + portable `.exe` |
+| Windows  | `.exe` (NSIS) + portable `.exe` |
 | macOS    | `.dmg` + `.zip` |
 | Linux    | `.AppImage` + `.deb` |
 
-## Native APIs exposed to renderer
+## Native APIs
 
-The preload script exposes `window.electronAPI`:
+Preload script exposes `window.electronAPI`:
 
 | Method | Description |
 |--------|-------------|
-| `getAppVersion()` | Returns the app version string |
+| `getAppVersion()` | App version string |
 | `openFileDialog(options)` | Native file-open dialog |
 | `saveFileDialog(options)` | Native save-file dialog |
-| `openPath(filePath)` | Open a file/folder with the default system app |
-| `openExternal(url)` | Open a URL in the system default browser |
+| `openPath(filePath)` | Open file/folder with default system app |
+| `openExternal(url)` | Open URL in system default browser |
 
-Example usage from frontend JS:
+Example:
 
 ```javascript
 if (window.electronAPI) {
@@ -65,9 +51,9 @@ if (window.electronAPI) {
 }
 ```
 
-## Security notes
+## Security
 
-- `contextIsolation: true` and `nodeIntegration: false` are enforced.
-- All native access goes through the preload script's `contextBridge`.
-- External links are forced to open in the system browser, not inside Electron.
-- The embedded server only binds to `127.0.0.1` (localhost) and is not reachable from other machines.
+- `contextIsolation: true`, `nodeIntegration: false`
+- All native access through preload script `contextBridge`
+- External links forced to system browser, not inside Electron
+- Embedded server binds to `127.0.0.1` only

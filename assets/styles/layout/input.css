@@ -120,7 +120,6 @@
 .attachment-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-default);
   border-radius: 4px;

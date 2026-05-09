@@ -45,8 +45,13 @@
   }
 
   function buildRuntimeContextBlock() {
-    const globalMemory = readRuntimeScopedMemory('global');
-    const projectMemory = readRuntimeScopedMemory('project');
+    const legacyGlobal = readRuntimeScopedMemory('global');
+    const legacyProject = readRuntimeScopedMemory('project');
+    const compatEntries = (window.AgentMemory?.list?.({ limit: 20 }) || [])
+      .filter(entry => (entry.tags || []).includes('compat'));
+    const compatText = compatEntries.length
+      ? compatEntries.map(e => e.text).join('\n\n')
+      : '';
     const state = window.AgentTools?.state;
     const rootSummary = state?.defaultRootId
       ? `Authorized workspace root: ${state.defaultRootId}`
@@ -54,8 +59,9 @@
 
     const sections = [
       rootSummary,
-      globalMemory ? `## Global Memory\n${globalMemory}` : '',
-      projectMemory ? `## Project Memory\n${projectMemory}` : ''
+      legacyGlobal ? `## Global Memory\n${legacyGlobal}` : '',
+      legacyProject ? `## Project Memory\n${legacyProject}` : '',
+      compatText ? `## Unified Memory\n${compatText}` : ''
     ].filter(Boolean);
 
     return sections.length ? `<runtime_context>\n${sections.join('\n\n')}\n</runtime_context>` : '';
@@ -92,6 +98,8 @@
         window.AgentMemory?.write?.({ text: `${topic ? `${topic}: ` : ''}${String(content || '').trim()}`, tags: ['compat', normalizedScope], source: 'tool', importance: 0.7 });
       } catch {}
     }
+
+    try { window.AgentRuntimeCache?.clearScope?.('memory_retrieval'); } catch {}
 
     return formatToolResult('memory_write', `Saved ${normalizedScope} memory.${stored ? `\n\n${stored.slice(0, 4000)}` : ''}`);
   }

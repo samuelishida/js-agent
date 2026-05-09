@@ -369,6 +369,7 @@
       existing.importance = Math.max(existing.importance, Math.max(0, Math.min(1, toNumber(importance, 0.5))));
       if (source && source !== 'auto') existing.source = String(source);
       saveLongTermMemoryStore(store);
+      clearRuntimeScope('memory_retrieval');
       return { saved: true, duplicate: true, entry: existing };
     }
 
@@ -387,6 +388,7 @@
 
     store.entries.unshift(entry);
     saveLongTermMemoryStore(store);
+    clearRuntimeScope('memory_retrieval');
     return { saved: true, duplicate: false, entry };
   }
 
@@ -415,7 +417,7 @@
     const usageScore = Math.min(0.2, Math.log1p(toNumber(entry.useCount, 0)) * 0.05);
     const importanceScore = Math.max(0, Math.min(1, toNumber(entry.importance, 0.4)));
 
-    return overlapScore * 0.6 + recencyScore * 0.2 + importanceScore * 0.15 + usageScore * 0.05;
+    return overlapScore * 0.7 + recencyScore * 0.1 + importanceScore * 0.15 + usageScore * 0.05;
   }
 
   function searchLongTermMemories({ query = '', limit = 8 } = {}) {
@@ -428,8 +430,16 @@
     const tokens = tokenize(normalizedQuery);
     const store = loadLongTermMemoryStore();
     const scored = store.entries
-      .map(entry => ({ entry, score: scoreMemory(entry, tokens) }))
-      .filter(item => item.score > 0.08)
+      .map(entry => {
+        const textTokens = new Set(tokenize(entry.text));
+        const tagTokens = new Set((entry.tags || []).flatMap(tag => tokenize(tag)));
+        const overlap = tokens.filter(token => textTokens.has(token) || tagTokens.has(token)).length;
+        return { entry, score: scoreMemory(entry, tokens), overlap };
+      })
+      .filter(item => {
+        if (tokens.length === 0) return true; // empty query = recency-only list flow
+        return item.overlap > 0 && item.score > 0.05;
+      })
       .sort((a, b) => b.score - a.score)
       .slice(0, max);
 
@@ -468,10 +478,17 @@
     ].join('\n');
 
     const matches = searchLongTermMemories({ query: queryContext, limit: 6 });
-    if (!matches.length) return '';
-    touchMemoryEntries(matches);
+    const compatMatches = (window.AgentMemory?.list?.({ limit: 20 }) || [])
+      .filter(entry => (entry.tags || []).includes('compat'));
 
-    const lines = matches.map((entry, index) => {
+    const combined = [...matches, ...compatMatches]
+      .filter((entry, idx, arr) => idx === arr.findIndex(e => e.id === entry.id))
+      .slice(0, 8);
+
+    if (!combined.length) return '';
+    touchMemoryEntries(combined);
+
+    const lines = combined.map((entry, index) => {
       const tags = entry.tags?.length ? ` [tags: ${entry.tags.join(', ')}]` : '';
       return `${index + 1}. ${entry.text}${tags}`;
     });
@@ -504,10 +521,10 @@
   }
 
   function extractFromTurn({ userMessage = '', assistantMessage = '' } = {}) {
-    const candidates = [
-      ...extractMemoryCandidatesFromText(userMessage),
-      ...extractMemoryCandidatesFromText(assistantMessage)
-    ];
+    let candidates = [...extractMemoryCandidatesFromText(userMessage)];
+    if (window.CONSTANTS?.ALLOW_ASSISTANT_MEMORY_EXTRACTION) {
+      candidates = candidates.concat(extractMemoryCandidatesFromText(assistantMessage));
+    }
 
     let saved = 0;
     let duplicates = 0;

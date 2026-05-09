@@ -72,9 +72,15 @@ async function agentLoop(userMessage) {
   });
 
   const Comp = window.AgentCompaction;
-  Comp?.armTimeBasedMicrocompactForTurn?.();
+  Comp?.armTimeBasedMicrocompactForTurn?.(({ messages: mcMessages }) => {
+    window.messages = mcMessages;
+    syncSessionState();
+  });
+
   const enrichedMessage = await tools.buildInitialContext(userMessage, { messages: window.messages });
-  const memoryContextBlock = window.AgentMemory?.buildContextBlock?.(userMessage, window.messages) || '';
+  const memoryBlock = window.AgentMemory?.buildContextBlock?.(userMessage, window.messages) || '';
+  const compatBlock = window.AgentToolMemory?.buildRuntimeContextBlock?.() || '';
+  const memoryContextBlock = [memoryBlock, compatBlock].filter(Boolean).join('\n\n');
   const turnInputMessage = memoryContextBlock ? `${memoryContextBlock}\n\n${enrichedMessage}` : enrichedMessage;
   throwIfStopRequested();
 
@@ -125,7 +131,7 @@ async function agentLoop(userMessage) {
       const finalMarkdown = roundResult.finalText;
       addMessage('agent', finalMarkdown, round, false, false, []);
       window.messages.push({ role: 'assistant', content: finalMarkdown });
-      const memoryDelta = maybeExtractLongTermMemory(userMessage, finalMarkdown);
+      const memoryDelta = maybeExtractLongTermMemory(userMessage, '');
       if (memoryDelta?.saved) {
         addNotice(`Memory manager: stored ${memoryDelta.saved} durable memory item(s).`);
       }
@@ -166,7 +172,8 @@ async function agentLoop(userMessage) {
     // Pre-LLM context check before force-final-answer
     const CompFinal = window.AgentCompaction;
     if (CompFinal?.preLlmContextCheck) {
-      CompFinal.preLlmContextCheck({ round: MAX_ROUNDS, ctxLimit: CTX_LIMIT });
+      const { messages: compacted } = CompFinal.preLlmContextCheck({ messages: window.messages, round: MAX_ROUNDS, ctxLimit: CTX_LIMIT });
+      window.messages = compacted;
     }
 
     const finalReply = await callLLM(window.messages, getTurnLlmCallOptions());
@@ -178,7 +185,7 @@ async function agentLoop(userMessage) {
     hideThinking();
     addMessage('agent', finalMarkdown, MAX_ROUNDS, false, false, parsedFinalReply.thinkingBlocks);
     window.messages.push({ role: 'assistant', content: finalMarkdown });
-    const memoryDelta = maybeExtractLongTermMemory(userMessage, finalMarkdown);
+    const memoryDelta = maybeExtractLongTermMemory(userMessage, '');
     if (memoryDelta?.saved) {
       addNotice(`Memory manager: stored ${memoryDelta.saved} durable memory item(s).`);
     }

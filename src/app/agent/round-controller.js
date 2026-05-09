@@ -437,11 +437,12 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
   // 1.5 Pre-LLM context check — compact before sending to LLM if needed
   const CompPre = window.AgentCompaction;
   if (CompPre?.preLlmContextCheck) {
-    const preNotes = CompPre.preLlmContextCheck({ round, ctxLimit: getCtxLimit() });
+    const { messages: preLlmMessages, notes: preNotes } = CompPre.preLlmContextCheck({ messages, round, ctxLimit: getCtxLimit() });
     if (preNotes.length) {
       for (const note of preNotes) addNotice(note);
       actions.push('pre-llm-compaction');
     }
+    messages = preLlmMessages;
   }
 
   // 2. Call LLM
@@ -546,9 +547,10 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
 
   // 7. Apply compaction
   const Comp = window.AgentCompaction;
-  const compactionNotes = Comp?.applyContextManagementPipeline
-    ? await Comp.applyContextManagementPipeline({ round, userMessage, ctxLimit: getCtxLimit() })
-    : [];
+  const { messages: compactedMessages, notes: compactionNotes } = Comp?.applyContextManagementPipeline
+    ? Comp.applyContextManagementPipeline({ messages, round, userMessage, ctxLimit: getCtxLimit() })
+    : { messages, notes: [] };
+  messages = compactedMessages;
 
   // 8. Build continuation prompt
   const { orchestrator } = getRuntimeModules();

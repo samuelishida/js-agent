@@ -189,12 +189,16 @@ function flushSaveSessions() {
  * Sync session state with active session.
  * @returns {void}
  */
-function syncSessionState() {
+function syncSessionState(contextMeta) {
   let session = getActiveSession();
   if (!session) session = createSession();
   session.updatedAt = new Date().toISOString();
   session.messages = window.messages;
   session.stats = window.sessionStats;
+  if (contextMeta) {
+    session.context = session.context || {};
+    Object.assign(session.context, contextMeta);
+  }
   scheduleSaveSessions();
   if (typeof renderSessionList === 'function') renderSessionList();
 }

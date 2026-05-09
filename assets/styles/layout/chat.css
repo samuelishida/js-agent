@@ -108,7 +108,7 @@
 
 .msg-content pre {
   background: rgba(0, 0, 0, 0.5);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   padding: var(--spacing-md);
   overflow-x: auto;
   margin: var(--spacing-sm) 0;
@@ -298,7 +298,7 @@
 }
 .html-body pre {
   background: rgba(0,0,0,0.4);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   padding: 12px;
   overflow-x: auto;
   margin: 8px 0;

@@ -3,14 +3,13 @@ button {
   font-family: var(--font-main);
   cursor: pointer;
   border: none;
-  transition: all var(--transition-fast);
 }
 
 .btn-primary {
   background: var(--accent-primary);
   color: white;
   padding: 8px 16px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   font-weight: 600;
   font-size: 14px;
   border: 1px solid transparent;
@@ -29,7 +28,7 @@ button {
   background: var(--bg-button);
   color: var(--text-primary);
   padding: 8px 16px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   border: 1px solid var(--border-default);
   font-weight: 500;
   font-size: 14px;
@@ -43,7 +42,7 @@ button {
 .btn-sm {
   padding: 6px 12px;
   font-size: 13px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
 }
 
 /* Form Elements */
@@ -54,7 +53,7 @@ select {
   background: var(--bg-secondary);
   color: var(--text-primary);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   padding: 10px 12px;
   font-family: var(--font-mono);
   font-size: 13px;
@@ -65,9 +64,9 @@ input[type="text"]:focus,
 input[type="password"]:focus,
 textarea:focus,
 select:focus {
-  outline: none;
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.1);
 }
 
 textarea {

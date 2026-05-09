@@ -43,10 +43,7 @@
   --spacing-2xl: 32px;
   
   /* Border Radius - minimal, functional only */
-  --radius-sm: 2px;
-  --radius-md: 2px;
-  --radius-lg: 2px;
-  --radius-xl: 2px;
+  --radius: 2px;
   
   /* Transitions - only for state changes */
   --transition-fast: 0.1s;

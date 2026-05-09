@@ -10,6 +10,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const isDev = !app.isPackaged;
 
+function isSafeExternalUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol === 'https:' || u.protocol === 'http:') return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 let mainWindow;
 let serverProcess;
 let serverPort = null;
@@ -118,14 +128,14 @@ function createWindow() {
 
   // Open external links in the system browser, not inside Electron
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isSafeExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (!url.startsWith('http://localhost')) {
       event.preventDefault();
-      shell.openExternal(url);
+      if (isSafeExternalUrl(url)) shell.openExternal(url);
     }
   });
 }
@@ -154,6 +164,7 @@ ipcMain.handle('shell:open-path', async (_event, filePath) => {
 });
 
 ipcMain.handle('shell:open-external', async (_event, url) => {
+  if (!isSafeExternalUrl(url)) throw new Error('Unsafe URL protocol');
   await shell.openExternal(url);
 });
 

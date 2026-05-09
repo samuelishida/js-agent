@@ -25,6 +25,17 @@ const HEALTH_PREFIX = '/api/health';
 const ENV_PREFIX = '/api/env';
 const MCP_PROXY_PREFIX = '/api/mcp-proxy';
 
+function isPathInsideRoot(root, candidate) {
+  const normalizedRoot = path.resolve(root);
+  const normalizedCandidate = path.resolve(normalizedRoot, candidate);
+  const rel = path.relative(normalizedRoot, normalizedCandidate);
+  return !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+function getOpenRouterApiKey() {
+  return process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY || '';
+}
+
 // Terminal auth token — persisted across restarts so browser sessions survive server reloads.
 // Prevents non-browser callers from running terminal commands even if they know the URL.
 const TOKEN_FILE = path.join(ROOT, '.terminal-token');
@@ -174,11 +185,8 @@ async function proxyOllama(req, res, parsedUrl) {
 
 function resolveSafeCwd(rawCwd = '') {
   const trimmed = String(rawCwd || '').trim();
-  const candidate = trimmed
-    ? path.resolve(ROOT, trimmed)
-    : ROOT;
-  const normalizedRoot = path.resolve(ROOT);
-  return candidate.startsWith(normalizedRoot) ? candidate : normalizedRoot;
+  const candidate = path.resolve(ROOT, trimmed || '.');
+  return isPathInsideRoot(ROOT, candidate) ? candidate : path.resolve(ROOT);
 }
 
 function readJsonBody(req) {
@@ -379,7 +387,7 @@ async function handleTerminalMultipart(req, res) {
         const fileMode = parseInt(String(file.mode || '0644'), 8);
         if (!filePath || !content) continue;
         const absPath = path.resolve(ROOT, filePath);
-        if (!absPath.startsWith(path.resolve(ROOT))) continue;
+        if (!isPathInsideRoot(ROOT, absPath)) continue;
         // content is base64
         try {
           const buffer = Buffer.from(content, 'base64');
@@ -434,7 +442,7 @@ async function handleDiagnostics(req, res) {
     const relPath = String(body.path || '').trim();
     const severity = String(body.severity || 'all').trim().toLowerCase();
     const absPath = relPath ? path.resolve(ROOT, relPath) : '';
-    if (absPath && !absPath.startsWith(path.resolve(ROOT))) {
+    if (absPath && !isPathInsideRoot(ROOT, absPath)) {
       send(res, 400, JSON.stringify({ error: 'path must stay within the workspace root' }), {
         'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Origin': '*'
@@ -483,7 +491,7 @@ function resolveFilePath(parsedUrl) {
   let reqPath = decodeURIComponent(parsedUrl.pathname || '/');
   if (reqPath === '/') reqPath = '/index.html';
   const abs = path.resolve(ROOT, `.${reqPath}`);
-  if (!abs.startsWith(path.resolve(ROOT))) return null;
+  if (!isPathInsideRoot(ROOT, abs)) return null;
   return abs;
 }
 
@@ -529,7 +537,7 @@ async function proxyOpenRouter(req, res, parsedUrl) {
     return;
   }
 
-  if (!process.env.OPEN_ROUTER_API_KEY) {
+  if (!getOpenRouterApiKey()) {
     send(res, 503, JSON.stringify({ error: 'OpenRouter API key not configured on server' }), {
       'Content-Type': 'application/json; charset=utf-8',
       'Access-Control-Allow-Origin': '*'
@@ -545,7 +553,7 @@ async function proxyOpenRouter(req, res, parsedUrl) {
   const headers = sanitizeHeaders(req.headers);
 
   // Inject server-side key — client never sees the raw key
-  headers.authorization = `Bearer ${process.env.OPEN_ROUTER_API_KEY}`;
+  headers.authorization = `Bearer ${getOpenRouterApiKey()}`;
   headers['http-referer'] = `http://localhost:${PORT}`;
   headers['x-title'] = 'JS Agent';
   if (body) headers['content-length'] = String(body.length);
@@ -757,7 +765,7 @@ async function handleEnv(req, res) {
     return;
   }
   const env = {
-    hasOpenRouterKey: !!process.env.OPEN_ROUTER_API_KEY,
+    hasOpenRouterKey: !!getOpenRouterApiKey(),
     terminalToken: TERMINAL_TOKEN
   };
   const corsOrigin = req.headers.origin || `http://localhost:${PORT}`;
@@ -832,8 +840,8 @@ server.listen(PORT, () => {
   if (!process.env.OLLAMA_API_KEY) {
     console.log('[dev-server] no OLLAMA_API_KEY env var detected; browser Authorization header will be forwarded if provided.');
   }
-  if (process.env.OPEN_ROUTER_API_KEY) {
-    console.log('[dev-server] OPEN_ROUTER_API_KEY detected; proxying via /api/openrouter (key never sent to browser)');
+  if (getOpenRouterApiKey()) {
+    console.log('[dev-server] OPENROUTER_API_KEY detected; proxying via /api/openrouter (key never sent to browser)');
   }
   console.log(`[dev-server] terminal auth token generated (shared via /api/env to localhost only)`);
 });

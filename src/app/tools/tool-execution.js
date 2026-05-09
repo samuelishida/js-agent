@@ -579,18 +579,14 @@
     const confirmationMsg = injectConfirmationGate(call);
     if (confirmationMsg) return confirmationMsg;
 
-    const sandboxTools = new Set(['runtime_runTerminal', 'runtime_writeFile', 'runtime_editFile', 'fs_write_file', 'fs_append_file', 'fs_delete_path']);
+    const sandboxTools = new Set(['runtime_runTerminal']);
     const useSandbox = sandboxTools.has(tool) && window.AgentWorkers?.getSandboxWorker;
     let result;
 
     if (useSandbox) {
       try {
         const sandboxToolMap = {
-          'runtime_runTerminal': 'run_terminal',
-          'runtime_writeFile': 'fswritefile',
-          'runtime_editFile': 'fswritefile',
-          'fs_write_file': 'fswritefile',
-          'fs_delete_path': 'fsdelete'
+          'runtime_runTerminal': 'run_terminal'
         };
         const sandboxResult = await window.AgentWorkers.executeSandboxed(sandboxToolMap[tool] || tool, args);
         result = typeof sandboxResult === 'string' ? sandboxResult : JSON.stringify(sandboxResult);

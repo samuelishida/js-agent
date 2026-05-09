@@ -24,7 +24,7 @@ const ESCAPE_PATTERNS = [
   /top\.window/i
 ];
 
-const ALLOWED_TOOLS = new Set(['run_terminal', 'fswritefile', 'fsdelete']);
+const ALLOWED_TOOLS = new Set(['run_terminal']);
 
 function validateMessage(msg) {
   if (!msg || typeof msg !== 'object') return { valid: false, error: 'Invalid message format' };
@@ -84,32 +84,6 @@ async function executeTerminalSandbox(args) {
   return truncate(output, 5000);
 }
 
-async function executeFileWriteSandbox(args) {
-  const { path, content } = args || {};
-  validateFilePath(path);
-  validateFileContent(content, 1048576);
-  const sanitized = sanitizeContent(content);
-  const res = await fetch('/api/files/write', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, content: sanitized })
-  });
-  return await res.json();
-}
-
-async function executeFileDeleteSandbox(args) {
-  const { path, recursive } = args || {};
-  validateFilePath(path);
-  if (path.includes('*') || path.includes('?')) throw new Error('Glob patterns not allowed');
-  if (path === '/' || /^[A-Za-z]:[/\\]?$/.test(path)) throw new Error('Root directory deletion not allowed');
-  const res = await fetch('/api/files/delete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, recursive: !!recursive })
-  });
-  return await res.json();
-}
-
 self.onmessage = async function(event) {
   const msg = event.data;
 
@@ -130,8 +104,6 @@ self.onmessage = async function(event) {
   try {
     let result;
     if (tool === 'run_terminal') result = await executeTerminalSandbox(args);
-    else if (tool === 'fswritefile') result = await executeFileWriteSandbox(args);
-    else if (tool === 'fsdelete') result = await executeFileDeleteSandbox(args);
     else { self.postMessage({ type: 'error', error: `Unknown tool: ${tool}` }); return; }
 
     self.postMessage({ type: 'result', tool, result });

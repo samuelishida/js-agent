@@ -81,4 +81,5 @@ SH.revokeTerminalAuthToken(auth.token);
 const afterRevoke = SH.validateTerminalAuthToken(auth.token);
 assert.equal(afterRevoke.valid, false, 'revoked token rejected');
 
-console.log('All security hardening tests passed ✅');
+console.log('All security hardening tests passed');
+process.exit(0);

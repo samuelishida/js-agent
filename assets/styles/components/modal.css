@@ -9,17 +9,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: fadeIn 0.2s ease;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
 
 .modal-overlay {
   position: absolute;
@@ -35,26 +26,13 @@
 .modal-content {
   position: relative;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-default);
   display: flex;
   flex-direction: column;
   max-height: 90vh;
   width: 90%;
   max-width: 500px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  animation: slideUp 0.3s ease;
-}
-
-@keyframes slideUp {
-  from {
-    transform: translateY(20px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
 }
 
 .modal-lg {
@@ -81,20 +59,13 @@
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  font-size: 20px;
+  font-size: 13px;
   cursor: pointer;
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-md);
-  transition: all var(--transition-fast);
+  padding: 4px 8px;
 }
 
 .modal-close:hover {
-  background: var(--bg-tertiary);
   color: var(--text-primary);
 }
 
@@ -182,36 +153,30 @@
 .settings-input {
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
   color: var(--text-primary);
   padding: 8px 12px;
   font-family: var(--font-mono);
   font-size: 13px;
-  transition: border-color var(--transition-fast);
 }
 
 .settings-input:focus {
   outline: none;
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.1);
 }
 
 .settings-select {
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
   color: var(--text-primary);
   padding: 8px 12px;
   font-family: var(--font-mono);
   font-size: 13px;
   cursor: pointer;
-  transition: border-color var(--transition-fast);
 }
 
 .settings-select:focus {
   outline: none;
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.1);
 }
 
 .settings-hint {
@@ -224,7 +189,6 @@
   color: var(--text-secondary);
   padding: 6px 8px;
   background: var(--bg-primary);
-  border-radius: var(--radius-md);
   border: 1px solid var(--border-light);
 }
 
@@ -232,7 +196,6 @@
   display: inline-block;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
   background: var(--text-tertiary);
   flex-shrink: 0;
 }
@@ -264,7 +227,6 @@
   width: 14px;
   height: 14px;
   background: var(--accent-primary);
-  border-radius: 50%;
   cursor: pointer;
   border: 2px solid var(--bg-secondary);
 }
@@ -273,7 +235,6 @@
   width: 14px;
   height: 14px;
   background: var(--accent-primary);
-  border-radius: 50%;
   cursor: pointer;
   border: 2px solid var(--bg-secondary);
 }
@@ -296,16 +257,13 @@
 .ctx-bar-track {
   height: 6px;
   background: var(--bg-primary);
-  border-radius: 3px;
   overflow: hidden;
   border: 1px solid var(--border-light);
 }
 
 .ctx-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--blue), var(--green));
-  border-radius: 3px;
-  transition: width 0.3s ease;
+  background: var(--accent-primary);
   width: 0%;
 }
 
@@ -319,9 +277,7 @@
 .stat-item {
   background: var(--bg-primary);
   border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
   padding: var(--spacing-md);
-  text-align: center;
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xs);
@@ -352,7 +308,6 @@
 .tool-group {
   background: var(--bg-primary);
   border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
   padding: var(--spacing-md);
 }
 
@@ -385,9 +340,7 @@
 .tool-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
   background: var(--text-tertiary);
-  transition: all var(--transition-fast);
 }
 
 .tool-item.enabled .tool-dot {

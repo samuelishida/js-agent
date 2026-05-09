@@ -40,7 +40,7 @@
 
   <!-- FOOTER -->
   <div class="sidebar-footer">
-    <button class="sidebar-btn-sm" id="settings-btn" onclick="openSettings()" title="Settings">⚙️</button>
+    <button class="sidebar-btn-sm" id="settings-btn" onclick="openSettings()" title="Settings">Settings</button>
   </div>
 </aside>
 
@@ -66,14 +66,8 @@
 <!-- MAIN CHAT -->
 <main class="chat-container" id="chat">
   <div class="empty-state" id="empty">
-    <div class="empty-logo"><img src="assets/icon.svg" alt="js-agent" width="48" height="48"></div>
-    <div class="empty-title">What can I help you with?</div>
-    <div class="empty-examples">
-      <button class="example-chip" onclick="useExample(this)">Search web for latest news</button>
-      <button class="example-chip" onclick="useExample(this)">Calculate interest on $10k savings</button>
-      <button class="example-chip" onclick="useExample(this)">Tell me today's date & time</button>
-      <button class="example-chip" onclick="useExample(this)">Help with file operations</button>
-    </div>
+    <div class="empty-title">Agent ready</div>
+    <div class="empty-sub">Enter a command to begin</div>
   </div>
   <div id="messages" class="messages-container"></div>
 </main>
@@ -86,13 +80,9 @@
               rows="1"
               onkeydown="handleKey(event)"
               oninput="autoResize(this)"></textarea>
-    <button class="btn-send" id="btn-send" onclick="sendMessage()" title="Send Message">
-      <span class="send-icon">▶</span>
-    </button>
-    <button class="btn-stop" id="btn-stop" onclick="requestStop()" title="Stop" disabled style="display:none">
-      <span>■</span>
-    </button>
-    <button class="steering-btn" id="btn-steering-toggle" onclick="toggleSteeringUI()" title="Toggle steering input" style="display:none;padding:2px 6px;font-size:10px">⚡Steer</button>
+    <button class="btn-send" id="btn-send" onclick="sendMessage()" title="Send Message">Send</button>
+    <button class="btn-stop" id="btn-stop" onclick="requestStop()" title="Stop" disabled style="display:none">Stop</button>
+    <button class="steering-btn" id="btn-steering-toggle" onclick="toggleSteeringUI()" title="Toggle steering input" style="display:none;padding:2px 6px;font-size:10px">Steer</button>
   </div>
   <div class="input-help">
     <span><kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line</span>
@@ -145,7 +135,7 @@
   <div class="modal-content modal-lg">
     <div class="modal-header">
       <h2>Settings</h2>
-      <button class="modal-close" onclick="closeSettings()">✕</button>
+      <button class="modal-close" onclick="closeSettings()">Close</button>
     </div>
     
     <div class="modal-body">

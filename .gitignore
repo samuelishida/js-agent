@@ -34,3 +34,8 @@ agent-sandbox/
 # Local progress notes (not tracked)
 progress/
 claude-code-main/
+
+# Build outputs / releases
+release/
+dist-electron/
+*.exe

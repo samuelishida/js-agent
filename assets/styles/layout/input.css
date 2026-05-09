@@ -24,9 +24,7 @@
   align-items: center;
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
   padding: var(--spacing-sm);
-  transition: border-color var(--transition-fast);
   flex: 1 1 auto;
   min-height: 44px;
   max-height: 120px;
@@ -34,7 +32,6 @@
 
 .input-wrapper:focus-within {
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.1);
 }
 
 #msg-input {
@@ -71,32 +68,24 @@
 
 /* SEND BUTTON */
 .btn-send {
-  width: 34px;
-  height: 34px;
   background: var(--accent-primary);
   border: none;
-  border-radius: var(--radius-md);
   color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all var(--transition-fast);
-  font-size: 14px;
   flex-shrink: 0;
-  min-width: 34px;
-  min-height: 34px;
+  min-width: 60px;
 }
 
 .btn-send:hover {
   background: var(--accent-hover);
-  transform: scale(1.05);
 }
 
 .btn-send:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  transform: none;
 }
 
 .send-icon {
@@ -116,19 +105,15 @@
 
 /* STOP BUTTON */
 .btn-stop {
-  width: 34px;
-  height: 34px;
   background: var(--red);
   border: none;
-  border-radius: var(--radius-md);
   color: white;
-  font-size: 13px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
-  transition: background var(--transition-fast);
+  min-width: 60px;
 }
 .btn-stop:hover { background: #c62828; }
 .btn-stop:disabled { background: var(--bg-tertiary); color: var(--text-tertiary); cursor: not-allowed; }

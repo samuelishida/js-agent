@@ -7,7 +7,6 @@
   flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
-  transition: transform 0.3s ease, min-width 0.2s ease, max-width 0.2s ease, width 0.2s ease;
   min-width: 260px;
   max-width: 260px;
   width: 260px;
@@ -48,7 +47,6 @@
 .sidebar-collapse-btn {
   background: transparent;
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 14px;
   cursor: pointer;
@@ -57,7 +55,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--transition-fast);
 }
 
 .sidebar-collapse-btn:hover {
@@ -81,10 +78,8 @@
   color: var(--text-primary);
   border: 1px solid var(--border-default);
   padding: 10px;
-  border-radius: var(--radius-md);
   font-weight: 500;
   font-size: 14px;
-  transition: all var(--transition-fast);
 }
 
 .new-chat-btn:hover {
@@ -131,12 +126,10 @@
 .session-item {
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
   padding: 8px var(--spacing-sm);
   font-size: 13px;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all var(--transition-fast);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -175,12 +168,11 @@
   font-size: 12px;
   padding: 2px 4px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--transition-fast);
+  visibility: hidden;
 }
 
 .session-item:hover .delete-btn {
-  opacity: 1;
+  visibility: visible;
 }
 
 .session-item .delete-btn:hover {
@@ -209,17 +201,15 @@
 }
 
 .sidebar-btn-sm {
-  width: 36px;
-  height: 36px;
   background: var(--bg-button);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
   color: var(--text-secondary);
-  font-size: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--transition-fast);
 }
 
 .sidebar-btn-sm:hover {
@@ -232,7 +222,6 @@
 .sidebar-open-btn {
   background: var(--bg-button);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: 14px;
   width: 30px;
@@ -242,7 +231,6 @@
   display: none;
   align-items: center;
   justify-content: center;
-  transition: all var(--transition-fast);
 }
 
 .sidebar-open-btn:hover {

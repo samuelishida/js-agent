@@ -42,15 +42,15 @@
   --spacing-xl: 24px;
   --spacing-2xl: 32px;
   
-  /* Border Radius */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  /* Border Radius - minimal, functional only */
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 2px;
   
-  /* Transitions */
-  --transition-fast: 0.15s ease;
-  --transition-normal: 0.25s ease;
+  /* Transitions - only for state changes */
+  --transition-fast: 0.1s;
+  --transition-normal: 0.15s;
 }
 
 * {

@@ -325,9 +325,7 @@
     el.className = 'thinking';
     el.id = 'thinking';
     el.innerHTML =
-      '<div class="thinking-dots">' +
-        '<div class="dot"></div><div class="dot"></div><div class="dot"></div>' +
-      '</div>' +
+      '<span class="thinking-state"></span>' +
       '<span class="thinking-label">' + escHtml(String(label || '')) + '</span>';
     var container = document.getElementById('messages') || document.getElementById('chat');
     if (container) container.appendChild(el);
@@ -640,14 +638,8 @@
         emptyEl.className = 'empty-state';
         emptyEl.id = 'empty';
         emptyEl.innerHTML =
-          '<div class="empty-logo">\u2b21</div>' +
-          '<div class="empty-title">What can I help you with?</div>' +
-          '<div class="empty-examples">' +
-            '<button class="example-chip" onclick="useExample(this)">Search web for latest news</button>' +
-            '<button class="example-chip" onclick="useExample(this)">Calculate interest on $10k savings</button>' +
-            '<button class="example-chip" onclick="useExample(this)">Tell me today\'s date & time</button>' +
-            '<button class="example-chip" onclick="useExample(this)">Help with file operations</button>' +
-          '</div>';
+          '<div class="empty-title">Agent ready</div>' +
+          '<div class="empty-sub">Enter a command to begin</div>';
         chat.insertBefore(emptyEl, container || null);
       }
       return;

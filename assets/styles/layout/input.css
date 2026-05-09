@@ -137,6 +137,7 @@
 .attachment-meta {
   font-size: 11px;
   color: var(--text-tertiary);
+  margin-left: 6px;
 }
 
 .attachment-remove {

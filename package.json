@@ -47,6 +47,10 @@
       "package.json",
       "electron/**/*"
     ],
+    "asarUnpack": [
+      "proxy",
+      "agent-sandbox"
+    ],
     "extraResources": [
       {
         "from": ".env",

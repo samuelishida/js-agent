@@ -7,8 +7,10 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = path.resolve(__dirname, '..');
 const isDev = !app.isPackaged;
+const PROJECT_ROOT = isDev
+  ? path.resolve(__dirname, '..')
+  : path.resolve(__dirname, '..', '..', 'app.asar.unpacked');
 
 function isSafeExternalUrl(url) {
   try {

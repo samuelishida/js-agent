@@ -590,6 +590,59 @@
 
       <div class="settings-divider"></div>
 
+      <!-- MCP Servers -->
+      <div class="settings-section">
+        <h3 class="settings-title">MCP Servers</h3>
+        <p class="settings-desc">Manage Model Context Protocol (MCP) servers</p>
+
+        <div id="mcp-server-list" class="mcp-server-list"></div>
+
+        <div class="settings-group" style="margin-top:12px">
+          <button class="btn-primary btn-sm" id="mcp-show-add-btn" onclick="toggleMcpAddForm()">Add Server</button>
+        </div>
+
+        <form id="mcp-add-server-form" class="mcp-add-form" style="display:none" onsubmit="onAddServerSubmit(event)">
+          <div class="settings-group">
+            <label class="settings-label">Name</label>
+            <input class="settings-input" id="mcp-add-name" type="text" placeholder="Server name" required />
+          </div>
+          <div class="settings-group">
+            <label class="settings-label">Transport</label>
+            <select class="settings-select" id="mcp-add-transport" onchange="toggleTransportFields()">
+              <option value="http">HTTP</option>
+              <option value="sse">SSE</option>
+              <option value="stdio">Stdio</option>
+            </select>
+          </div>
+          <div class="settings-group" id="mcp-add-url-group">
+            <label class="settings-label">URL</label>
+            <input class="settings-input" id="mcp-add-url" type="text" placeholder="http://localhost:3000/sse" onblur="onUrlBlur()" />
+          </div>
+          <div class="settings-group" id="mcp-add-cmd-group" style="display:none">
+            <label class="settings-label">Command</label>
+            <input class="settings-input" id="mcp-add-command" type="text" placeholder="npx" />
+          </div>
+          <div class="settings-group" id="mcp-add-args-group" style="display:none">
+            <label class="settings-label">Arguments</label>
+            <input class="settings-input" id="mcp-add-args" type="text" placeholder="-y, @modelcontextprotocol/server-filesystem" />
+            <div class="settings-hint">Comma or space separated</div>
+          </div>
+          <div class="settings-group">
+            <label class="settings-checkbox">
+              <input type="checkbox" id="mcp-add-enabled" checked />
+              <span>Enabled</span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <button class="btn-primary btn-sm" type="submit">Add</button>
+            <button class="btn-secondary btn-sm" type="button" onclick="toggleMcpAddForm()">Cancel</button>
+          </div>
+          <div id="mcp-add-error" class="mcp-error-text"></div>
+        </form>
+      </div>
+
+      <div class="settings-divider"></div>
+
       <!-- Activity Stats -->
       <div class="settings-section">
         <h3 class="settings-title">Session Activity</h3>
@@ -672,6 +725,13 @@
 <script src="src/tools/groups/data.js" defer></script>
 <script src="src/tools/groups/filesystem.js" defer></script>
 <script src="src/tools/groups/github.js" defer></script>
+
+<!-- MCP Manager modules -->
+<script src="src/app/mcp/mcp-store.js" defer></script>
+<script src="src/app/mcp/mcp-http-transport.js" defer></script>
+<script src="src/app/mcp/mcp-stdio-transport.js" defer></script>
+<script src="src/app/mcp/mcp-manager.js" defer></script>
+
 <script src="src/tools/mcp-bridge.js" defer></script>
 <script src="src/tools/index.js" defer></script>
 
@@ -705,6 +765,7 @@
 <!-- ── 8. Tool infrastructure ─────────────────────────────────────────── -->
 <script src="src/app/llm/local-backend.js" defer></script>
 <script src="src/app/ui/tools.js" defer></script>
+<script src="src/app/ui/settings-mcp.js" defer></script>
 <script src="src/app/tools/tool-execution.js" defer></script>
 
 <!-- ── 9. UI rendering (markdown, messages, sidebar) ──────────────────── -->
@@ -721,14 +782,15 @@
 <script src="src/app/llm/provider-local.js" defer></script>
 <script src="src/app/llm/llm.js" defer></script>
 <script src="src/app/llm/child-agent.js" defer></script>
-<script src="src/app/llm/mcp-client.js" defer></script>
 
 <!-- ── 11. Agent loop + extracted modules ─────────────────────────────── -->
+<script src="src/app/agent/run-graph.js" defer></script>
 <script src="src/app/agent/session-lifecycle.js" defer></script>
 <script src="src/app/agent/tool-call-repair.js" defer></script>
 <script src="src/app/agent/error-recovery.js" defer></script>
 <script src="src/app/agent/round-controller.js" defer></script>
 <script src="src/app/agent/agent.js" defer></script>
+<script src="src/app/agent/run-inspector.js" defer></script>
 <script src="src/app/app-init.js" defer></script>
 <script src="src/app/ui/ui-modern.js" defer></script>
 </body>

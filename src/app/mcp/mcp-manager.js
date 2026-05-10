@@ -7,10 +7,14 @@
 
   const Store = window.AgentMcpStore;
   const HttpTransport = window.AgentMcpHttpTransport;
+  const StdioTransport = window.AgentMcpStdioTransport;
 
   if (!Store) {
     console.warn('[MCP Manager] AgentMcpStore not found. MCP subsystem disabled.');
     return;
+  }
+  if (!StdioTransport) {
+    console.warn('[MCP Manager] AgentMcpStdioTransport not found. Stdio transport disabled.');
   }
 
   /** @type {Map<string, import('../../types/index.js').McpServerConfigV2>} */
@@ -27,6 +31,16 @@
   // ── Public API ─────────────────────────────────────────────────────────────
 
   /**
+   * Sync internal _servers map from the store.
+   * Call before any operation that reads _servers to prevent stale state.
+   */
+  function syncServersFromStore() {
+    const servers = Store.loadServers();
+    _servers.clear();
+    for (const s of servers) _servers.set(s.id, s);
+  }
+
+  /**
    * Load servers from store, migrate v1 if needed, and connect enabled servers.
    * @returns {Promise<void>}
    */
@@ -35,9 +49,7 @@
       console.log('[MCP Manager] Feature flag disabled; skipping MCP.');
       return;
     }
-    const servers = Store.loadServers();
-    _servers.clear();
-    for (const s of servers) _servers.set(s.id, s);
+    syncServersFromStore();
 
     const enabled = [..._servers.values()].filter(s => s.enabled);
     // Parallel background connect with Promise.allSettled
@@ -50,10 +62,10 @@
    * @returns {Promise<void>}
    */
   async function connect(serverId) {
+    syncServersFromStore();
     const config = _servers.get(serverId);
     if (!config) {
-      console.warn(`[MCP Manager] connect: server ${serverId} not found`);
-      return;
+      throw new Error(`Server ${serverId} not found`);
     }
     if (!config.enabled) return;
 
@@ -61,16 +73,46 @@
     const start = performance.now();
     let result;
     if (config.transport === 'stdio') {
-      // Stdio transport is implemented in Inc 6
-      _setStatus(serverId, { state: 'error', lastError: 'stdio transport not yet available', lastRefreshAt: Date.now(), latencyMs: Math.round(performance.now() - start), refreshRevision: (_status.get(serverId)?.refreshRevision || 0) + 1 });
+      if (!StdioTransport) {
+        const errStatus = {
+          state: 'error',
+          lastError: 'stdio transport not available',
+          lastRefreshAt: Date.now(),
+          latencyMs: Math.round(performance.now() - start),
+          refreshRevision: (_status.get(serverId)?.refreshRevision || 0) + 1
+        };
+        _setStatus(serverId, errStatus);
+        throw new Error('stdio transport not available');
+      }
+      result = await StdioTransport.connect(config);
+      if (result?.error) {
+        const errStatus = {
+          state: 'error',
+          lastError: result.error,
+          lastRefreshAt: Date.now(),
+          latencyMs: Math.round(performance.now() - start),
+          refreshRevision: (_status.get(serverId)?.refreshRevision || 0) + 1
+        };
+        _setStatus(serverId, errStatus);
+        throw new Error(result.error);
+      }
+      _setStatus(serverId, {
+        state: 'connected',
+        stdioSessionId: result?.sessionId,
+        protocolVersion: result?.protocolVersion,
+        serverInfo: result?.serverInfo,
+        capabilities: result?.capabilities,
+        lastRefreshAt: Date.now(),
+        latencyMs: Math.round(performance.now() - start),
+        refreshRevision: (_status.get(serverId)?.refreshRevision || 0) + 1
+      });
       return;
-    } else {
-      result = await HttpTransport.connect(config);
     }
+    result = await HttpTransport.connect(config);
     const latency = Math.round(performance.now() - start);
     if (result?.error) {
       _setStatus(serverId, { state: 'error', lastError: result.error, lastRefreshAt: Date.now(), latencyMs: latency, refreshRevision: (_status.get(serverId)?.refreshRevision || 0) + 1 });
-      return;
+      throw new Error(result.error);
     }
     _setStatus(serverId, {
       state: 'connected',
@@ -89,10 +131,16 @@
    * @returns {void}
    */
   function disconnect(serverId) {
+    syncServersFromStore();
     const st = _status.get(serverId);
     if (!st) return;
-    HttpTransport.disconnect();
-    _setStatus(serverId, { state: 'disconnected' });
+    const config = _servers.get(serverId);
+    if (config?.transport === 'stdio' && StdioTransport) {
+      StdioTransport.disconnect(config);
+    } else {
+      HttpTransport.disconnect();
+    }
+    _setStatus(serverId, { state: 'disconnected', stdioSessionId: undefined });
   }
 
   /**
@@ -101,6 +149,7 @@
    * @returns {Promise<void>}
    */
   async function reloadServer(serverId) {
+    syncServersFromStore();
     const activeRun = window.AgentRunGraph?.getActiveRun?.();
     if (activeRun?.status === 'running') {
       // Queue reload
@@ -126,6 +175,7 @@
    * @returns {Promise<void>}
    */
   async function reloadAll() {
+    syncServersFromStore();
     const enabled = [..._servers.values()].filter(s => s.enabled).map(s => s.id);
     await Promise.allSettled(enabled.map(id => reloadServer(id)));
   }
@@ -136,11 +186,13 @@
    * @returns {Promise<object[]>}
    */
   async function listTools(serverId) {
+    syncServersFromStore();
     const config = _servers.get(serverId);
-    if (!config) return [];
+    if (!config) throw new Error(`Server ${serverId} not found`);
     const cached = _status.get(serverId)?.tools;
     if (Array.isArray(cached) && cached.length > 0) return cached;
-    const tools = await HttpTransport.listTools(config);
+    const transport = _getTransport(config);
+    const tools = await transport.listTools(config);
     _setStatus(serverId, { tools });
     return tools;
   }
@@ -153,19 +205,20 @@
    * @returns {Promise<{ content?: {type:string,text?:string}[], isError?: boolean, error?: string }>}
    */
   async function callTool(serverId, toolName, args = {}) {
+    syncServersFromStore();
     const config = _servers.get(serverId);
-    if (!config) return { error: `Server ${serverId} not found` };
+    if (!config) throw new Error(`Server ${serverId} not found`);
     // Heartbeat: if stale > 60s, do a lightweight ping
     const st = _status.get(serverId);
     if (st && st.state === 'connected' && st.lastRefreshAt && (Date.now() - st.lastRefreshAt) > 60000) {
-      const ping = await HttpTransport.connect(config);
+      const ping = await _getTransport(config).connect(config);
       if (ping?.error) {
         _setStatus(serverId, { state: 'error', lastError: ping.error });
         return { error: `Server ${serverId} stale: ${ping.error}` };
       }
       _setStatus(serverId, { lastRefreshAt: Date.now() });
     }
-    return HttpTransport.callTool(config, toolName, args);
+    return _getTransport(config).callTool(config, toolName, args);
   }
 
   /**
@@ -174,6 +227,7 @@
    * @returns {import('../../types/index.js').McpServerStatus | undefined}
    */
   function getStatus(serverId) {
+    syncServersFromStore();
     return _status.get(serverId);
   }
 
@@ -197,9 +251,7 @@
   function setToolFilter(serverId, filter) {
     const ok = Store.updateServer(serverId, { toolFilter: filter });
     if (!ok) return false;
-    const servers = Store.loadServers();
-    _servers.clear();
-    for (const s of servers) _servers.set(s.id, s);
+    syncServersFromStore();
     return true;
   }
 
@@ -210,6 +262,105 @@
    */
   function getToolFilter(serverId) {
     return _servers.get(serverId)?.toolFilter;
+  }
+
+  /**
+   * Choose the right transport for a config.
+   * @param {import('../../types/index.js').McpServerConfigV2} config
+   * @returns {object}
+   */
+  function _getTransport(config) {
+    return config?.transport === 'stdio' && StdioTransport ? StdioTransport : HttpTransport;
+  }
+
+  /**
+   * List resources for a server.
+   * @param {string} serverId
+   * @returns {Promise<object[]>}
+   */
+  async function listResources(serverId) {
+    syncServersFromStore();
+    const config = _servers.get(serverId);
+    if (!config) throw new Error(`Server ${serverId} not found`);
+    const cached = _status.get(serverId)?.resources;
+    if (Array.isArray(cached) && cached.length > 0) return cached;
+    const transport = _getTransport(config);
+    const resources = await transport.listResources(config);
+    _setStatus(serverId, { resources });
+    return resources;
+  }
+
+  /**
+   * Read a resource from a server.
+   * @param {string} serverId
+   * @param {string} uri
+   * @returns {Promise<object>}
+   */
+  async function readResource(serverId, uri) {
+    syncServersFromStore();
+    const config = _servers.get(serverId);
+    if (!config) throw new Error(`Server ${serverId} not found`);
+    return _getTransport(config).readResource(config, uri);
+  }
+
+  /**
+   * List prompts for a server.
+   * @param {string} serverId
+   * @returns {Promise<object[]>}
+   */
+  async function listPrompts(serverId) {
+    syncServersFromStore();
+    const config = _servers.get(serverId);
+    if (!config) throw new Error(`Server ${serverId} not found`);
+    const cached = _status.get(serverId)?.prompts;
+    if (Array.isArray(cached) && cached.length > 0) return cached;
+    const transport = _getTransport(config);
+    const prompts = await transport.listPrompts(config);
+    _setStatus(serverId, { prompts });
+    return prompts;
+  }
+
+  /**
+   * Get a prompt from a server.
+   * @param {string} serverId
+   * @param {string} name
+   * @param {Record<string,any>} [args]
+   * @returns {Promise<object>}
+   */
+  async function getPrompt(serverId, name, args = {}) {
+    syncServersFromStore();
+    const config = _servers.get(serverId);
+    if (!config) throw new Error(`Server ${serverId} not found`);
+    return _getTransport(config).getPrompt(config, name, args);
+  }
+
+  /**
+   * Refresh a server if its cached data is stale.
+   * @param {string} serverId
+   * @returns {Promise<void>}
+   */
+  async function refreshIfNeeded(serverId) {
+    syncServersFromStore();
+    const config = _servers.get(serverId);
+    if (!config || !config.enabled) return;
+    const st = _status.get(serverId);
+    if (!st || st.state !== 'connected') {
+      await connect(serverId);
+      return;
+    }
+    const transport = _getTransport(config);
+    const [tools, resources, prompts] = await Promise.allSettled([
+      transport.listTools(config),
+      transport.listResources(config),
+      transport.listPrompts(config)
+    ]);
+    const patch = {
+      tools: tools.status === 'fulfilled' ? tools.value : st.tools,
+      resources: resources.status === 'fulfilled' ? resources.value : st.resources,
+      prompts: prompts.status === 'fulfilled' ? prompts.value : st.prompts,
+      lastRefreshAt: Date.now()
+    };
+    _setStatus(serverId, patch);
   }
 
   /**
@@ -241,6 +392,7 @@
    * @returns {import('../../types/index.js').McpServerConfigV2[]}
    */
   function getServers() {
+    syncServersFromStore();
     return [..._servers.values()];
   }
 
@@ -285,6 +437,11 @@
     reloadAll,
     listTools,
     callTool,
+    listResources,
+    readResource,
+    listPrompts,
+    getPrompt,
+    refreshIfNeeded,
     getStatus,
     subscribe,
     setToolFilter,

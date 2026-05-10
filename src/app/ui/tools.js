@@ -9,7 +9,12 @@ function renderToolGroups() {
   const host = document.getElementById('tool-groups');
   if (!host) return;
 
-  const groups = Object.values(window.AgentToolGroups || {});
+  // Use AgentTools.toolGroups as source of truth; keep legacy fallback in sync
+  const src = window.AgentTools?.toolGroups || window.AgentToolGroups || {};
+  if (window.AgentToolGroups !== src) {
+    window.AgentToolGroups = src;
+  }
+  const groups = Object.values(src);
   host.innerHTML = groups.map(group => `
     <div class="tool-group">
       <div class="tool-group-label">${escHtml(group.label)}</div>

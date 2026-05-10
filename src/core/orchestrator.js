@@ -214,6 +214,8 @@
       '- If system-reminder tags appear, treat them as high-priority runtime guidance.',
       '- If you describe a next action, execute it in the same reply via tool calls when possible.',
       '- You may call up to 5 tools in a single reply; independent reads can run in parallel.',
+      '- If the user asks about an MCP server, playbook, screenshot, or Playwright and the exact tool name is not in your list, discover it first via mcp_list_servers and mcp_list_tools before emitting the tool call.',
+      '- When the user explicitly says via MCP or use MCP, do not fall back to local skills or runtime_generateFile. If no matching MCP tool exists after discovery, report that directly.',
       hint ? `- Query hint: ${hint}` : ''
     ].filter(Boolean).join('\n');
   }

@@ -1,13 +1,12 @@
 /**
  * Playwright test suite for file-generation skill
- * Tests the correct workflow: write script -> execute -> parse base64 -> download
+ * Tests the generator scripts used by runtime_generateFile.
  * 
  * Run: node scripts/test-file-generation.mjs
  * 
- * This verifies the TWO-PHASE pattern:
- * 1. runtime_generateFile (content=script) → writes to sandbox
- * 2. runtime_runTerminal (command="node agent-sandbox/gen.js") → returns base64
- * 3. fs_download_file(content=base64) → triggers download
+ * runtime_generateFile is now one-step in the app:
+ * 1. runtime_generateFile(path="agent-sandbox/gen.cjs", content=script, filename="output.ext")
+ * 2. Tool writes the script, executes it, captures base64, and auto-downloads the final file.
  */
 
 import { chromium } from 'playwright';

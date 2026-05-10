@@ -1,11 +1,21 @@
 // src/app/mcp/mcp-http-transport.js
-// MCP HTTP transport using /api/mcp-proxy. Publishes: window.AgentMcpHttpTransport
+// MCP HTTP/SSE transport using /api/mcp-proxy and /api/mcp-sse-proxy.
+// Publishes: window.AgentMcpHttpTransport
 
 (() => {
   'use strict';
 
   const MCP_PROTOCOL_VERSION = '2024-11-05';
   const REQUEST_TIMEOUT = 15000;
+
+  /**
+   * Choose the proxy route based on transport type.
+   * @param {import('../../types/index.js').McpServerConfigV2} config
+   * @returns {string}
+   */
+  function _proxyRoute(config) {
+    return config.transport === 'sse' ? '/api/mcp-sse-proxy' : '/api/mcp-proxy';
+  }
 
   /**
    * @param {import('../../types/index.js').McpServerConfigV2} config
@@ -31,7 +41,7 @@
 
   /** @returns {void} */
   function disconnect() {
-    // HTTP transport is stateless; no-op
+    // HTTP transport is stateless; SSE sessions are managed server-side
   }
 
   /**
@@ -125,6 +135,33 @@
   }
 
   /**
+   * Detect HTML responses (e.g. VS Code "Cannot POST /sse" page) and produce
+   * an actionable error instead of "invalid JSON".
+   * @param {string} text
+   * @param {string} serverUrl
+   * @returns {Error|null}
+   */
+  function _maybeHtmlError(text, serverUrl) {
+    const trimmed = text.trim();
+    if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<!doctype')) {
+      return new Error(
+        `Server returned HTML instead of JSON. ` +
+        `This looks like an SSE endpoint (e.g. VS Code MCP). ` +
+        `Select SSE transport in settings or use the Streamable HTTP /mcp endpoint. ` +
+        `URL: ${serverUrl}`
+      );
+    }
+    if (/<html/i.test(trimmed) && /<body/i.test(trimmed)) {
+      return new Error(
+        `Server returned HTML page. ` +
+        `If this is an SSE endpoint, switch the transport to SSE in MCP settings. ` +
+        `URL: ${serverUrl}`
+      );
+    }
+    return null;
+  }
+
+  /**
    * @param {import('../../types/index.js').McpServerConfigV2} config
    * @param {string} method
    * @param {Record<string,any>} params
@@ -137,7 +174,7 @@
     const headers = { ...config.headers };
     if (authHeader) headers['Authorization'] = authHeader;
 
-    const res = await fetchWithTimeout('/api/mcp-proxy', {
+    const res = await fetchWithTimeout(_proxyRoute(config), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ serverUrl: url, method, params, headers })
@@ -147,6 +184,9 @@
     if (!res.ok) {
       throw new Error(`MCP proxy HTTP ${res.status}: ${text.slice(0, 200)}`);
     }
+    const htmlErr = _maybeHtmlError(text, url);
+    if (htmlErr) throw htmlErr;
+
     let data;
     try { data = JSON.parse(text); } catch { throw new Error(`MCP proxy returned invalid JSON: ${text.slice(0, 200)}`); }
     if (data.error) {
@@ -162,7 +202,6 @@
   function _resolveAuthHeader(config) {
     if (!config.authRef) return null;
     const ref = String(config.authRef).trim();
-    // Browser-only: try localStorage header store (v1 compat)
     if (ref.startsWith('localstorage:')) {
       const key = ref.slice('localstorage:'.length);
       try { return localStorage.getItem(key) || null; } catch { return null; }

@@ -105,7 +105,9 @@ document.addEventListener('DOMContentLoaded', () => {
   } catch {}
 
   // Discover and register MCP server tools (non-blocking; failures are logged only)
-  /** @type {any} */ (window).AgentMcpManager?.loadAndConnect?.().catch(() => {});
+  /** @type {any} */ (window).AgentMcpManager?.loadAndConnect?.()
+    .then(() => window.AgentMcpBridge?.discoverAndRegisterMcpTools?.())
+    .catch(() => {});
 
   // Auto-load built-in skills (methodology/expertise .md files)
   if (window.AgentSkillLoader) {

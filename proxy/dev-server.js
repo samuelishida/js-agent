@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { URL } from 'node:url';
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 const PORT = Number(process.env.PORT || 5500);
 const ROOT = process.cwd();
@@ -24,6 +24,9 @@ const DIAGNOSTICS_PREFIX = '/api/diagnostics';
 const HEALTH_PREFIX = '/api/health';
 const ENV_PREFIX = '/api/env';
 const MCP_PROXY_PREFIX = '/api/mcp-proxy';
+const MCP_SSE_PREFIX = '/api/mcp-sse-proxy';
+const MCP_STDIO_PREFIX = '/api/mcp-stdio';
+
 
 function isPathInsideRoot(root, candidate) {
   const normalizedRoot = path.resolve(root);
@@ -710,6 +713,309 @@ async function handleMcpProxy(req, res) {
   }
 }
 
+// ── MCP SSE proxy helpers ──────────────────────────────────────────────────
+
+/** @type {Map<string, { endpoint: string, eventSource: http.IncomingMessage, resolvers: Map<number|string, Function>, parser: import('http').IncomingMessage, createdAt: number, lastUsedAt: number }>} */
+const _sseSessions = new Map();
+const SSE_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+const SSE_MAX_SESSIONS = 20;
+const SSE_MAX_BODY_BYTES = 2 * 1024 * 1024;
+
+function _sseKey(serverUrl, authHeader) {
+  return `${serverUrl}||${authHeader || ''}`;
+}
+
+function _closeSseSession(key) {
+  const session = _sseSessions.get(key);
+  if (!session) return;
+  try { session.parser.destroy(); } catch {}
+  _sseSessions.delete(key);
+}
+
+async function handleMcpSseProxy(req, res) {
+  if (req.method === 'OPTIONS') {
+    send(res, 204, '', {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST,OPTIONS',
+      'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type',
+      'Access-Control-Max-Age': '86400'
+    });
+    return;
+  }
+  if (req.method !== 'POST') {
+    send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  if (!isLocalhostOrigin(req)) {
+    send(res, 403, JSON.stringify({ error: 'Forbidden' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  try {
+    const body = await readJsonBody(req);
+    const serverUrl = String(body.serverUrl || '').trim();
+    const method = String(body.method || '').trim();
+    const params = body.params || {};
+    const authHeader = String(body.authHeader || '').trim();
+
+    if (!serverUrl || !method) {
+      send(res, 400, JSON.stringify({ error: 'serverUrl and method are required' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+
+    const parsed = new URL(serverUrl);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      send(res, 400, JSON.stringify({ error: 'serverUrl must use http or https' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+
+    // SSRF
+    const trustedLocal = body.trustedLocal === true;
+    if (!isLocalhost(serverUrl) && isPrivateNetwork(serverUrl) && !trustedLocal) {
+      send(res, 403, JSON.stringify({ error: 'SSRF: private network targets are blocked' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+
+    const key = _sseKey(serverUrl, authHeader);
+    let session = _sseSessions.get(key);
+
+    if (session) {
+      session.lastUsedAt = Date.now();
+    } else {
+      // Open SSE GET to serverUrl
+      const upstreamModule = parsed.protocol === 'https:' ? https : http;
+      const getPath = parsed.pathname + parsed.search;
+      const getRes = await new Promise((resolve, reject) => {
+        const getReq = upstreamModule.request({
+          hostname: parsed.hostname,
+          port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+          path: getPath,
+          method: 'GET',
+          headers: {
+            'Accept': 'text/event-stream',
+            ...(authHeader ? { 'Authorization': authHeader } : {})
+          },
+          timeout: 15000
+        }, upstreamRes => {
+          if (upstreamRes.statusCode !== 200) {
+            resolve({ error: `SSE endpoint returned HTTP ${upstreamRes.statusCode}` });
+            return;
+          }
+          resolve({ ok: true, res: upstreamRes });
+        });
+        getReq.on('error', err => reject(err));
+        getReq.on('timeout', () => { getReq.destroy(); reject(new Error('SSE connect timeout')); });
+        getReq.end();
+      });
+
+      if (getRes.error) {
+        send(res, 502, JSON.stringify({ error: getRes.error }), {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Access-Control-Allow-Origin': '*'
+        });
+        return;
+      }
+
+      session = {
+        endpoint: null,
+        parser: getRes.res,
+        resolvers: new Map(),
+        createdAt: Date.now(),
+        lastUsedAt: Date.now()
+      };
+
+      // Evict oldest if over limit
+      if (_sseSessions.size >= SSE_MAX_SESSIONS) {
+        const oldest = [..._sseSessions.entries()].sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt)[0];
+        if (oldest) _closeSseSession(oldest[0]);
+      }
+      _sseSessions.set(key, session);
+
+      // Parse SSE events
+      let buffer = '';
+      getRes.res.on('data', chunk => {
+        buffer += chunk.toString();
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+        for (const evt of events) {
+          const lines = evt.split('\n');
+          let eventName = 'message';
+          let dataLines = [];
+          for (const line of lines) {
+            if (line.startsWith('event:')) eventName = line.slice('event:'.length).trim();
+            else if (line.startsWith('data:')) dataLines.push(line.slice('data:'.length).trim());
+          }
+          const data = dataLines.join('\n');
+          if (eventName === 'endpoint' && !session.endpoint) {
+            let endpoint = data;
+            // Resolve relative endpoint against server origin
+            if (endpoint && !endpoint.startsWith('http')) {
+              endpoint = new URL(endpoint, `${parsed.protocol}//${parsed.host}`).href;
+            }
+            session.endpoint = endpoint;
+            // Resolve any pending waiters for endpoint
+            const waiters = session.endpointWaiters;
+            if (waiters) {
+              for (const w of waiters) w.resolve(endpoint);
+              session.endpointWaiters = [];
+            }
+            continue;
+          }
+          if (eventName === 'message' && data) {
+            try {
+              const msg = JSON.parse(data);
+              if (msg.id !== undefined && session.resolvers.has(msg.id)) {
+                const resolve = session.resolvers.get(msg.id);
+                session.resolvers.delete(msg.id);
+                resolve({ ok: true, result: msg.result, error: msg.error });
+              }
+            } catch { /* ignore non-JSON events */ }
+          }
+        }
+      });
+
+      getRes.res.on('close', () => {
+        for (const [id, resolve] of session.resolvers) {
+          resolve({ ok: false, error: { code: -32000, message: 'SSE connection closed' } });
+        }
+        session.resolvers.clear();
+        _sseSessions.delete(key);
+      });
+
+      getRes.res.on('error', () => {
+        for (const [id, resolve] of session.resolvers) {
+          resolve({ ok: false, error: { code: -32000, message: 'SSE connection error' } });
+        }
+        session.resolvers.clear();
+        _sseSessions.delete(key);
+      });
+
+      // Wait for endpoint event
+      let endpoint = session.endpoint;
+      if (!endpoint) {
+        endpoint = await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('SSE endpoint event timeout')), 10000);
+          if (!session.endpointWaiters) session.endpointWaiters = [];
+          session.endpointWaiters.push({
+            resolve: (ep) => { clearTimeout(timer); resolve(ep); },
+            reject: (err) => { clearTimeout(timer); reject(err); }
+          });
+        });
+      }
+      session.endpoint = endpoint;
+    }
+
+    // POST JSON-RPC to endpoint
+    const reqId = body.id !== undefined ? body.id : (Date.now() + Math.floor(Math.random() * 100000));
+    const rpcBody = JSON.stringify({ jsonrpc: '2.0', id: reqId, method, params });
+    if (Buffer.byteLength(rpcBody) > SSE_MAX_BODY_BYTES) {
+      send(res, 400, JSON.stringify({ error: 'Request body too large' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+
+    const postParsed = new URL(session.endpoint);
+    const upstreamModule = postParsed.protocol === 'https:' ? https : http;
+
+    const postRes = await new Promise((resolve, reject) => {
+      const postReq = upstreamModule.request({
+        hostname: postParsed.hostname,
+        port: postParsed.port || (postParsed.protocol === 'https:' ? 443 : 80),
+        path: postParsed.pathname + postParsed.search,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(rpcBody).toString(),
+          ...(authHeader ? { 'Authorization': authHeader } : {})
+        },
+        timeout: 15000
+      }, upstreamRes => {
+        let data = '';
+        upstreamRes.on('data', chunk => { data += chunk.toString(); });
+        upstreamRes.on('end', () => {
+          // Some SSE servers return JSON-RPC directly in the POST response
+          try {
+            const msg = JSON.parse(data);
+            resolve({ ok: true, result: msg.result, error: msg.error, direct: true });
+          } catch {
+            resolve({ ok: true, result: null, error: null, direct: false });
+          }
+        });
+      });
+      postReq.on('error', err => reject(err));
+      postReq.on('timeout', () => { postReq.destroy(); reject(new Error('POST timeout')); });
+      postReq.write(rpcBody);
+      postReq.end();
+    });
+
+    if (postRes.direct && (postRes.result !== undefined || postRes.error !== undefined)) {
+      send(res, 200, JSON.stringify({ jsonrpc: '2.0', id: reqId, result: postRes.result, error: postRes.error }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+
+    // Wait for SSE response by matching id
+    const sseResult = await new Promise((resolve, reject) => {
+      session.resolvers.set(reqId, resolve);
+      const timer = setTimeout(() => {
+        session.resolvers.delete(reqId);
+        resolve({ ok: false, error: { code: -32000, message: 'SSE response timeout' } });
+      }, 15000);
+    });
+
+    if (!sseResult.ok) {
+      send(res, 502, JSON.stringify({ jsonrpc: '2.0', id: reqId, error: sseResult.error }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+
+    send(res, 200, JSON.stringify({ jsonrpc: '2.0', id: reqId, result: sseResult.result, error: sseResult.error }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Access-Control-Allow-Origin': '*'
+    });
+  } catch (error) {
+    send(res, 502, JSON.stringify({ error: `MCP SSE proxy error: ${error.message}` }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+  }
+}
+
+// Idle cleanup timer for SSE sessions
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, session] of _sseSessions) {
+    if (now - session.lastUsedAt > SSE_IDLE_TIMEOUT_MS) {
+      _closeSseSession(key);
+    }
+  }
+}, 60000);
+
 async function proxyGoogleNews(req, res, parsedUrl) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
@@ -807,6 +1113,386 @@ async function handleEnv(req, res) {
   });
 }
 
+// ── MCP stdio sidecar helpers ──────────────────────────────────────────────
+
+/** @type {Map<string, { id: string, process: import('child_process').ChildProcess, stdoutBuffer: string, stderrRing: string[], pendingResolves: Map<number, Function>, state: 'running'|'dead', createdAt: number }>} */
+const _stdioSessions = new Map();
+
+function isAllowedStdioCommand(cmd) {
+  const base = path.basename(cmd);
+  if (['node', 'python', 'python3', 'uvx'].includes(base)) return true;
+  if (cmd.startsWith('/')) return true;
+  if (/^[A-Z]:\\/i.test(cmd)) return true;
+  return false;
+}
+
+function hasShellMetacharacters(str) {
+  return /[;|&$`"<>(){}[\]*?]/.test(str);
+}
+
+async function handleMcpStdioCreate(req, res) {
+  if (req.method === 'OPTIONS') {
+    send(res, 204, '', {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST,OPTIONS',
+      'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type,authorization',
+      'Access-Control-Max-Age': '86400'
+    });
+    return;
+  }
+  if (req.method !== 'POST') {
+    send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  const authHeader = String(req.headers['authorization'] || '');
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (token !== TERMINAL_TOKEN) {
+    send(res, 401, JSON.stringify({ error: 'Unauthorized: invalid or missing terminal token' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+  if (!isLocalhostOrigin(req)) {
+    send(res, 403, JSON.stringify({ error: 'Forbidden' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  try {
+    const body = await readJsonBody(req);
+    const command = String(body.command || '').trim();
+    if (!command) {
+      send(res, 400, JSON.stringify({ error: 'command is required' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+    if (!isAllowedStdioCommand(command)) {
+      send(res, 400, JSON.stringify({ error: 'Command not allowed' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+    if (hasShellMetacharacters(command)) {
+      send(res, 400, JSON.stringify({ error: 'Command contains shell metacharacters' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+    const args = Array.isArray(body.args) ? body.args : [];
+    if (args.some(a => hasShellMetacharacters(String(a || '')))) {
+      send(res, 400, JSON.stringify({ error: 'Args contain shell metacharacters' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+
+    const cwd = resolveSafeCwd(body.cwd);
+    const env = body.env && typeof body.env === 'object' ? body.env : {};
+
+    const child = spawn(command, args, {
+      cwd,
+      env: { ...process.env, ...env },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false
+    });
+
+    const id = randomUUID();
+    /** @type {any} */
+    const session = {
+      id,
+      process: child,
+      stdoutBuffer: '',
+      stderrRing: [],
+      pendingResolves: new Map(),
+      state: 'running',
+      createdAt: Date.now()
+    };
+
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+
+    child.stdout.on('data', chunk => {
+      if (session.state === 'dead') return;
+      session.stdoutBuffer += chunk;
+      if (session.stdoutBuffer.length > 1024 * 1024) {
+        session.state = 'dead';
+        child.kill('SIGKILL');
+        for (const resolver of session.pendingResolves.values()) {
+          resolver({ jsonrpc: '2.0', error: { code: -32000, message: 'Stdout buffer exceeded 1MB' } });
+        }
+        session.pendingResolves.clear();
+        return;
+      }
+      let lines = session.stdoutBuffer.split('\n');
+      session.stdoutBuffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.id !== undefined && session.pendingResolves.has(msg.id)) {
+            const resolver = session.pendingResolves.get(msg.id);
+            session.pendingResolves.delete(msg.id);
+            resolver(msg);
+          }
+        } catch { /* not JSON-RPC, ignore */ }
+      }
+    });
+
+    child.stderr.on('data', chunk => {
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        session.stderrRing.push(line);
+        if (session.stderrRing.length > 50) session.stderrRing.shift();
+      }
+    });
+
+    child.on('error', () => {
+      session.state = 'dead';
+      for (const resolver of session.pendingResolves.values()) {
+        resolver({ jsonrpc: '2.0', error: { code: -32000, message: 'Process error' } });
+      }
+      session.pendingResolves.clear();
+    });
+
+    child.on('exit', () => {
+      session.state = 'dead';
+      for (const resolver of session.pendingResolves.values()) {
+        resolver({ jsonrpc: '2.0', error: { code: -32000, message: 'Process exited' } });
+      }
+      session.pendingResolves.clear();
+    });
+
+    _stdioSessions.set(id, session);
+    send(res, 200, JSON.stringify({ id, state: 'running' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Access-Control-Allow-Origin': '*'
+    });
+  } catch (error) {
+    send(res, 500, JSON.stringify({ error: `MCP stdio create error: ${error.message}` }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+  }
+}
+
+async function handleMcpStdioList(req, res) {
+  if (req.method === 'OPTIONS') {
+    send(res, 204, '', {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET,OPTIONS',
+      'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type,authorization',
+      'Access-Control-Max-Age': '86400'
+    });
+    return;
+  }
+  if (req.method !== 'GET') {
+    send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  const authHeader = String(req.headers['authorization'] || '');
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (token !== TERMINAL_TOKEN) {
+    send(res, 401, JSON.stringify({ error: 'Unauthorized: invalid or missing terminal token' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+  if (!isLocalhostOrigin(req)) {
+    send(res, 403, JSON.stringify({ error: 'Forbidden' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  const list = [..._stdioSessions.values()].map(s => ({
+    id: s.id,
+    command: s.process.spawnfile,
+    state: s.state,
+    createdAt: s.createdAt
+  }));
+  send(res, 200, JSON.stringify(list), {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': '*'
+  });
+}
+
+async function handleMcpStdioKill(req, res) {
+  if (req.method === 'OPTIONS') {
+    send(res, 204, '', {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST,OPTIONS',
+      'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type,authorization',
+      'Access-Control-Max-Age': '86400'
+    });
+    return;
+  }
+  if (req.method !== 'POST') {
+    send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  const authHeader = String(req.headers['authorization'] || '');
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (token !== TERMINAL_TOKEN) {
+    send(res, 401, JSON.stringify({ error: 'Unauthorized: invalid or missing terminal token' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+  if (!isLocalhostOrigin(req)) {
+    send(res, 403, JSON.stringify({ error: 'Forbidden' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  const id = req.url.split('/').pop();
+  const session = _stdioSessions.get(id);
+  if (!session) {
+    send(res, 404, JSON.stringify({ error: 'Session not found' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+  session.state = 'dead';
+  session.process.kill('SIGTERM');
+  _stdioSessions.delete(id);
+  send(res, 200, JSON.stringify({ ok: true }), {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': '*'
+  });
+}
+
+async function handleMcpStdioCall(req, res) {
+  if (req.method === 'OPTIONS') {
+    send(res, 204, '', {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST,OPTIONS',
+      'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type,authorization',
+      'Access-Control-Max-Age': '86400'
+    });
+    return;
+  }
+  if (req.method !== 'POST') {
+    send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  const authHeader = String(req.headers['authorization'] || '');
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (token !== TERMINAL_TOKEN) {
+    send(res, 401, JSON.stringify({ error: 'Unauthorized: invalid or missing terminal token' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+  if (!isLocalhostOrigin(req)) {
+    send(res, 403, JSON.stringify({ error: 'Forbidden' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  const id = req.url.split('/').pop();
+  const session = _stdioSessions.get(id);
+  if (!session) {
+    send(res, 404, JSON.stringify({ error: 'Session not found' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+  if (session.state !== 'running') {
+    send(res, 410, JSON.stringify({ error: 'Session is dead' }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return;
+  }
+
+  try {
+    const body = await readJsonBody(req);
+    const method = String(body.method || '');
+    const params = body.params || {};
+    if (!method) {
+      send(res, 400, JSON.stringify({ error: 'method is required' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+
+    const reqId = Date.now() + Math.floor(Math.random() * 100000);
+    const rpc = JSON.stringify({ jsonrpc: '2.0', id: reqId, method, params });
+
+    const promise = new Promise((resolve) => {
+      session.pendingResolves.set(reqId, resolve);
+    });
+
+    session.process.stdin.write(rpc + '\n');
+
+    const result = await Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 15000))
+    ]);
+
+    session.pendingResolves.delete(reqId);
+
+    if (result?.error) {
+      send(res, 500, JSON.stringify({ error: result.error.message || result.error }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return;
+    }
+
+    send(res, 200, JSON.stringify(result?.result ?? result), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Access-Control-Allow-Origin': '*'
+    });
+  } catch (error) {
+    send(res, 500, JSON.stringify({ error: `MCP stdio call error: ${error.message}` }), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
@@ -829,6 +1515,24 @@ const server = http.createServer(async (req, res) => {
     }
     if (parsedUrl.pathname === MCP_PROXY_PREFIX) {
       await handleMcpProxy(req, res);
+      return;
+    }
+    if (parsedUrl.pathname === MCP_SSE_PREFIX) {
+      await handleMcpSseProxy(req, res);
+      return;
+    }
+    if (parsedUrl.pathname === MCP_STDIO_PREFIX || parsedUrl.pathname.startsWith(MCP_STDIO_PREFIX + '/')) {
+      if (parsedUrl.pathname === MCP_STDIO_PREFIX + '/create') {
+        await handleMcpStdioCreate(req, res);
+      } else if (parsedUrl.pathname === MCP_STDIO_PREFIX + '/list') {
+        await handleMcpStdioList(req, res);
+      } else if (parsedUrl.pathname.startsWith(MCP_STDIO_PREFIX + '/kill/')) {
+        await handleMcpStdioKill(req, res);
+      } else if (parsedUrl.pathname.startsWith(MCP_STDIO_PREFIX + '/call/')) {
+        await handleMcpStdioCall(req, res);
+      } else {
+        send(res, 404, JSON.stringify({ error: 'Not found' }), { 'Content-Type': 'application/json; charset=utf-8' });
+      }
       return;
     }
     if (parsedUrl.pathname.startsWith(GNEWS_PREFIX)) {

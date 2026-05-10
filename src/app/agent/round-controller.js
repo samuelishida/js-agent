@@ -32,6 +32,45 @@ function drainSteering(messages) {
   return { messages: updated, steeringNotice: notice };
 }
 
+/**
+ * Detect whether the user message suggests an MCP or Playwright tool request.
+ * @param {string} userMessage
+ * @returns {boolean}
+ */
+function _userWantsMcp(userMessage) {
+  if (!userMessage) return false;
+  const text = String(userMessage).toLowerCase();
+  const actionTerms = /\b(playwright|browser screenshot|browser click|browser navigate|page source|browser automation)\b/;
+  const mcpAction = /\bmcp\b.*\b(screenshot|click|navigate|automation|browser|tool|use|call|open|run|launch|server)/;
+  return actionTerms.test(text) || mcpAction.test(text);
+}
+
+/**
+ * Detect hard MCP requests where fallback to local/browser tools is not allowed.
+ * @param {string} userMessage
+ * @returns {boolean}
+ */
+function _isStrictMcpRequest(userMessage) {
+  const text = String(userMessage || '').toLowerCase();
+  return /\b(?:via|using|use|with|through)\s+(?:playwright\s+)?mcp\b/.test(text)
+    || /\bmcp\b.*\b(?:only|required|must|via|use|using|through)\b/.test(text)
+    || /\bplaywright\s+mcp\b/.test(text);
+}
+
+/**
+ * Build a one-time nudge for MCP-specific missed actions.
+ * @param {string} userMessage
+ * @param {number} consecutiveNonActionRounds
+ * @returns {string}
+ */
+function _buildMcpNudge(userMessage, consecutiveNonActionRounds) {
+  if (consecutiveNonActionRounds !== 1) return '';
+  if (_userWantsMcp(userMessage)) {
+    return ' If you need to discover MCP/Playwright tools first, call mcp_list_servers() or mcp_list_tools().';
+  }
+  return '';
+}
+
 // Build LLM call options based on mode and recovery state.
 /**
  * Get LLM call options for the current turn.
@@ -150,9 +189,10 @@ async function tryRepairToolCalls({ userMessage, rawReply, reply, parsedReply, m
  * @param {number} opts.round
  * @param {number} opts.consecutiveNonActionRounds
  * @param {SessionMessage[]} opts.messages
+ * @param {string} [opts.userMessage]
  * @returns {{ finalAnswer: boolean, finalText?: string, messages: SessionMessage[], consecutiveNonActionRounds: number, shouldContinue?: boolean }}
  */
-function handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionRounds, messages }) {
+async function handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionRounds, messages, userMessage }) {
   const cfg = window.CONSTANTS || {};
   const cleanReply = reply.replace(getToolCallCleanupRegex(), '').trim();
   const reasoningText = (window.AgentReplyAnalysis?.extractThinkingBlocks?.(rawReply || '') || []).join('\n').trim();
@@ -207,7 +247,7 @@ function handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionRounds,
     }
     const updated = [...messages,
       { role: 'assistant', content: rawReply || cleanReply },
-      { role: 'user', content: 'Your previous reply described a next action but did not execute it. Continue now without narration: call one or more tools with complete args, or provide the final answer if no tool is needed.' }
+      { role: 'user', content: 'Your previous reply described a next action but did not execute it. Continue now without narration: call one or more tools with complete args, or provide the final answer if no tool is needed.' + _buildMcpNudge(userMessage, nextConsecutive) }
     ];
     return { finalAnswer: false, messages: updated, consecutiveNonActionRounds: nextConsecutive, shouldContinue: true };
   }
@@ -224,7 +264,48 @@ function handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionRounds,
     }
     const updated = [...messages,
       { role: 'assistant', content: rawReply || cleanReply },
-      { role: 'user', content: 'Your previous reply claimed a tool call already ran, but no valid <tool_call> block was present. Continue now with exactly one of these: (1) emit one or more valid tool calls with complete args, or (2) provide the complete final answer. Do not ask to wait for tool output.' }
+      { role: 'user', content: 'Your previous reply claimed a tool call already ran, but no valid <tool_call> block was present. Continue now with exactly one of these: (1) emit one or more valid tool calls with complete args, or (2) provide the complete final answer. Do not ask to wait for tool output.' + _buildMcpNudge(userMessage, nextConsecutive) }
+    ];
+    return { finalAnswer: false, messages: updated, consecutiveNonActionRounds: nextConsecutive, shouldContinue: true };
+  }
+
+  // MCP-specific no-action diagnostic: if user wants MCP tools but none are available,
+  // continue once with explicit MCP meta tool instructions, then final-answer with setup info.
+  if (_userWantsMcp(userMessage)) {
+    const nextConsecutive = consecutiveNonActionRounds + 1;
+    if (nextConsecutive >= 2) {
+      const hasMcpMeta = !!window.AgentTools?.registry?.mcp_list_servers;
+      const servers = window.AgentMcpManager?.getServers?.() || [];
+      const hasServers = servers.length > 0;
+      const connectedServers = servers.filter(s => {
+        const st = window.AgentMcpManager?.getStatus?.(s.id);
+        return st?.state === 'connected';
+      });
+      let explanation = 'No MCP/Playwright tools are currently available for this request. ';
+      if (!hasServers) {
+        explanation += 'Check Settings > MCP and add a Playwright MCP server to enable browser/screenshot automation.';
+      } else if (!connectedServers.length) {
+        explanation += `Configured servers (${servers.map(s=>s.name).join(', ')}) are not connected. Check their status in Settings > MCP.`;
+      } else if (!hasMcpMeta) {
+        explanation += 'MCP meta tools are not loaded; reload the page or re-enable MCP in Settings.';
+      } else {
+        // Check capability
+        const cap = window.AgentMcpBridge?.checkMcpCapability ? await window.AgentMcpBridge.checkMcpCapability('screenshot') : { available: false, matches: [] };
+        if (!cap.available) {
+          const toolNames = connectedServers.flatMap(s => {
+            const tools = window.AgentMcpManager?.getStatus?.(s.id)?.tools || [];
+            return tools.map(t => t.name);
+          }).join(', ') || 'none';
+          explanation += `Connected servers expose these tools: ${toolNames}. None provide browser/screenshot capability. Add a Playwright MCP server for screenshots.`;
+        } else {
+          explanation += 'MCP servers with screenshot capability are connected but the matching tool was not called. Try mcp_find_tools(screenshot) to locate it.';
+        }
+      }
+      return { finalAnswer: true, finalText: explanation, messages, consecutiveNonActionRounds: nextConsecutive };
+    }
+    const updated = [...messages,
+      { role: 'assistant', content: rawReply || cleanReply },
+      { role: 'user', content: 'You mentioned using an MCP tool but did not emit a valid <tool_call>. If you need to discover available MCP servers and tools, call mcp_list_servers() or mcp_list_tools(). If the user explicitly asked for MCP, do not fall back to local skills.' }
     ];
     return { finalAnswer: false, messages: updated, consecutiveNonActionRounds: nextConsecutive, shouldContinue: true };
   }
@@ -248,10 +329,17 @@ function validateToolCalls({ toolCalls, messages, userMessage }) {
   const Comp = window.AgentCompaction;
   const validToolCalls = [];
   const blockedReasons = [];
+  const strictMcp = _isStrictMcpRequest(userMessage);
 
   for (const candidateCall of toolCalls) {
     const normalizedCandidate = completeToolCallArgs(candidateCall, { messages, userMessage });
     if (!normalizedCandidate) continue;
+
+    if (strictMcp && !String(normalizedCandidate.tool || '').startsWith('mcp_')) {
+      blockedReasons.push(`strict MCP request blocked non-MCP fallback ${normalizedCandidate.tool}`);
+      addNotice(`Blocked non-MCP fallback for strict MCP request: ${normalizedCandidate.tool}`);
+      continue;
+    }
 
     const repeatState = Comp?.recordRepeatedToolCall ? Comp.recordRepeatedToolCall(normalizedCandidate) : { repeated: false };
     if (repeatState.repeated) {
@@ -560,8 +648,10 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
       toolCalls = repaired.toolCalls;
       if (graph) RG.emitEvent(graph, { type: 'repair_attempted', round, level: 'warn', message: `Tool call repair succeeded: ${repaired.toolCalls.map(c => c.tool).join(', ')}` });
     } else if (String(repaired.reply || '').trim()) {
-      addNotice('Repair pass normalized malformed output into a contract-compliant reply.');
-      if (graph) RG.emitEvent(graph, { type: 'repair_attempted', round, level: 'warn', message: 'Repair pass normalized reply (no tools)' });
+      // Repaired text exists but no tool calls extracted — still needs continuation handling
+      if (window.AgentRunGraph?.getActiveRun?.()) {
+        // Let handleNoToolCalls below decide whether this is narration or final answer
+      }
     }
   } else if (graph) {
     RG.emitEvent(graph, { type: 'tool_calls_parsed', round, level: 'info', message: `Parsed ${toolCalls.length} tool call(s): ${toolCalls.map(c => c.tool).join(', ')}` });
@@ -569,7 +659,14 @@ async function executeRound({ userMessage, messages, round, maxRounds, delay, co
 
   // 4. Handle no tool calls (final answer or continuation)
   if (!toolCalls.length) {
-    const noToolResult = handleNoToolCalls({ reply: String(repaired?.reply || reply || ''), rawReply, round, consecutiveNonActionRounds, messages });
+    const noToolResult = await handleNoToolCalls({
+      reply: String(repaired?.reply || reply || ''),
+      rawReply: repaired?.rawReply || rawReply,
+      round,
+      consecutiveNonActionRounds,
+      messages,
+      userMessage
+    });
 
     if (noToolResult.finalAnswer) {
       const finalText = noToolResult.finalText;

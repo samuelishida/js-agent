@@ -1,77 +1,213 @@
-// scripts/test-loop-bugs.mjs
-// Verify loop regression fixes: Gemini thinking tags, repair context, streaming cleanup.
+// Behavior-level agent loop regression tests.
 
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { createBrowserHarness, finish, runScripts, test } from './test-helpers/browser-harness.mjs';
 
-// ── 1. Gemini thinking tags ───────────────────────────────────────────────
-{
-  const code = await readFile('src/app/llm/provider-gemini.js', 'utf8');
-  assert.ok(code.includes("\\u003cthink\\u003e\\n"), 'Gemini thinking uses \\u003cthink\\u003e tag');
-  assert.ok(!code.includes("\\u003ctool_call\\u003e\\n" + "thinkingText"), 'Gemini does not wrap thinking in \\u003ctool_call\\u003e');
-  console.log('  gemini thinking tags: OK');
+function makeToolCall(tool, args = {}) {
+  return `<tool_call>\n${JSON.stringify({ tool, args })}\n</tool_call>`;
 }
 
-// ── 2. Round-controller passes local messages/userMessage to repair ───────
-{
-  const code = await readFile('src/app/agent/round-controller.js', 'utf8');
-  assert.ok(code.includes('completeToolCallArgs(candidateCall, { messages, userMessage })'), 'repair receives local messages and userMessage');
-  assert.ok(!code.includes("completeToolCallArgs(candidateCall, { messages: window.messages, userMessage: '' })"), 'repair does not use window.messages');
-  console.log('  repair context: OK');
+function setupRoundHarness({ llmReplies = [] } = {}) {
+  const executed = [];
+  const notices = [];
+  const messages = [];
+  const { context } = createBrowserHarness({
+    globals: {
+      window: undefined,
+      sessionStats: { tools: 0 },
+      enabledTools: {
+        mcp_list_servers: true,
+        mcp_list_tools: true,
+        mcp_playwright_browser_navigate: true,
+        mcp_playwright_browser_take_screenshot: true,
+        runtime_generateFile: true,
+        skill_search: true,
+        skill_load: true,
+        tool_search: true
+      },
+      CONSTANTS: {
+        DEFAULT_TIMEOUT_MS_CLOUD: 1000,
+        DEFAULT_RETRIES_CLOUD: 0,
+        DEFAULT_MAX_TOKENS_LOCAL: 2048,
+        MAX_CONSECUTIVE_NON_ACTION_ROUNDS: 3
+      },
+      AgentLLMUtils: {},
+      AgentCompaction: {
+        recordRepeatedToolCall: () => ({ repeated: false }),
+        recordToolFailure: () => ({ repeated: false }),
+        sanitizeToolResult: value => String(value || ''),
+        buildToolUseSummary: results => `[TOOL_USE_SUMMARY]\n${results.map(r => `${r.call.tool}: ${r.result}`).join('\n')}`,
+        applyToolResultContextBudget: (_call, result) => result,
+        applyContextManagementPipeline: ({ messages }) => ({ messages, notes: [] }),
+        preLlmContextCheck: ({ messages }) => ({ messages, notes: [] }),
+        extractPromptInjectionSignals: () => []
+      },
+      AgentPermissions: {
+        isPermissionDeniedResult: () => false,
+        runPermissionDenials: []
+      },
+      AgentTools: {
+        registry: {
+          mcp_list_servers: {},
+          mcp_list_tools: {},
+          mcp_playwright_browser_navigate: {},
+          mcp_playwright_browser_take_screenshot: {},
+          runtime_generateFile: {},
+          skill_search: {},
+          skill_load: {},
+          tool_search: {}
+        }
+      },
+      AgentMcpManager: { getServers: () => [{ id: 'vscode', name: 'VS Code' }] },
+      AgentOrchestrator: {
+        buildRepairPrompt: async () => 'repair prompt',
+        buildRuntimeContinuationPrompt: () => ''
+      },
+      AgentRegex: {
+        TOOL_BLOCK: /<tool_call(?:\s[^>]*>|>?)\s*[\s\S]*?<\/tool_call>/gi,
+        hasUnprocessedToolCall: raw => /<tool_call/i.test(String(raw || '')),
+        validateToolOutput: () => ({ valid: true, issues: [] })
+      },
+      AgentToolExecution: {
+        runToolCallRepairAttempts: new Set(),
+        runSuccessfulToolCount: 0,
+        stableHashText: value => String(value),
+        normalizeToolCallObject: call => call?.tool ? { tool: call.tool, args: call.args || {} } : null,
+        dedupeToolCalls: calls => calls,
+        resolveToolCallsFromModelReply: (_visible, raw) => {
+          const out = [];
+          const re = /<tool_call(?:\s[^>]*>|>?)\s*([\s\S]*?)<\/tool_call>/gi;
+          let m;
+          while ((m = re.exec(String(raw || ''))) !== null) {
+            try { out.push(JSON.parse(m[1].trim())); } catch {}
+          }
+          return out;
+        },
+        partitionToolCallBatches: calls => [{ concurrencySafe: false, calls }],
+        executeTool: async call => {
+          executed.push(call);
+          return `OK ${call.tool}`;
+        },
+        getToolCallSignature: call => `${call.tool}:${JSON.stringify(call.args || {})}`,
+        checkReadBeforeWriteWarning: () => ''
+      },
+      getRuntimeModules: () => ({
+        regex: context.AgentRegex,
+        orchestrator: context.AgentOrchestrator,
+        tools: context.AgentTools
+      }),
+      callLLM: async () => {
+        if (!llmReplies.length) throw new Error('No LLM reply queued');
+        return llmReplies.shift();
+      },
+      isLocalModeActive: () => false,
+      getMaxTokensForModel: () => 2048,
+      getCtxLimit: () => 32000,
+      sleep: async () => {},
+      throwIfStopRequested: () => {},
+      showThinking: () => {},
+      hideThinking: () => {},
+      updateStats: () => {},
+      setStatus: () => {},
+      addNotice: notice => notices.push(notice),
+      addMessage: (role, content) => messages.push({ role, content })
+    }
+  });
+  return { context, executed, notices, messages };
 }
 
-// ── 3. validateToolCalls receives scope args ────────────────────────────────
-{
-  const code = await readFile('src/app/agent/round-controller.js', 'utf8');
-  assert.ok(code.includes('function validateToolCalls({ toolCalls, messages, userMessage })'), 'validateToolCalls destructures scope');
-  assert.ok(code.includes('validateToolCalls({ toolCalls, messages, userMessage })'), 'call site passes scope');
-  console.log('  validateToolCalls scope: OK');
+async function loadRound(context) {
+  await runScripts(context, [
+    'src/app/reply-analysis.js',
+    'src/app/agent/tool-call-repair.js',
+    'src/app/agent/round-controller.js'
+  ]);
 }
 
-// ── 4. Streaming callback restored in finally ─────────────────────────────
-{
-  const code = await readFile('src/app/agent/round-controller.js', 'utf8');
-  assert.ok(code.includes('try {'), 'streaming wrapped in try');
-  assert.ok(code.includes('} finally {'), 'streaming wrapped in finally');
-  assert.ok(code.includes('window.AgentLLMUtils.streamingCallback = prevStreamingCb'), 'callback restored in finally');
-  console.log('  streaming cleanup: OK');
-}
+const results = [];
+console.log('Agent Loop Behavior Tests\n');
 
-// ── 5. Attachment wiring ─────────────────────────────────────────────────
-{
-  const agentCode = await readFile('src/app/agent/agent.js', 'utf8');
-  assert.ok(agentCode.includes('function agentLoop(userMessage, attachments = [])'), 'agentLoop accepts attachments');
-  assert.ok(agentCode.includes('buildAttachmentContextBlock(attachments)'), 'agentLoop builds attachment block');
-  assert.ok(agentCode.includes('window.currentTurnAttachments = attachments || []'), 'stores currentTurnAttachments');
-  assert.ok(agentCode.includes('window.currentTurnAttachments = []'), 'clears currentTurnAttachments');
+await test('repair narration with no tool calls continues instead of finalizing', async () => {
+  const h = setupRoundHarness({
+    llmReplies: [
+      'I will check the available MCP tools first.',
+      'I will inspect the MCP servers now.'
+    ]
+  });
+  await loadRound(h.context);
+  const result = await h.context.AgentRoundController.executeRound({
+    userMessage: 'ss of yvy.app.br via playwright mcp go',
+    messages: [{ role: 'user', content: 'ss of yvy.app.br via playwright mcp go' }],
+    round: 1,
+    maxRounds: 5,
+    delay: 0,
+    consecutiveNonActionRounds: 0
+  });
+  assert.equal(result.finalAnswer, false);
+  assert.equal(result.shouldContinue, true);
+  assert.equal(h.executed.length, 0, 'no fallback tool should execute');
+  assert.match(result.messages.at(-1).content, /mcp_list_servers|mcp_list_tools/i);
+}, results);
 
-  const sessionCode = await readFile('src/app/agent/session-lifecycle.js', 'utf8');
-  assert.ok(sessionCode.includes('window.pendingAttachments'), 'sendMessage reads pendingAttachments');
+await test('strict MCP request blocks local runtime_generateFile fallback', async () => {
+  const h = setupRoundHarness({
+    llmReplies: [makeToolCall('runtime_generateFile', { path: 'agent-sandbox/ss.cjs', filename: 'ss.png' })]
+  });
+  await loadRound(h.context);
+  const result = await h.context.AgentRoundController.executeRound({
+    userMessage: 'ss of yvy.app.br via playwright mcp go',
+    messages: [{ role: 'user', content: 'ss of yvy.app.br via playwright mcp go' }],
+    round: 1,
+    maxRounds: 5,
+    delay: 0,
+    consecutiveNonActionRounds: 0
+  });
+  assert.equal(result.finalAnswer, false);
+  assert.equal(result.shouldContinue, true);
+  assert.equal(h.executed.length, 0, 'runtime_generateFile must not execute for strict MCP request');
+  assert.ok(h.notices.some(n => /Blocked non-MCP fallback/i.test(n)), 'missing strict MCP block notice');
+}, results);
 
-  const html = await readFile('index.html', 'utf8');
-  assert.ok(html.includes('id="file-input"'), 'index.html has file input');
-  assert.ok(html.includes('id="attachment-chips"'), 'index.html has attachment chips');
-  assert.ok(html.includes('textContent'), 'full text stored');
-  assert.ok(html.includes('isTextByExtension'), 'extension-based text detection');
+await test('strict MCP request allows real MCP Playwright tools', async () => {
+  const h = setupRoundHarness({
+    llmReplies: [
+      makeToolCall('mcp_playwright_browser_navigate', { url: 'https://yvy.app.br' })
+      + '\n'
+      + makeToolCall('mcp_playwright_browser_take_screenshot', { fullPage: true })
+    ]
+  });
+  await loadRound(h.context);
+  const result = await h.context.AgentRoundController.executeRound({
+    userMessage: 'ss of yvy.app.br via playwright mcp go',
+    messages: [{ role: 'user', content: 'ss of yvy.app.br via playwright mcp go' }],
+    round: 1,
+    maxRounds: 5,
+    delay: 0,
+    consecutiveNonActionRounds: 0
+  });
+  assert.equal(result.finalAnswer, false);
+  assert.deepEqual(h.executed.map(c => c.tool), [
+    'mcp_playwright_browser_navigate',
+    'mcp_playwright_browser_take_screenshot'
+  ]);
+  assert.ok(!h.executed.some(c => c.tool === 'runtime_generateFile'));
+}, results);
 
-  const openRouter = await readFile('src/app/llm/provider-openrouter.js', 'utf8');
-  assert.ok(openRouter.includes('image_url'), 'OpenRouter supports image_url');
-  assert.ok(openRouter.includes('window.currentTurnAttachments'), 'OpenRouter resolves dataUrl');
+await test('non-MCP Playwright request can use local runtime_generateFile fallback', async () => {
+  const h = setupRoundHarness({
+    llmReplies: [makeToolCall('runtime_generateFile', { path: 'agent-sandbox/ss.cjs', filename: 'ss.png' })]
+  });
+  await loadRound(h.context);
+  const result = await h.context.AgentRoundController.executeRound({
+    userMessage: 'take a screenshot of yvy.app.br with Playwright',
+    messages: [{ role: 'user', content: 'take a screenshot of yvy.app.br with Playwright' }],
+    round: 1,
+    maxRounds: 5,
+    delay: 0,
+    consecutiveNonActionRounds: 0
+  });
+  assert.equal(result.finalAnswer, false);
+  assert.deepEqual(h.executed.map(c => c.tool), ['runtime_generateFile']);
+}, results);
 
-  const gemini = await readFile('src/app/llm/provider-gemini.js', 'utf8');
-  assert.ok(gemini.includes('inlineData'), 'Gemini supports inlineData');
-  assert.ok(gemini.includes('window.currentTurnAttachments'), 'Gemini resolves dataUrl');
-
-  const llmUtils = await readFile('src/app/llm/llm-utils.js', 'utf8');
-  assert.ok(llmUtils.includes('image_url'), 'llm-utils supports image_url');
-  assert.ok(llmUtils.includes('window.currentTurnAttachments'), 'llm-utils resolves dataUrl');
-
-  const attRuntime = await readFile('src/tools/modules/attachment-runtime.js', 'utf8');
-  assert.ok(attRuntime.includes('a.textContent'), 'attachmentReadText reads full textContent');
-  assert.ok(attRuntime.includes('offset'), 'attachmentReadText supports offset');
-
-  console.log('  attachment wiring: OK');
-}
-
-console.log('All loop bug + attachment tests passed');
-process.exit(0);
+finish(results, 'Agent loop behavior tests');

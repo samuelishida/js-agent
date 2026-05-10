@@ -9,6 +9,7 @@ Requirements:
 - Final answer must be Markdown only
 - If tool use is needed, return only one or more <tool_call> blocks
 - Use only tools from the available tool list
+- Do not fall back to local skills or runtime_generateFile when the user explicitly asked for MCP.
 - If the previous reply already had the right intent, preserve the intent and only fix the format
 - If no tool is needed, return the final answer directly
 - Do not invent facts, tool outputs, or file contents

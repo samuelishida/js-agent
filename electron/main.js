@@ -46,6 +46,7 @@ function isSafeExternalUrl(url) {
 /**
  * Start the embedded dev server and capture its assigned port.
  * Guards against double-start and clears state on unexpected exit.
+ * In production, spawns Electron with ELECTRON_RUN_AS_NODE=1 so it behaves as Node.js.
  * @returns {Promise<number>}
  */
 function startEmbeddedServer() {
@@ -60,8 +61,9 @@ function startEmbeddedServer() {
     const serverPath = path.join(PROJECT_ROOT, 'proxy', 'dev-server.js');
     const env = {
       ...process.env,
-      PORT: '0',               // let OS assign a free port
-      ROOT: PROJECT_ROOT        // ensure server resolves paths correctly
+      ELECTRON_RUN_AS_NODE: '1', // make Electron binary act as Node.js
+      PORT: '0',                 // let OS assign a free port
+      ROOT: PROJECT_ROOT         // ensure server resolves paths correctly
     };
 
     serverProcess = spawn(process.execPath, [serverPath], {
@@ -69,6 +71,8 @@ function startEmbeddedServer() {
       env,
       stdio: ['ignore', 'pipe', 'pipe']
     });
+
+    let stderrBuffer = '';
 
     const onStdout = (data) => {
       const text = data.toString();
@@ -87,7 +91,9 @@ function startEmbeddedServer() {
     serverProcess.stdout.on('data', onStdout);
 
     serverProcess.stderr.on('data', (data) => {
-      console.error(`[server] ${data.toString().trim()}`);
+      const text = data.toString();
+      stderrBuffer += text;
+      console.error(`[server] ${text.trim()}`);
     });
 
     serverProcess.on('error', (err) => {
@@ -101,7 +107,8 @@ function startEmbeddedServer() {
       serverProcess = null;
       serverPort = null;
       if (!serverPort) {
-        reject(new Error(`Server exited with code ${code} before binding to a port`));
+        const stderrHint = stderrBuffer ? ` Stderr: ${stderrBuffer.slice(0, 200)}` : '';
+        reject(new Error(`Server exited with code ${code} before binding to a port.${stderrHint}`));
       }
     });
 
@@ -113,7 +120,8 @@ function startEmbeddedServer() {
           serverProcess.kill();
           serverProcess = null;
         }
-        reject(new Error('Server failed to start within 15 seconds'));
+        const stderrHint = stderrBuffer ? ` Stderr: ${stderrBuffer.slice(0, 200)}` : '';
+        reject(new Error(`Server failed to start within 15 seconds.${stderrHint}`));
       }
     }, 15000);
   });

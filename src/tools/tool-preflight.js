@@ -133,7 +133,7 @@
 
     if (detectGenerationIntent(text)) {
       plan.push('runtime_generateFile', 'skill_search', 'skill_load');
-      hints.push('Binary file generation intent detected: use runtime_generateFile for DOCX/PDF/XLSX/PPTX/PNG. It auto-downloads — no second step needed. Use skill_search("file-generation") first to get the methodology.');
+      hints.push('Binary file generation intent detected: use runtime_generateFile for DOCX/PDF/XLSX/PPTX/PNG. It auto-saves — no second step needed. Use skill_search("file-generation") first to get the methodology.');
     } else if (detectSaveIntent(text)) {
       plan.push('fs_write_file', 'fs_download_file');
       hints.push('Save/export intent detected: prefer fs_write_file first; if direct filesystem access is unavailable, use fs_download_file.');

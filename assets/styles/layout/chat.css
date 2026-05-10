@@ -344,3 +344,44 @@ details[open] > .debug-summary::before { content: '[-] '; }
   max-height: 400px;
   overflow-y: auto;
 }
+
+/* RUN INSPECTOR — viewport-docked overlay */
+.run-inspector-container {
+  position: fixed;
+  right: 16px;
+  bottom: calc(80px + 16px);
+  z-index: 60;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 4px;
+  pointer-events: none;
+}
+.run-inspector-container > * {
+  pointer-events: auto;
+}
+.run-inspector-toggle {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.run-inspector-panel {
+  display: none;
+  width: 320px;
+  max-height: calc(100vh - 160px);
+  overflow: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.run-inspector-panel.open {
+  display: block;
+}

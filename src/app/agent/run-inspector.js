@@ -15,35 +15,30 @@
     let container = document.getElementById(CONTAINER_ID);
     if (container) return container;
 
-    const chat = document.getElementById('chat') || document.querySelector('.chat-container');
-    if (!chat) return null;
-
     container = document.createElement('div');
     container.id = CONTAINER_ID;
-    container.style.cssText = 'position:absolute;right:8px;top:8px;z-index:50;display:flex;flex-direction:column;align-items:flex-end;gap:4px;';
+    container.className = 'run-inspector-container';
 
     const toggle = document.createElement('button');
     toggle.id = TOGGLE_ID;
+    toggle.className = 'run-inspector-toggle';
     toggle.textContent = 'Run';
     toggle.title = 'Toggle run inspector';
-    toggle.style.cssText = 'font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);cursor:pointer;';
     toggle.onclick = () => {
       const panel = document.getElementById(PANEL_ID);
       if (panel) {
-        const next = panel.style.display === 'none' ? 'block' : 'none';
-        panel.style.display = next;
-        toggle.textContent = next === 'none' ? 'Run' : 'Close';
+        const isOpen = panel.classList.toggle('open');
+        toggle.textContent = isOpen ? 'Close' : 'Run';
       }
     };
 
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
-    panel.style.cssText = 'display:none;width:320px;max-height:420px;overflow:auto;background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:12px;line-height:1.4;box-shadow:0 4px 12px rgba(0,0,0,0.15);';
+    panel.className = 'run-inspector-panel';
 
     container.appendChild(toggle);
     container.appendChild(panel);
-    chat.style.position = 'relative';
-    chat.appendChild(container);
+    document.body.appendChild(container);
     return container;
   }
 
@@ -173,8 +168,8 @@
       return;
     }
     // Auto-expand on errors if collapsed
-    if (run?.errors?.length && panel.style.display === 'none') {
-      panel.style.display = 'block';
+    if (run?.errors?.length && !panel.classList.contains('open')) {
+      panel.classList.add('open');
       toggle.textContent = 'Close';
     }
     renderRun(run);

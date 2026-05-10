@@ -54,7 +54,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const sl = document.getElementById(def.id);
         const vl = document.getElementById(def.valId);
         if (sl) /** @type {HTMLInputElement} */ (sl).value = stored;
-        if (vl) vl.textContent = stored;
+        if (vl && def.valId !== 'val-ctx') vl.textContent = stored;
       }
     } catch {}
   }

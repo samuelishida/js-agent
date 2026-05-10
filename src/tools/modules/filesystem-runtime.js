@@ -377,7 +377,7 @@
         resolvedName = resolvedName || (path ? String(path).split(/[\\/]/).pop() : 'download.txt');
         const raw = String(content).trim();
         if (!raw) {
-          return formatToolResult('fs_download_file', 'ERROR: Content is empty. If generating files, use runtime_generateFile which auto-downloads.');
+          return formatToolResult('fs_download_file', 'ERROR: Content is empty. If generating files, use runtime_generateFile which auto-saves.');
         }
         if (isLikelyBase64(raw)) {
           const bytes = base64ToUint8Array(raw);
@@ -419,6 +419,14 @@
         return formatToolResult('fs_download_file', 'ERROR: No content or path provided.');
       }
 
+      if (window.ElectronFileSave?.isElectron?.()) {
+        const b64 = arrayBufferToBase64(await blob.arrayBuffer());
+        const result = await window.ElectronFileSave.saveGeneratedArtifact({ name: resolvedName, mimeType: blob.type || 'application/octet-stream', base64: b64 });
+        if (result.mode === 'electron') {
+          return formatToolResult('fs_download_file', `Saved ${resolvedName} to ${result.path}`);
+        }
+      }
+
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -426,7 +434,18 @@
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
 
-      return formatToolResult('fs_download_file', `Triggered browser download for ${resolvedName}`);
+      return formatToolResult('fs_download_file', `Downloaded ${resolvedName}`);
+    }
+
+    function arrayBufferToBase64(buffer) {
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const slice = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+        binary += String.fromCharCode.apply(null, slice);
+      }
+      return btoa(binary);
     }
 
     async function previewFile({ path }) {

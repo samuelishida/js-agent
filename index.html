@@ -287,6 +287,70 @@
     </div>
     
     <div class="modal-body">
+      <!-- File Access -->
+      <div class="settings-section">
+        <h3 class="settings-title">File Access</h3>
+        <p class="settings-desc">Authorize a folder for file operations</p>
+        
+        <button class="btn-primary" onclick="requestDirectoryAccess()" style="width:100%;margin-bottom:8px">Authorize Folder</button>
+        <div id="file-access-status" class="settings-status">No folder authorized</div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- MCP Servers -->
+      <div class="settings-section">
+        <h3 class="settings-title">MCP Servers</h3>
+        <p class="settings-desc">Manage Model Context Protocol (MCP) servers</p>
+
+        <div id="mcp-server-list" class="mcp-server-list"></div>
+
+        <div class="settings-group" style="margin-top:12px">
+          <button class="btn-primary btn-sm" id="mcp-show-add-btn" onclick="toggleMcpAddForm()">Add Server</button>
+        </div>
+
+        <form id="mcp-add-server-form" class="mcp-add-form" style="display:none" onsubmit="onAddServerSubmit(event)">
+          <div class="settings-group">
+            <label class="settings-label">Name</label>
+            <input class="settings-input" id="mcp-add-name" type="text" placeholder="Server name" required />
+          </div>
+          <div class="settings-group">
+            <label class="settings-label">Transport</label>
+            <select class="settings-select" id="mcp-add-transport" onchange="toggleTransportFields()">
+              <option value="http">HTTP</option>
+              <option value="sse">SSE</option>
+              <option value="stdio">Stdio</option>
+            </select>
+          </div>
+          <div class="settings-group" id="mcp-add-url-group">
+            <label class="settings-label">URL</label>
+            <input class="settings-input" id="mcp-add-url" type="text" placeholder="http://localhost:3000/sse" onblur="onUrlBlur()" />
+          </div>
+          <div class="settings-group" id="mcp-add-cmd-group" style="display:none">
+            <label class="settings-label">Command</label>
+            <input class="settings-input" id="mcp-add-command" type="text" placeholder="npx" />
+          </div>
+          <div class="settings-group" id="mcp-add-args-group" style="display:none">
+            <label class="settings-label">Arguments</label>
+            <input class="settings-input" id="mcp-add-args" type="text" placeholder="-y, @modelcontextprotocol/server-filesystem" />
+            <div class="settings-hint">Comma or space separated</div>
+          </div>
+          <div class="settings-group">
+            <label class="settings-checkbox">
+              <input type="checkbox" id="mcp-add-enabled" checked />
+              <span>Enabled</span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <button class="btn-primary btn-sm" type="submit">Add</button>
+            <button class="btn-secondary btn-sm" type="button" onclick="toggleMcpAddForm()">Cancel</button>
+          </div>
+          <div id="mcp-add-error" class="mcp-error-text"></div>
+        </form>
+      </div>
+
+      <div class="settings-divider"></div>
+
       <!-- Cloud Providers Section -->
       <div class="settings-section">
         <h3 class="settings-title">Cloud Providers</h3>
@@ -523,10 +587,10 @@
         <div class="settings-group">
           <label class="settings-label">
             Context Budget
-            <span class="settings-value" id="val-ctx">43</span>
+            <span class="settings-value" id="val-ctx">~32k tokens</span>
           </label>
           <input class="settings-slider" type="range" id="sl-ctx" min="4" max="512" value="43"
-                 oninput="document.getElementById('val-ctx').textContent=this.value;localStorage.setItem('agent_sl_ctx',this.value);updateBadge()">
+                 oninput="localStorage.setItem('agent_sl_ctx',this.value);updateBadge()">
         </div>
 
         <div class="settings-group">
@@ -547,17 +611,6 @@
             <div class="ctx-bar-fill" id="ctx-bar"></div>
           </div>
         </div>
-      </div>
-
-      <div class="settings-divider"></div>
-
-      <!-- File Access -->
-      <div class="settings-section">
-        <h3 class="settings-title">File Access</h3>
-        <p class="settings-desc">Authorize a folder for file operations</p>
-        
-        <button class="btn-primary" onclick="requestDirectoryAccess()" style="width:100%;margin-bottom:8px">Authorize Folder</button>
-        <div id="file-access-status" class="settings-status">No folder authorized</div>
       </div>
 
       <div class="settings-divider"></div>
@@ -586,59 +639,6 @@
       <div class="settings-section">
         <h3 class="settings-title">Capabilities</h3>
         <div id="tool-groups" class="tool-groups"></div>
-      </div>
-
-      <div class="settings-divider"></div>
-
-      <!-- MCP Servers -->
-      <div class="settings-section">
-        <h3 class="settings-title">MCP Servers</h3>
-        <p class="settings-desc">Manage Model Context Protocol (MCP) servers</p>
-
-        <div id="mcp-server-list" class="mcp-server-list"></div>
-
-        <div class="settings-group" style="margin-top:12px">
-          <button class="btn-primary btn-sm" id="mcp-show-add-btn" onclick="toggleMcpAddForm()">Add Server</button>
-        </div>
-
-        <form id="mcp-add-server-form" class="mcp-add-form" style="display:none" onsubmit="onAddServerSubmit(event)">
-          <div class="settings-group">
-            <label class="settings-label">Name</label>
-            <input class="settings-input" id="mcp-add-name" type="text" placeholder="Server name" required />
-          </div>
-          <div class="settings-group">
-            <label class="settings-label">Transport</label>
-            <select class="settings-select" id="mcp-add-transport" onchange="toggleTransportFields()">
-              <option value="http">HTTP</option>
-              <option value="sse">SSE</option>
-              <option value="stdio">Stdio</option>
-            </select>
-          </div>
-          <div class="settings-group" id="mcp-add-url-group">
-            <label class="settings-label">URL</label>
-            <input class="settings-input" id="mcp-add-url" type="text" placeholder="http://localhost:3000/sse" onblur="onUrlBlur()" />
-          </div>
-          <div class="settings-group" id="mcp-add-cmd-group" style="display:none">
-            <label class="settings-label">Command</label>
-            <input class="settings-input" id="mcp-add-command" type="text" placeholder="npx" />
-          </div>
-          <div class="settings-group" id="mcp-add-args-group" style="display:none">
-            <label class="settings-label">Arguments</label>
-            <input class="settings-input" id="mcp-add-args" type="text" placeholder="-y, @modelcontextprotocol/server-filesystem" />
-            <div class="settings-hint">Comma or space separated</div>
-          </div>
-          <div class="settings-group">
-            <label class="settings-checkbox">
-              <input type="checkbox" id="mcp-add-enabled" checked />
-              <span>Enabled</span>
-            </label>
-          </div>
-          <div class="settings-row">
-            <button class="btn-primary btn-sm" type="submit">Add</button>
-            <button class="btn-secondary btn-sm" type="button" onclick="toggleMcpAddForm()">Cancel</button>
-          </div>
-          <div id="mcp-add-error" class="mcp-error-text"></div>
-        </form>
       </div>
 
       <div class="settings-divider"></div>
@@ -743,6 +743,9 @@
 
 <!-- ── 6a. Browser capabilities ──────────────────────────────────────── -->
 <script src="src/app/core/browser-capabilities.js" defer></script>
+
+<!-- ── 6b. Electron file save helper ────────────────────────────────── -->
+<script src="src/app/core/electron-file-save.js" defer></script>
 
 <!-- ── 6. App state and cache ─────────────────────────────────────────── -->
 <script src="src/app/core/state.js" defer></script>

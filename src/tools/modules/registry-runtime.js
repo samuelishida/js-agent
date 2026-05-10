@@ -280,8 +280,8 @@
           }),
           defineTool({
             name: 'fs_download_file',
-            signature: 'fs_download_file(filename, content?, path?, storageKey?)',
-            description: 'Triggers a browser download. Provide filename + content (text or base64) to download without filesystem access. Provide filename + path to download a local file. Provide filename + storageKey to download from localStorage. No directory root needed when content or storageKey is provided. NOTE: Do NOT use this after runtime_generateFile — it already auto-downloads.',
+            signature: 'fs_download_file(filename, content?, path?, storageKey?, artifactId?)',
+            description: 'Saves a file to disk. In packaged Electron, saves to the app Generated Files folder; in browser, triggers a download. Provide filename + content (text or base64) to save without filesystem access. Provide filename + path to save a local file. Provide filename + storageKey to save from localStorage. No directory root needed when content or storageKey is provided. NOTE: Do NOT use this after runtime_generateFile — it already saves automatically.',
             run: handlers.fs_download_file
           }),
           defineTool({

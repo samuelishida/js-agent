@@ -576,16 +576,20 @@
     download: (id, fallbackName = '') => {
       const a = getArtifact(id);
       if (!a?.data) return false;
+      const ext = (a.name || fallbackName).split('.').pop()?.toLowerCase() || 'bin';
+      const mime = GENERATED_MIME_BY_EXT?.[ext] || a.mimeType || 'application/octet-stream';
+      const name = fallbackName || a.name || `artifact.${ext}`;
+      if (window.ElectronFileSave?.isElectron?.()) {
+        window.ElectronFileSave.saveGeneratedArtifact({ name, mimeType: mime, base64: a.data });
+        return true;
+      }
       const bytes = base64ToUint8Array(a.data);
       if (!bytes) return false;
-      const mimeMap = { docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation', pdf:'application/pdf', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp', svg:'image/svg+xml', zip:'application/zip', json:'application/json', csv:'text/csv', html:'text/html', txt:'text/plain' };
-      const ext = (a.name || fallbackName).split('.').pop()?.toLowerCase() || 'bin';
-      const mime = mimeMap[ext] || a.mimeType || 'application/octet-stream';
       const blob = new Blob([bytes], { type: mime });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = fallbackName || a.name || `artifact.${ext}`;
+      link.download = name;
       link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
@@ -675,24 +679,12 @@
     const stdoutMatch = rawOutput.match(/STDOUT:\s*([A-Za-z0-9+/=\r\n]{40,}?)(?:\r?\nSTDERR:|$)/);
     const b64 = stdoutMatch ? stdoutMatch[1].replace(/[\r\n\s]/g, '') : '';
     if (b64) {
-      // Auto-download: decode base64 and trigger browser download immediately.
-      // No second tool call needed — the file lands in the user's Downloads folder.
+      // Save via Electron IPC (packaged) or browser Blob download.
       try {
         const bytes = base64ToUint8Array(b64);
         const downloadName = resolveGeneratedDownloadName({ outputFilename, scriptPath, bytes });
         const ext = extensionOf(downloadName) || 'bin';
         const mime = GENERATED_MIME_BY_EXT[ext] || 'application/octet-stream';
-        const blob = new Blob([bytes], { type: mime });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = downloadName;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
-        // Register artifact so tools can reference it by id
         const artifact = registerArtifact({
           id: `art_gen_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
           name: downloadName,
@@ -702,7 +694,11 @@
           data: b64,
           preview: `Generated ${downloadName} (${bytes.length} bytes)`
         });
-        return formatToolResult('runtime_generateFile', `✅ Generated and auto-downloaded ${artifact.name} (${artifact.size} bytes). Artifact id: ${artifact.id}`);
+        const saveResult = await (window.ElectronFileSave?.saveGeneratedArtifact?.({ name: downloadName, mimeType: mime, base64: b64 }) || Promise.resolve({ mode: 'browser', name: downloadName, size: bytes.length }));
+        if (saveResult.mode === 'electron') {
+          return formatToolResult('runtime_generateFile', `✅ Generated and saved ${artifact.name} (${artifact.size} bytes) to ${saveResult.path}. Artifact id: ${artifact.id}`);
+        }
+        return formatToolResult('runtime_generateFile', `✅ Generated and downloaded ${artifact.name} (${artifact.size} bytes). Artifact id: ${artifact.id}`);
       } catch (e) {
         // Fallback: save to localStorage + artifact registry
         try { localStorage.setItem('__last_generated_base64__', b64); } catch {}
@@ -715,9 +711,9 @@
           size: Math.floor(b64.length * 0.75),
           source: 'runtime_generateFile',
           data: b64,
-          preview: 'Base64 fallback (auto-download failed)'
+          preview: 'Base64 fallback (save failed)'
         });
-        return formatToolResult('runtime_generateFile', `Artifact id: ${artifact.id}\n[Auto-download failed: ${e.message}. Use fs_download_file(artifactId="${artifact.id}") or storageKey="__last_generated_base64__" to download.]`);
+        return formatToolResult('runtime_generateFile', `Artifact id: ${artifact.id}\n[Save failed: ${e.message}. Use fs_download_file(artifactId="${artifact.id}") or storageKey="__last_generated_base64__" to download.]`);
       }
     }
     // If node failed, make the error actionable instead of just dumping raw output

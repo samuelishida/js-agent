@@ -49,7 +49,10 @@
     ],
     "asarUnpack": [
       "proxy",
-      "agent-sandbox"
+      "agent-sandbox",
+      "index.html",
+      "src",
+      "assets"
     ],
     "extraResources": [
       {

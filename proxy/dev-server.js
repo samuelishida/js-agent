@@ -8,8 +8,10 @@ import { spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 
 const PORT = Number(process.env.PORT || 5500);
-const ROOT = process.cwd();
-const SANDBOX_DIR = path.join(ROOT, 'agent-sandbox');
+const STATIC_ROOT = process.env.STATIC_ROOT || process.cwd();
+const RUNTIME_ROOT = process.env.RUNTIME_ROOT || process.cwd();
+const SANDBOX_DIR = path.join(RUNTIME_ROOT, 'agent-sandbox');
+const PUBLIC_DEPLOY = !!process.env.PUBLIC_DEPLOY;
 
 // Ensure sandbox directory exists for runtime_generateFile output
 try { fs.mkdirSync(SANDBOX_DIR, { recursive: true }); } catch {}
@@ -41,7 +43,7 @@ function getOpenRouterApiKey() {
 
 // Terminal auth token — persisted across restarts so browser sessions survive server reloads.
 // Prevents non-browser callers from running terminal commands even if they know the URL.
-const TOKEN_FILE = path.join(ROOT, '.terminal-token');
+const TOKEN_FILE = path.join(RUNTIME_ROOT, '.terminal-token');
 let TERMINAL_TOKEN;
 try {
   TERMINAL_TOKEN = fs.readFileSync(TOKEN_FILE, 'utf-8').trim();
@@ -71,6 +73,12 @@ function isLocalhostOrigin(req) {
   const origin = String(req.headers.origin || '').trim();
   if (!origin) return true; // no origin = same-origin or non-browser
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
+
+function localhostOriginHeaderValue(req) {
+  const origin = String(req.headers.origin || '').trim();
+  if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return origin;
+  return `http://127.0.0.1:${PORT}`;
 }
 
 const MIME_TYPES = {
@@ -136,10 +144,18 @@ function readRequestBody(req) {
 async function proxyOllama(req, res, parsedUrl) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
       'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'authorization,content-type',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin'
+    });
+    return;
+  }
+
+  if (!isLocalhostOrigin(req)) {
+    send(res, 403, JSON.stringify({ error: 'Forbidden: localhost access only' }), {
+      'Content-Type': 'application/json; charset=utf-8'
     });
     return;
   }
@@ -151,8 +167,18 @@ async function proxyOllama(req, res, parsedUrl) {
   const body = method === 'GET' || method === 'HEAD' ? null : await readRequestBody(req);
   const headers = sanitizeHeaders(req.headers);
 
-  if (!headers.authorization && process.env.OLLAMA_API_KEY) {
-    headers.authorization = `Bearer ${process.env.OLLAMA_API_KEY}`;
+  if (!headers.authorization) {
+    if (PUBLIC_DEPLOY) {
+      send(res, 401, JSON.stringify({ error: 'API key required: server-side key disabled for public deploy. Provide your own via Authorization header.' }), {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
+      });
+      return;
+    }
+    if (process.env.OLLAMA_API_KEY) {
+      headers.authorization = `Bearer ${process.env.OLLAMA_API_KEY}`;
+    }
   }
   if (body) headers['content-length'] = String(body.length);
 
@@ -170,7 +196,8 @@ async function proxyOllama(req, res, parsedUrl) {
     const contentType = upstreamRes.headers['content-type'];
     if (contentType) passHeaders['Content-Type'] = contentType;
     passHeaders['Cache-Control'] = 'no-store';
-    passHeaders['Access-Control-Allow-Origin'] = '*';
+    passHeaders['Access-Control-Allow-Origin'] = localhostOriginHeaderValue(req);
+    passHeaders['Vary'] = 'Origin';
 
     res.writeHead(upstreamRes.statusCode || 502, passHeaders);
     upstreamRes.pipe(res);
@@ -188,8 +215,8 @@ async function proxyOllama(req, res, parsedUrl) {
 
 function resolveSafeCwd(rawCwd = '') {
   const trimmed = String(rawCwd || '').trim();
-  const candidate = path.resolve(ROOT, trimmed || '.');
-  return isPathInsideRoot(ROOT, candidate) ? candidate : path.resolve(ROOT);
+  const candidate = path.resolve(RUNTIME_ROOT, trimmed || '.');
+  return isPathInsideRoot(RUNTIME_ROOT, candidate) ? candidate : path.resolve(RUNTIME_ROOT);
 }
 
 function readJsonBody(req) {
@@ -255,10 +282,11 @@ function runCommand(command, cwd, timeoutMs = 60000) {
 async function handleTerminal(req, res) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
       'Access-Control-Allow-Methods': 'POST,OPTIONS',
       'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin'
     });
     return;
   }
@@ -266,7 +294,8 @@ async function handleTerminal(req, res) {
   if (req.method !== 'POST') {
     send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -277,7 +306,8 @@ async function handleTerminal(req, res) {
   if (token !== TERMINAL_TOKEN) {
     send(res, 401, JSON.stringify({ error: 'Unauthorized: invalid or missing terminal token' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -288,21 +318,24 @@ async function handleTerminal(req, res) {
     if (!command) {
       send(res, 400, JSON.stringify({ error: 'command is required' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
     if (command.length > 4096) {
       send(res, 400, JSON.stringify({ error: 'Command too long (max 4096 chars)' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
     if (isDangerousCommand(command)) {
       send(res, 400, JSON.stringify({ error: 'Command blocked: matches dangerous pattern' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -316,12 +349,14 @@ async function handleTerminal(req, res) {
     }), {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
   } catch (error) {
     send(res, 500, JSON.stringify({ error: `Terminal error: ${error.message}` }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
   }
 }
@@ -329,10 +364,11 @@ async function handleTerminal(req, res) {
 async function handleTerminalMultipart(req, res) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
       'Access-Control-Allow-Methods': 'POST,OPTIONS',
       'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin'
     });
     return;
   }
@@ -340,7 +376,8 @@ async function handleTerminalMultipart(req, res) {
   if (req.method !== 'POST') {
     send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -351,7 +388,8 @@ async function handleTerminalMultipart(req, res) {
   if (token !== TERMINAL_TOKEN) {
     send(res, 401, JSON.stringify({ error: 'Unauthorized: invalid or missing terminal token' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -362,21 +400,24 @@ async function handleTerminalMultipart(req, res) {
     if (!command) {
       send(res, 400, JSON.stringify({ error: 'command is required' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
     if (command.length > 4096) {
       send(res, 400, JSON.stringify({ error: 'Command too long (max 4096 chars)' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
     if (isDangerousCommand(command)) {
       send(res, 400, JSON.stringify({ error: 'Command blocked: matches dangerous pattern' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -389,8 +430,8 @@ async function handleTerminalMultipart(req, res) {
         const content = String(file.content || '');
         const fileMode = parseInt(String(file.mode || '0644'), 8);
         if (!filePath || !content) continue;
-        const absPath = path.resolve(ROOT, filePath);
-        if (!isPathInsideRoot(ROOT, absPath)) continue;
+        const absPath = path.resolve(RUNTIME_ROOT, filePath);
+        if (!isPathInsideRoot(RUNTIME_ROOT, absPath)) continue;
         // content is base64
         try {
           const buffer = Buffer.from(content, 'base64');
@@ -411,12 +452,14 @@ async function handleTerminalMultipart(req, res) {
     }), {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
   } catch (error) {
     send(res, 500, JSON.stringify({ error: `Terminal error: ${error.message}` }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
   }
 }
@@ -424,10 +467,11 @@ async function handleTerminalMultipart(req, res) {
 async function handleDiagnostics(req, res) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
       'Access-Control-Allow-Methods': 'POST,OPTIONS',
       'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin'
     });
     return;
   }
@@ -435,7 +479,8 @@ async function handleDiagnostics(req, res) {
   if (req.method !== 'POST') {
     send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -444,11 +489,12 @@ async function handleDiagnostics(req, res) {
     const body = await readJsonBody(req);
     const relPath = String(body.path || '').trim();
     const severity = String(body.severity || 'all').trim().toLowerCase();
-    const absPath = relPath ? path.resolve(ROOT, relPath) : '';
-    if (absPath && !isPathInsideRoot(ROOT, absPath)) {
+    const absPath = relPath ? path.resolve(RUNTIME_ROOT, relPath) : '';
+    if (absPath && !isPathInsideRoot(RUNTIME_ROOT, absPath)) {
       send(res, 400, JSON.stringify({ error: 'path must stay within the workspace root' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -463,7 +509,7 @@ async function handleDiagnostics(req, res) {
       }
     } else if (absPath && /\.(js|cjs|mjs)$/i.test(absPath)) {
       const command = `node --check "${absPath}"`;
-      const result = await runCommand(command, ROOT, 30000);
+      const result = await runCommand(command, RUNTIME_ROOT, 30000);
       resultText = result.ok ? `No diagnostics for ${relPath}.` : result.output;
     } else {
       resultText = `No type-checking available for ${relPath}. Only .js and .json files are checked.`;
@@ -480,12 +526,14 @@ async function handleDiagnostics(req, res) {
     send(res, 200, JSON.stringify({ ok: true, result: resultText }), {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
   } catch (error) {
     send(res, 500, JSON.stringify({ error: `Diagnostics error: ${error.message}` }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
   }
 }
@@ -493,8 +541,8 @@ async function handleDiagnostics(req, res) {
 function resolveFilePath(parsedUrl) {
   let reqPath = decodeURIComponent(parsedUrl.pathname || '/');
   if (reqPath === '/') reqPath = '/index.html';
-  const abs = path.resolve(ROOT, `.${reqPath}`);
-  if (!isPathInsideRoot(ROOT, abs)) return null;
+  const abs = path.resolve(STATIC_ROOT, `.${reqPath}`);
+  if (!isPathInsideRoot(STATIC_ROOT, abs)) return null;
   return abs;
 }
 
@@ -532,18 +580,27 @@ function serveStatic(req, res, parsedUrl) {
 async function proxyOpenRouter(req, res, parsedUrl) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
       'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'authorization,content-type',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin'
     });
     return;
   }
 
-  if (!getOpenRouterApiKey()) {
-    send(res, 503, JSON.stringify({ error: 'OpenRouter API key not configured on server' }), {
+  if (!isLocalhostOrigin(req)) {
+    send(res, 403, JSON.stringify({ error: 'Forbidden: localhost access only' }), {
+      'Content-Type': 'application/json; charset=utf-8'
+    });
+    return;
+  }
+
+  if (PUBLIC_DEPLOY || !getOpenRouterApiKey()) {
+    send(res, 503, JSON.stringify({ error: 'OpenRouter server proxy disabled. Provide your own API key in client settings.' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -575,7 +632,8 @@ async function proxyOpenRouter(req, res, parsedUrl) {
     const contentType = upstreamRes.headers['content-type'];
     if (contentType) passHeaders['Content-Type'] = contentType;
     passHeaders['Cache-Control'] = 'no-store';
-    passHeaders['Access-Control-Allow-Origin'] = '*';
+    passHeaders['Access-Control-Allow-Origin'] = localhostOriginHeaderValue(req);
+    passHeaders['Vary'] = 'Origin';
     res.writeHead(upstreamRes.statusCode || 502, passHeaders);
     upstreamRes.pipe(res);
   });
@@ -613,17 +671,19 @@ function isLocalhost(url) {
 async function handleMcpProxy(req, res) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
       'Access-Control-Allow-Methods': 'POST,OPTIONS',
       'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin'
     });
     return;
   }
   if (req.method !== 'POST') {
     send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -631,7 +691,8 @@ async function handleMcpProxy(req, res) {
   if (!isLocalhostOrigin(req)) {
     send(res, 403, JSON.stringify({ error: 'Forbidden' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -646,7 +707,8 @@ async function handleMcpProxy(req, res) {
     if (!serverUrl || !method) {
       send(res, 400, JSON.stringify({ error: 'serverUrl and method are required' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -655,7 +717,8 @@ async function handleMcpProxy(req, res) {
     if (!['http:', 'https:'].includes(parsed.protocol)) {
       send(res, 400, JSON.stringify({ error: 'serverUrl must use http or https' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -665,7 +728,8 @@ async function handleMcpProxy(req, res) {
     if (!isLocalhost(serverUrl) && isPrivateNetwork(serverUrl) && !trustedLocal) {
       send(res, 403, JSON.stringify({ error: 'SSRF: private network targets are blocked' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -692,7 +756,8 @@ async function handleMcpProxy(req, res) {
         send(res, 200, data, {
           'Content-Type': 'application/json; charset=utf-8',
           'Cache-Control': 'no-store',
-          'Access-Control-Allow-Origin': '*'
+          'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+          'Vary': 'Origin'
         });
       });
     });
@@ -700,7 +765,8 @@ async function handleMcpProxy(req, res) {
     upstreamReq.on('error', err => {
       send(res, 502, JSON.stringify({ error: `MCP proxy error: ${err.message}` }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
     });
     upstreamReq.write(rpcBody);
@@ -708,7 +774,8 @@ async function handleMcpProxy(req, res) {
   } catch (error) {
     send(res, 500, JSON.stringify({ error: `MCP proxy error: ${error.message}` }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
   }
 }
@@ -735,17 +802,19 @@ function _closeSseSession(key) {
 async function handleMcpSseProxy(req, res) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
       'Access-Control-Allow-Methods': 'POST,OPTIONS',
       'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin'
     });
     return;
   }
   if (req.method !== 'POST') {
     send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -753,7 +822,8 @@ async function handleMcpSseProxy(req, res) {
   if (!isLocalhostOrigin(req)) {
     send(res, 403, JSON.stringify({ error: 'Forbidden' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -768,7 +838,8 @@ async function handleMcpSseProxy(req, res) {
     if (!serverUrl || !method) {
       send(res, 400, JSON.stringify({ error: 'serverUrl and method are required' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -777,7 +848,8 @@ async function handleMcpSseProxy(req, res) {
     if (!['http:', 'https:'].includes(parsed.protocol)) {
       send(res, 400, JSON.stringify({ error: 'serverUrl must use http or https' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -787,7 +859,8 @@ async function handleMcpSseProxy(req, res) {
     if (!isLocalhost(serverUrl) && isPrivateNetwork(serverUrl) && !trustedLocal) {
       send(res, 403, JSON.stringify({ error: 'SSRF: private network targets are blocked' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -827,7 +900,8 @@ async function handleMcpSseProxy(req, res) {
       if (getRes.error) {
         send(res, 502, JSON.stringify({ error: getRes.error }), {
           'Content-Type': 'application/json; charset=utf-8',
-          'Access-Control-Allow-Origin': '*'
+          'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+          'Vary': 'Origin'
         });
         return;
       }
@@ -927,7 +1001,8 @@ async function handleMcpSseProxy(req, res) {
     if (Buffer.byteLength(rpcBody) > SSE_MAX_BODY_BYTES) {
       send(res, 400, JSON.stringify({ error: 'Request body too large' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -970,7 +1045,8 @@ async function handleMcpSseProxy(req, res) {
       send(res, 200, JSON.stringify({ jsonrpc: '2.0', id: reqId, result: postRes.result, error: postRes.error }), {
         'Content-Type': 'application/json; charset=utf-8',
         'Cache-Control': 'no-store',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -988,7 +1064,8 @@ async function handleMcpSseProxy(req, res) {
       send(res, 502, JSON.stringify({ jsonrpc: '2.0', id: reqId, error: sseResult.error }), {
         'Content-Type': 'application/json; charset=utf-8',
         'Cache-Control': 'no-store',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -996,12 +1073,14 @@ async function handleMcpSseProxy(req, res) {
     send(res, 200, JSON.stringify({ jsonrpc: '2.0', id: reqId, result: sseResult.result, error: sseResult.error }), {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
   } catch (error) {
     send(res, 502, JSON.stringify({ error: `MCP SSE proxy error: ${error.message}` }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
   }
 }
@@ -1019,9 +1098,10 @@ setInterval(() => {
 async function proxyGoogleNews(req, res, parsedUrl) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
       'Access-Control-Allow-Methods': 'GET,OPTIONS',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin'
     });
     return;
   }
@@ -1046,7 +1126,8 @@ async function proxyGoogleNews(req, res, parsedUrl) {
     const contentType = upstreamRes.headers['content-type'];
     if (contentType) passHeaders['Content-Type'] = contentType;
     passHeaders['Cache-Control'] = 'no-store';
-    passHeaders['Access-Control-Allow-Origin'] = '*';
+    passHeaders['Access-Control-Allow-Origin'] = localhostOriginHeaderValue(req);
+    passHeaders['Vary'] = 'Origin';
     res.writeHead(upstreamRes.statusCode || 502, passHeaders);
     upstreamRes.pipe(res);
   });
@@ -1078,17 +1159,19 @@ async function handleHealth(req, res) {
 async function handleEnv(req, res) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
       'Access-Control-Allow-Methods': 'GET,OPTIONS',
       'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin'
     });
     return;
   }
   if (req.method !== 'GET') {
     send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -1133,17 +1216,19 @@ function hasShellMetacharacters(str) {
 async function handleMcpStdioCreate(req, res) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
       'Access-Control-Allow-Methods': 'POST,OPTIONS',
       'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type,authorization',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin'
     });
     return;
   }
   if (req.method !== 'POST') {
     send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -1153,14 +1238,16 @@ async function handleMcpStdioCreate(req, res) {
   if (token !== TERMINAL_TOKEN) {
     send(res, 401, JSON.stringify({ error: 'Unauthorized: invalid or missing terminal token' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
   if (!isLocalhostOrigin(req)) {
     send(res, 403, JSON.stringify({ error: 'Forbidden' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -1171,21 +1258,24 @@ async function handleMcpStdioCreate(req, res) {
     if (!command) {
       send(res, 400, JSON.stringify({ error: 'command is required' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
     if (!isAllowedStdioCommand(command)) {
       send(res, 400, JSON.stringify({ error: 'Command not allowed' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
     if (hasShellMetacharacters(command)) {
       send(res, 400, JSON.stringify({ error: 'Command contains shell metacharacters' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -1193,7 +1283,8 @@ async function handleMcpStdioCreate(req, res) {
     if (args.some(a => hasShellMetacharacters(String(a || '')))) {
       send(res, 400, JSON.stringify({ error: 'Args contain shell metacharacters' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -1279,12 +1370,14 @@ async function handleMcpStdioCreate(req, res) {
     send(res, 200, JSON.stringify({ id, state: 'running' }), {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
   } catch (error) {
     send(res, 500, JSON.stringify({ error: `MCP stdio create error: ${error.message}` }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
   }
 }
@@ -1292,17 +1385,19 @@ async function handleMcpStdioCreate(req, res) {
 async function handleMcpStdioList(req, res) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
       'Access-Control-Allow-Methods': 'GET,OPTIONS',
       'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type,authorization',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin'
     });
     return;
   }
   if (req.method !== 'GET') {
     send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -1312,14 +1407,16 @@ async function handleMcpStdioList(req, res) {
   if (token !== TERMINAL_TOKEN) {
     send(res, 401, JSON.stringify({ error: 'Unauthorized: invalid or missing terminal token' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
   if (!isLocalhostOrigin(req)) {
     send(res, 403, JSON.stringify({ error: 'Forbidden' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -1333,24 +1430,27 @@ async function handleMcpStdioList(req, res) {
   send(res, 200, JSON.stringify(list), {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
-    'Access-Control-Allow-Origin': '*'
+    'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+    'Vary': 'Origin'
   });
 }
 
 async function handleMcpStdioKill(req, res) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
       'Access-Control-Allow-Methods': 'POST,OPTIONS',
       'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type,authorization',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin'
     });
     return;
   }
   if (req.method !== 'POST') {
     send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -1360,14 +1460,16 @@ async function handleMcpStdioKill(req, res) {
   if (token !== TERMINAL_TOKEN) {
     send(res, 401, JSON.stringify({ error: 'Unauthorized: invalid or missing terminal token' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
   if (!isLocalhostOrigin(req)) {
     send(res, 403, JSON.stringify({ error: 'Forbidden' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -1377,7 +1479,8 @@ async function handleMcpStdioKill(req, res) {
   if (!session) {
     send(res, 404, JSON.stringify({ error: 'Session not found' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -1387,24 +1490,27 @@ async function handleMcpStdioKill(req, res) {
   send(res, 200, JSON.stringify({ ok: true }), {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
-    'Access-Control-Allow-Origin': '*'
+    'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+    'Vary': 'Origin'
   });
 }
 
 async function handleMcpStdioCall(req, res) {
   if (req.method === 'OPTIONS') {
     send(res, 204, '', {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
       'Access-Control-Allow-Methods': 'POST,OPTIONS',
       'Access-Control-Allow-Headers': req.headers['access-control-request-headers'] || 'content-type,authorization',
-      'Access-Control-Max-Age': '86400'
+      'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin'
     });
     return;
   }
   if (req.method !== 'POST') {
     send(res, 405, JSON.stringify({ error: 'Method not allowed' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -1414,14 +1520,16 @@ async function handleMcpStdioCall(req, res) {
   if (token !== TERMINAL_TOKEN) {
     send(res, 401, JSON.stringify({ error: 'Unauthorized: invalid or missing terminal token' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
   if (!isLocalhostOrigin(req)) {
     send(res, 403, JSON.stringify({ error: 'Forbidden' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -1431,14 +1539,16 @@ async function handleMcpStdioCall(req, res) {
   if (!session) {
     send(res, 404, JSON.stringify({ error: 'Session not found' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
   if (session.state !== 'running') {
     send(res, 410, JSON.stringify({ error: 'Session is dead' }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
     return;
   }
@@ -1450,7 +1560,8 @@ async function handleMcpStdioCall(req, res) {
     if (!method) {
       send(res, 400, JSON.stringify({ error: 'method is required' }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -1475,7 +1586,8 @@ async function handleMcpStdioCall(req, res) {
       send(res, 500, JSON.stringify({ error: result.error.message || result.error }), {
         'Content-Type': 'application/json; charset=utf-8',
         'Cache-Control': 'no-store',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+        'Vary': 'Origin'
       });
       return;
     }
@@ -1483,12 +1595,14 @@ async function handleMcpStdioCall(req, res) {
     send(res, 200, JSON.stringify(result?.result ?? result), {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
   } catch (error) {
     send(res, 500, JSON.stringify({ error: `MCP stdio call error: ${error.message}` }), {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': localhostOriginHeaderValue(req),
+      'Vary': 'Origin'
     });
   }
 }
@@ -1565,17 +1679,55 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[dev-server] FATAL: port ${PORT} is already in use. EADDRINUSE`);
+    process.exit(2);
+  }
+  console.error(`[dev-server] FATAL: ${err.message}`);
+  process.exit(1);
+});
+
 server.listen(PORT, () => {
   const boundPort = /** @type {import('node:net').AddressInfo} */ (server.address()).port;
   console.log(`[dev-server] running at http://127.0.0.1:${boundPort}`);
   console.log(`[dev-server] proxy route: ${API_PREFIX} -> ${OLLAMA_BASE}/v1`);
   console.log(`[dev-server] proxy route: ${GNEWS_PREFIX} -> ${GNEWS_BASE}`);
   console.log(`[dev-server] compat routes: ${TERMINAL_PREFIX}, ${DIAGNOSTICS_PREFIX}, ${ENV_PREFIX}`);
+  console.log(`[dev-server] STATIC_ROOT: ${STATIC_ROOT}`);
+  console.log(`[dev-server] RUNTIME_ROOT: ${RUNTIME_ROOT}`);
+
+  const indexPath = path.join(STATIC_ROOT, 'index.html');
+  const indexExists = fs.existsSync(indexPath);
+  console.log(`[dev-server] index.html: ${indexExists ? 'found at ' + indexPath : 'NOT FOUND'}`);
+
+  const isPackaged = STATIC_ROOT !== RUNTIME_ROOT || /app\.asar/.test(STATIC_ROOT) || /app\.asar/.test(RUNTIME_ROOT);
+  if (!indexExists && isPackaged) {
+    console.error(`[dev-server] FATAL: index.html not found at ${indexPath}`);
+    console.error('[dev-server] Build may be incomplete or corrupted. Check that index.html was unpacked.');
+    process.exit(1);
+  }
+  if (!indexExists) {
+    console.warn(`[dev-server] WARNING: index.html not found at ${indexPath}`);
+    console.warn('[dev-server] In dev mode this might indicate a clean checkout. Continuing anyway.');
+  }
+
+  if (PUBLIC_DEPLOY) {
+    console.log('[dev-server] PUBLIC_DEPLOY mode: server-key proxy disabled (BYOK only); API routes restricted to localhost');
+  }
   if (!process.env.OLLAMA_API_KEY) {
     console.log('[dev-server] no OLLAMA_API_KEY env var detected; browser Authorization header will be forwarded if provided.');
+  } else if (PUBLIC_DEPLOY) {
+    console.log('[dev-server] OLLAMA_API_KEY detected but NOT injected (PUBLIC_DEPLOY mode)');
+  } else {
+    console.log('[dev-server] OLLAMA_API_KEY detected; will inject on /api/ollama/v1 requests from localhost');
   }
   if (getOpenRouterApiKey()) {
-    console.log('[dev-server] OPENROUTER_API_KEY detected; proxying via /api/openrouter (key never sent to browser)');
+    if (PUBLIC_DEPLOY) {
+      console.log('[dev-server] OPENROUTER_API_KEY detected but server proxy DISABLED (PUBLIC_DEPLOY mode; BYOK only)');
+    } else {
+      console.log('[dev-server] OPENROUTER_API_KEY detected; proxying via /api/openrouter (key never sent to browser; localhost-only CORS)');
+    }
   }
   console.log(`[dev-server] terminal auth token generated (shared via /api/env to localhost only)`);
 });

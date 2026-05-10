@@ -62,7 +62,7 @@
       "category": "public.app-category.developer-tools"
     },
     "win": {
-      "target": ["nsis", "portable"]
+      "target": ["portable"]
     },
     "linux": {
       "target": ["AppImage", "deb"],

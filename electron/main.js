@@ -6,11 +6,32 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// ── Single instance lock ───────────────────────────────────────────────────
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  console.log('[main] Another instance already running; quitting.');
+  app.quit();
+  process.exit(0);
+}
+
+app.on('second-instance', () => {
+  // Focus existing window when user tries to launch again
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
 const PROJECT_ROOT = isDev
   ? path.resolve(__dirname, '..')
   : path.resolve(__dirname, '..', '..', 'app.asar.unpacked');
+
+let mainWindow;
+let serverProcess;
+let serverPort = null;
+let serverStarting = false;
 
 function isSafeExternalUrl(url) {
   try {
@@ -22,15 +43,19 @@ function isSafeExternalUrl(url) {
   }
 }
 
-let mainWindow;
-let serverProcess;
-let serverPort = null;
-
 /**
  * Start the embedded dev server and capture its assigned port.
+ * Guards against double-start and clears state on unexpected exit.
  * @returns {Promise<number>}
  */
 function startEmbeddedServer() {
+  if (serverStarting || serverPort) {
+    return serverPort
+      ? Promise.resolve(serverPort)
+      : Promise.reject(new Error('Server already starting'));
+  }
+  serverStarting = true;
+
   return new Promise((resolve, reject) => {
     const serverPath = path.join(PROJECT_ROOT, 'proxy', 'dev-server.js');
     const env = {
@@ -53,6 +78,7 @@ function startEmbeddedServer() {
       if (match) {
         const port = Number(match[1]);
         serverPort = port;
+        serverStarting = false;
         serverProcess.stdout.off('data', onStdout);
         resolve(port);
       }
@@ -64,8 +90,16 @@ function startEmbeddedServer() {
       console.error(`[server] ${data.toString().trim()}`);
     });
 
-    serverProcess.on('error', reject);
+    serverProcess.on('error', (err) => {
+      serverStarting = false;
+      serverProcess = null;
+      reject(err);
+    });
+
     serverProcess.on('exit', (code) => {
+      serverStarting = false;
+      serverProcess = null;
+      serverPort = null;
       if (!serverPort) {
         reject(new Error(`Server exited with code ${code} before binding to a port`));
       }
@@ -74,6 +108,11 @@ function startEmbeddedServer() {
     // Safety timeout
     setTimeout(() => {
       if (!serverPort) {
+        serverStarting = false;
+        if (serverProcess) {
+          serverProcess.kill();
+          serverProcess = null;
+        }
         reject(new Error('Server failed to start within 15 seconds'));
       }
     }, 15000);
@@ -106,6 +145,15 @@ function createWindow() {
     // In dev, assume the user already ran `npm start` or we start the server ourselves
     const loadUrl = async () => {
       try {
+        if (serverStarting) {
+          dialog.showErrorBox('Server Busy', 'Embedded server is already starting. Please wait a moment and try again.');
+          app.quit();
+          return;
+        }
+        if (serverPort) {
+          mainWindow.loadURL(`http://localhost:${serverPort}`);
+          return;
+        }
         const port = await startEmbeddedServer();
         mainWindow.loadURL(`http://localhost:${port}`);
       } catch (err) {
@@ -117,15 +165,24 @@ function createWindow() {
     loadUrl();
   } else {
     // Production: always start the embedded server
-    startEmbeddedServer()
-      .then((port) => {
-        mainWindow.loadURL(`http://localhost:${port}`);
-      })
-      .catch((err) => {
-        console.error('Failed to start embedded server:', err);
-        dialog.showErrorBox('Server Error', err.message);
-        app.quit();
-      });
+    if (serverStarting) {
+      dialog.showErrorBox('Server Busy', 'Embedded server is already starting. Please wait a moment and try again.');
+      app.quit();
+      return;
+    }
+    if (serverPort) {
+      mainWindow.loadURL(`http://localhost:${serverPort}`);
+    } else {
+      startEmbeddedServer()
+        .then((port) => {
+          mainWindow.loadURL(`http://localhost:${port}`);
+        })
+        .catch((err) => {
+          console.error('Failed to start embedded server:', err);
+          dialog.showErrorBox('Server Error', err.message);
+          app.quit();
+        });
+    }
   }
 
   // Open external links in the system browser, not inside Electron

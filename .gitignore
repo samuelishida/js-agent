@@ -39,3 +39,7 @@ claude-code-main/
 release/
 dist-electron/
 *.exe
+# Electron builds (exceeds GitHub 100MB limit)
+release/*.exe
+release/*.blockmap
+release/win-unpacked/

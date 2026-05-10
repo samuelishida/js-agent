@@ -33,16 +33,29 @@ function drainSteering(messages) {
 }
 
 /**
- * Detect whether the user message suggests an MCP or Playwright tool request.
+ * Detect whether the user message suggests an MCP tool request (not generic browser automation).
  * @param {string} userMessage
  * @returns {boolean}
  */
 function _userWantsMcp(userMessage) {
   if (!userMessage) return false;
   const text = String(userMessage).toLowerCase();
-  const actionTerms = /\b(playwright|browser screenshot|browser click|browser navigate|page source|browser automation)\b/;
+  const mcpExplicit = /\b(mcp|playwright\s+mcp)\b/;
   const mcpAction = /\bmcp\b.*\b(screenshot|click|navigate|automation|browser|tool|use|call|open|run|launch|server)/;
-  return actionTerms.test(text) || mcpAction.test(text);
+  const serverRef = /\b(server|mcp\s+server|connected\s+server)\b/;
+  return mcpExplicit.test(text) || mcpAction.test(text) || serverRef.test(text);
+}
+
+/**
+ * Detect whether the user message suggests browser automation (MCP or local).
+ * @param {string} userMessage
+ * @returns {boolean}
+ */
+function _wantsBrowserAutomation(userMessage) {
+  if (!userMessage) return false;
+  const text = String(userMessage).toLowerCase();
+  const actionTerms = /\b(playwright|browser\s*(screenshot|click|navigate|automation)|page\s*source)\b/;
+  return actionTerms.test(text);
 }
 
 /**
@@ -67,6 +80,20 @@ function _buildMcpNudge(userMessage, consecutiveNonActionRounds) {
   if (consecutiveNonActionRounds !== 1) return '';
   if (_userWantsMcp(userMessage)) {
     return ' If you need to discover MCP/Playwright tools first, call mcp_list_servers() or mcp_list_tools().';
+  }
+  return '';
+}
+
+/**
+ * Build nudge for browser automation (non-MCP) when model narrates instead of acting.
+ * @param {string} userMessage
+ * @param {number} consecutiveNonActionRounds
+ * @returns {string}
+ */
+function _buildBrowserNudge(userMessage, consecutiveNonActionRounds) {
+  if (consecutiveNonActionRounds !== 1) return '';
+  if (_wantsBrowserAutomation(userMessage) && !_userWantsMcp(userMessage)) {
+    return ' For browser automation, you can use local browser tools or connect MCP Playwright server via Settings > MCP.';
   }
   return '';
 }
@@ -247,7 +274,7 @@ async function handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionR
     }
     const updated = [...messages,
       { role: 'assistant', content: rawReply || cleanReply },
-      { role: 'user', content: 'Your previous reply described a next action but did not execute it. Continue now without narration: call one or more tools with complete args, or provide the final answer if no tool is needed.' + _buildMcpNudge(userMessage, nextConsecutive) }
+      { role: 'user', content: 'Your previous reply described a next action but did not execute it. Continue now without narration: call one or more tools with complete args, or provide the final answer if no tool is needed.' + _buildMcpNudge(userMessage, nextConsecutive) + _buildBrowserNudge(userMessage, nextConsecutive) }
     ];
     return { finalAnswer: false, messages: updated, consecutiveNonActionRounds: nextConsecutive, shouldContinue: true };
   }
@@ -269,9 +296,8 @@ async function handleNoToolCalls({ reply, rawReply, round, consecutiveNonActionR
     return { finalAnswer: false, messages: updated, consecutiveNonActionRounds: nextConsecutive, shouldContinue: true };
   }
 
-  // MCP-specific no-action diagnostic: if user wants MCP tools but none are available,
-  // continue once with explicit MCP meta tool instructions, then final-answer with setup info.
-  if (_userWantsMcp(userMessage)) {
+  // MCP-specific no-action diagnostic: only for explicit MCP requests, not generic browser automation
+  if (_userWantsMcp(userMessage) && !_wantsBrowserAutomation(userMessage)) {
     const nextConsecutive = consecutiveNonActionRounds + 1;
     if (nextConsecutive >= 2) {
       const hasMcpMeta = !!window.AgentTools?.registry?.mcp_list_servers;

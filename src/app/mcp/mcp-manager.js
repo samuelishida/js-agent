@@ -135,8 +135,9 @@
     const st = _status.get(serverId);
     if (!st) return;
     const config = _servers.get(serverId);
+    const runtimeConfig = _enrichConfigWithRuntimeState(config, serverId);
     if (config?.transport === 'stdio' && StdioTransport) {
-      StdioTransport.disconnect(config);
+      StdioTransport.disconnect(runtimeConfig);
     } else {
       HttpTransport.disconnect();
     }
@@ -191,8 +192,9 @@
     if (!config) throw new Error(`Server ${serverId} not found`);
     const cached = _status.get(serverId)?.tools;
     if (Array.isArray(cached) && cached.length > 0) return cached;
-    const transport = _getTransport(config);
-    const tools = await transport.listTools(config);
+    const runtimeConfig = _enrichConfigWithRuntimeState(config, serverId);
+    const transport = _getTransport(runtimeConfig);
+    const tools = await transport.listTools(runtimeConfig);
     _setStatus(serverId, { tools });
     return tools;
   }
@@ -208,17 +210,17 @@
     syncServersFromStore();
     const config = _servers.get(serverId);
     if (!config) throw new Error(`Server ${serverId} not found`);
-    // Heartbeat: if stale > 60s, do a lightweight ping
+    const runtimeConfig = _enrichConfigWithRuntimeState(config, serverId);
     const st = _status.get(serverId);
     if (st && st.state === 'connected' && st.lastRefreshAt && (Date.now() - st.lastRefreshAt) > 60000) {
-      const ping = await _getTransport(config).connect(config);
+      const ping = await _getTransport(runtimeConfig).connect(runtimeConfig);
       if (ping?.error) {
         _setStatus(serverId, { state: 'error', lastError: ping.error });
         return { error: `Server ${serverId} stale: ${ping.error}` };
       }
       _setStatus(serverId, { lastRefreshAt: Date.now() });
     }
-    return _getTransport(config).callTool(config, toolName, args);
+    return _getTransport(runtimeConfig).callTool(runtimeConfig, toolName, args);
   }
 
   /**
@@ -274,6 +276,19 @@
   }
 
   /**
+   * Enrich config with runtime state (e.g. stdio sessionId from status).
+   * @param {import('../../types/index.js').McpServerConfigV2} config
+   * @param {string} serverId
+   * @returns {import('../../types/index.js').McpServerConfigV2}
+   */
+  function _enrichConfigWithRuntimeState(config, serverId) {
+    if (config?.transport !== 'stdio') return config;
+    const st = _status.get(serverId);
+    if (!st?.stdioSessionId) return config;
+    return { ...config, stdioSessionId: st.stdioSessionId };
+  }
+
+  /**
    * List resources for a server.
    * @param {string} serverId
    * @returns {Promise<object[]>}
@@ -284,8 +299,9 @@
     if (!config) throw new Error(`Server ${serverId} not found`);
     const cached = _status.get(serverId)?.resources;
     if (Array.isArray(cached) && cached.length > 0) return cached;
-    const transport = _getTransport(config);
-    const resources = await transport.listResources(config);
+    const runtimeConfig = _enrichConfigWithRuntimeState(config, serverId);
+    const transport = _getTransport(runtimeConfig);
+    const resources = await transport.listResources(runtimeConfig);
     _setStatus(serverId, { resources });
     return resources;
   }
@@ -300,7 +316,8 @@
     syncServersFromStore();
     const config = _servers.get(serverId);
     if (!config) throw new Error(`Server ${serverId} not found`);
-    return _getTransport(config).readResource(config, uri);
+    const runtimeConfig = _enrichConfigWithRuntimeState(config, serverId);
+    return _getTransport(runtimeConfig).readResource(runtimeConfig, uri);
   }
 
   /**
@@ -314,8 +331,9 @@
     if (!config) throw new Error(`Server ${serverId} not found`);
     const cached = _status.get(serverId)?.prompts;
     if (Array.isArray(cached) && cached.length > 0) return cached;
-    const transport = _getTransport(config);
-    const prompts = await transport.listPrompts(config);
+    const runtimeConfig = _enrichConfigWithRuntimeState(config, serverId);
+    const transport = _getTransport(runtimeConfig);
+    const prompts = await transport.listPrompts(runtimeConfig);
     _setStatus(serverId, { prompts });
     return prompts;
   }
@@ -331,7 +349,8 @@
     syncServersFromStore();
     const config = _servers.get(serverId);
     if (!config) throw new Error(`Server ${serverId} not found`);
-    return _getTransport(config).getPrompt(config, name, args);
+    const runtimeConfig = _enrichConfigWithRuntimeState(config, serverId);
+    return _getTransport(runtimeConfig).getPrompt(runtimeConfig, name, args);
   }
 
   /**

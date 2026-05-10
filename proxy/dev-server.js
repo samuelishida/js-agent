@@ -641,7 +641,7 @@ async function handleMcpProxy(req, res) {
     const serverUrl = String(body.serverUrl || '').trim();
     const method = String(body.method || '').trim();
     const params = body.params || {};
-    const authHeader = String(body.authHeader || '').trim();
+    const authHeader = String(body.authHeader || body.headers?.Authorization || '').trim();
 
     if (!serverUrl || !method) {
       send(res, 400, JSON.stringify({ error: 'serverUrl and method are required' }), {
@@ -763,7 +763,7 @@ async function handleMcpSseProxy(req, res) {
     const serverUrl = String(body.serverUrl || '').trim();
     const method = String(body.method || '').trim();
     const params = body.params || {};
-    const authHeader = String(body.authHeader || '').trim();
+    const authHeader = String(body.authHeader || body.headers?.Authorization || '').trim();
 
     if (!serverUrl || !method) {
       send(res, 400, JSON.stringify({ error: 'serverUrl and method are required' }), {

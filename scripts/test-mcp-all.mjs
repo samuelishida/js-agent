@@ -9,6 +9,8 @@ const MCP_TESTS = [
   'scripts/test-mcp-sse.mjs',
   'scripts/test-mcp-routing.mjs',
   'scripts/test-mcp-settings.mjs',
+  'scripts/test-mcp-stdio-integration.mjs',
+  'scripts/test-non-mcp-playwright.mjs',
 ];
 
 const SMOKE_TESTS = [

@@ -321,8 +321,9 @@
         const riskColor = risk === 'safe' ? 'var(--green)' : risk === 'irreversible' ? 'var(--red)' : 'var(--amber)';
         const isAllowed = filter.mode === 'all' || (filter.mode === 'include' && allowSet.has(tool.name));
         return (
-          '<div class="mcp-tool-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border-default)">' +
-            '<input type="checkbox" ' + (isAllowed ? 'checked' : '') + ' onchange="onToggleTool(\'' + serverId + '\', \'' + escHtml(tool.name) + '\')" />' +
+          '<div class="mcp-tool-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border-default)" ' +
+            'data-tool-server="' + escHtml(serverId) + '" data-tool-name="' + escHtml(tool.name) + '">' +
+            '<input type="checkbox" ' + (isAllowed ? 'checked' : '') + ' class="mcp-tool-checkbox" />' +
             '<span style="font-weight:500">' + escHtml(tool.name) + '</span>' +
             '<span style="font-size:11px;color:var(--text-secondary)">' + escHtml((tool.description || '').slice(0, 80)) + '</span>' +
             '<span style="margin-left:auto;font-size:10px;padding:1px 4px;border-radius:3px;background:' + riskColor + ';color:#0f0f0f">' + risk + '</span>' +
@@ -332,10 +333,25 @@
 
       drawer.innerHTML += (
         '<div style="display:flex;gap:8px;margin-top:8px">' +
-          '<button class="btn-primary btn-sm" onclick="onEnableAllTools(\'' + serverId + '\')">Enable All</button>' +
-          '<button class="btn-secondary btn-sm" onclick="onDisableAllTools(\'' + serverId + '\')">Disable All</button>' +
+          '<button class="btn-primary btn-sm" data-drawer-server="' + escHtml(serverId) + '" id="mcp-enable-all-' + escHtml(serverId) + '">Enable All</button>' +
+          '<button class="btn-secondary btn-sm" data-drawer-server="' + escHtml(serverId) + '" id="mcp-disable-all-' + escHtml(serverId) + '">Disable All</button>' +
         '</div>'
       );
+
+      drawer.querySelectorAll('.mcp-tool-checkbox').forEach(function (checkbox) {
+        checkbox.addEventListener('change', function () {
+          const row = this.closest('.mcp-tool-row');
+          const sid = row.getAttribute('data-tool-server');
+          const tname = row.getAttribute('data-tool-name');
+          onToggleTool(sid, tname);
+        });
+      });
+      drawer.querySelector('#mcp-enable-all-' + escHtml(serverId))?.addEventListener('click', function () {
+        onEnableAllTools(this.getAttribute('data-drawer-server'));
+      });
+      drawer.querySelector('#mcp-disable-all-' + escHtml(serverId))?.addEventListener('click', function () {
+        onDisableAllTools(this.getAttribute('data-drawer-server'));
+      });
     }).catch(function (err) {
       drawer.innerHTML = '<div class="mcp-error-text">Failed to load tools: ' + escHtml(err?.message || err) + '</div>';
     });

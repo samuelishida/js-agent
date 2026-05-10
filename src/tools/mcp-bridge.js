@@ -92,13 +92,14 @@
         const filter = server.toolFilter || {};
         const urlStr = String(server.url || '');
         const isLocalhost = (() => {
+          if (server.transport === 'stdio') return true;
           try {
             return /^(localhost|127\.\d+\.\d+\.\d+|\[?::1\]?)$/i.test(new URL(urlStr).hostname);
           } catch (e) {
             return false;
           }
         })();
-        // Default: remote = none (user must enable explicitly), localhost = all
+        // Default: remote = none (user must enable explicitly), localhost/stdio = all
         const effectiveMode = filter.mode || (isLocalhost ? 'all' : 'none');
         /** @type {Set<string>} */
         const allowSet = new Set((effectiveMode === 'include' && filter.names) ? filter.names.map(String) : []);

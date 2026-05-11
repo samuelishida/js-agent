@@ -4,10 +4,26 @@
       "id": "pdf",
       "description": "Generate PDF documents",
       "inputSchema": {
-        "text": "string",
-        "pages": "Array<{ text: string, fontSize?: number, bold?: boolean, title?: string }>",
-        "title": "string",
-        "margin": "number"
+        "title": "string — centered bold title at top",
+        "sections": "Array<{ children: ChildNode[] }>",
+        "text": "string — simple fallback when no sections",
+        "pages": "Array<{ title?: string, text: string, fontSize?: number }> — legacy append-page mode",
+        "fontSize": "number (default 11)",
+        "margin": "number in points (default 50)",
+        "landscape": "boolean (default false)",
+        "ChildNode": {
+          "type": "'paragraph'|'heading'|'table'|'bulletList'|'numberedList'|'horizontalRule'|'pageBreak'",
+          "text": "string — for paragraph/heading",
+          "heading": "number 1-6 — heading level (required for heading type)",
+          "rows": "string[][] — for table (first row = header)",
+          "items": "string[] or {text,bold?,color?}[] — for bulletList/numberedList",
+          "bold": "boolean",
+          "italic": "boolean",
+          "fontSize": "number",
+          "color": "string — hex color e.g. '#FF0000' or 'red'",
+          "align": "'left'|'center'|'right'|'justify'",
+          "spacing": "number — extra spacing multiplier"
+        }
       },
       "outputMime": "application/pdf",
       "extensions": ["pdf"]
@@ -16,9 +32,27 @@
       "id": "docx",
       "description": "Generate Word documents",
       "inputSchema": {
-        "sections": "Array<{ children: Array<{ type: 'paragraph'|'heading'|'table'|'bulletList', text?: string, heading?: string, rows?: string[][], items?: string[], bold?: boolean, fontSize?: number }> }",
-        "title": "string",
-        "margins": "object"
+        "title": "string — title paragraph at top (centered, large)",
+        "sections": "Array<{ children: ChildNode[] }>",
+        "margins": "{ top, right, bottom, left } in DXA units (default 720 each = 0.5in)",
+        "ChildNode": {
+          "type": "'paragraph'|'heading'|'table'|'bulletList'|'numberedList'|'horizontalRule'|'pageBreak'",
+          "text": "string — for paragraph/heading",
+          "heading": "number 1-6 — heading level (required for heading type)",
+          "runs": "Array<{text,bold?,italic?,underline?,strikethrough?,color?,fontSize?}> — mixed inline formatting",
+          "rows": "string[][] — for table (first row = bold+gray header)",
+          "headerRow": "boolean (default true) — style first row as header",
+          "noBorders": "boolean — remove table borders",
+          "items": "string[] or {text,bold?,italic?,color?,level?}[] — for bulletList/numberedList",
+          "bold": "boolean",
+          "italic": "boolean",
+          "underline": "boolean",
+          "strikethrough": "boolean",
+          "color": "string — hex color e.g. 'FF0000' (no #)",
+          "fontSize": "number in pt",
+          "align": "'left'|'center'|'right'|'justify'",
+          "spacing": "number — pt spacing before/after"
+        }
       },
       "outputMime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "extensions": ["docx"]
@@ -27,7 +61,14 @@
       "id": "xlsx",
       "description": "Generate Excel spreadsheets",
       "inputSchema": {
-        "sheets": "Array<{ name?: string, data: string[][], options?: { header?: boolean } }>"
+        "sheets": "Array<SheetDef>",
+        "SheetDef": {
+          "name": "string — tab name (max 31 chars)",
+          "data": "string[][] — rows of cells (first row = header if options.header not false)",
+          "colWidths": "number[] — per-column widths in characters (auto-calculated if omitted)",
+          "formats": "string[] — per-column number format strings e.g. ['', '$#,##0.00', '0%', 'YYYY-MM-DD']",
+          "options": "{ header?: boolean } — set header false to skip header styling"
+        }
       },
       "outputMime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "extensions": ["xlsx"]
@@ -36,19 +77,37 @@
       "id": "pptx",
       "description": "Generate PowerPoint presentations",
       "inputSchema": {
-        "slides": "Array<{ title?: string, text?: string, bullets?: string[], fontSize?: number }>",
-        "title": "string"
+        "title": "string — title slide text",
+        "subtitle": "string or {text,color} — subtitle on title slide",
+        "background": "string — hex fill color for title slide e.g. '#1E40AF'",
+        "fontSize": "number — default body font size (default 18)",
+        "slides": "Array<SlideDef>",
+        "SlideDef": {
+          "title": "string — slide heading",
+          "titleColor": "string — hex color for title",
+          "text": "string — body text paragraph",
+          "bullets": "string[] or {text,bold?,color?,level?}[] — bullet items",
+          "table": "string[][] — tabular data (first row = header)",
+          "notes": "string — speaker notes",
+          "background": "string — hex fill color for slide",
+          "color": "string — default text color for slide",
+          "fontSize": "number — override font size for this slide"
+        }
       },
       "outputMime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       "extensions": ["pptx"]
     },
     {
       "id": "html",
-      "description": "Generate standalone HTML/text artifacts",
+      "description": "Generate standalone HTML/SVG/text artifacts",
       "inputSchema": {
-        "html": "string",
-        "title": "string",
-        "type": "'html'|'htm'|'svg'|'text'"
+        "html": "string — HTML body content (or full SVG content, or raw text)",
+        "title": "string — <title> tag content (for html/htm type)",
+        "css": "string — optional inline CSS added in <style> block",
+        "type": "'html'|'htm'|'svg'|'text' (default 'html')",
+        "width": "number — SVG width attribute",
+        "height": "number — SVG height attribute",
+        "viewBox": "string — SVG viewBox e.g. '0 0 800 600'"
       },
       "outputMime": "text/html",
       "extensions": ["html", "htm", "svg", "txt"]

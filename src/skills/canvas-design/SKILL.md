@@ -1,33 +1,39 @@
 ---
 name: canvas-design
-description: Create beautiful visual art in .png and .pdf documents using design philosophy. You should use this skill when the user asks to create a poster, piece of art, design, or other static piece. Create original visual designs, never copying existing artists' work to avoid copyright violations.
+version: "2"
+description: Create beautiful visual art as PDF (pdfkit graphics) or SVG/HTML. Use when the user asks for a poster, artwork, or design. Outputs PDF via pdfkit or SVG via runtime_generateArtifact html generator.
 license: Complete terms in LICENSE.txt
 ---
 
 These are instructions for creating design philosophies - aesthetic movements that are then EXPRESSED VISUALLY. Output only .md files, .pdf files, and .png files.
 
-## ⚠️ Browser Compatibility
+## ⚠️ File Generation
 
-This skill provides canvas design methodology and guidelines. Prefer the browser-friendly dev-server flow: `runtime_generateArtifact` for PDF output, `runtime_generateFile` for PNG output.
+The dev server has `pdfkit` available. The `canvas` (node-canvas) package is NOT installed — do not attempt PNG via node-canvas.
 
 | Format | Method |
 |--------|--------|
-| PDF | `runtime_generateArtifact(generator="pdf", filename="output.pdf", input={...})` |
-| PNG | `runtime_generateFile(path="agent-sandbox/gen.cjs", content=script, filename="output.png")` |
+| PDF with graphics | `runtime_generateFile` with pdfkit script (see template below) |
+| SVG / HTML art | `runtime_generateArtifact(generator="html", filename="art.svg", input={html: svgString, type: "html"})` |
 
-**For PDF**: Use `runtime_generateArtifact` with structured input data. The precompiled PDF generator handles text, pages, and styling.
+**Avoid `runtime_runTerminal`** for file generation — `runtime_generateFile` already writes, runs, captures output, and downloads.
 
-**For PNG**: Use `runtime_generateFile` with a custom canvas/pdfkit script (no PNG generator available yet).
+## Pdfkit Canvas Script Template
 
-**In pure browser mode**, do not create a staging script. Generate the final HTML/SVG/text/blob content in browser memory and download it with `fs_download_file`. For Node libraries such as `pdfkit` or `canvas`, use the dev-server path below.
+Use this EXACT template structure. Keep script short; complex designs use geometry primitives.
 
-## ⚠️ File Generation Paths
+```xml
+<tool_call>
+{"tool":"runtime_generateFile","args":{"path":"agent-sandbox/gen.cjs","content":"const PDFDocument = require('pdfkit');\nconst doc = new PDFDocument({ size: [800, 800], margin: 0 });\nconst chunks = [];\ndoc.on('data', c => chunks.push(c));\ndoc.on('end', () => process.stdout.write(Buffer.concat(chunks).toString('base64')));\ndoc.rect(0, 0, 800, 800).fill('#1a1a2e');\ndoc.circle(400, 400, 200).fill('#e94560').opacity(0.8);\ndoc.rect(200, 200, 400, 400).stroke('#ffffff').lineWidth(0.5).opacity(0.3);\ndoc.font('Helvetica-Bold').fontSize(32).fillColor('#ffffff').opacity(1).text('TITLE', 0, 360, { align: 'center', width: 800 });\ndoc.end();","filename":"output.pdf"}}
+</tool_call>
+```
 
-**PDF (preferred)**: `runtime_generateArtifact(generator="pdf", filename="output.pdf", input={text: "...", pages: [...]})`
-
-**PNG (custom script)**: `runtime_generateFile(path="agent-sandbox/generate_canvas.cjs", content="<JavaScript script using pdfkit or node-canvas>", filename="output.png")`
-
-**Avoid `runtime_runTerminal`** for file generation. `runtime_generateArtifact` and `runtime_generateFile` already write, run, capture output, and download.
+**Key rules for the content string:**
+- Use `\n` (ONE backslash in JSON) between statements — never `\\n`
+- No raw line breaks inside the JSON string
+- Draw order: background rect → shapes → text (top to bottom)
+- Available: `doc.rect()`, `doc.circle()`, `doc.moveTo().lineTo()`, `doc.polygon()`, `doc.fill()`, `doc.stroke()`, `doc.text()`, `doc.font()`, `doc.fontSize()`, `doc.fillColor()`, `doc.opacity()`
+- Chain methods: `.fill('#color')`, `.stroke('#color')`, `.lineWidth(n)`, `.opacity(n)`
 
 Complete this in two steps:
 1. Design Philosophy Creation (.md file)

@@ -1,3 +1,4 @@
+"use strict";
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -2357,14 +2358,14 @@ var require_dist = __commonJS({
         }
         var hexSliceLookupTable = (function() {
           var alphabet = "0123456789abcdef";
-          var table2 = new Array(256);
+          var table = new Array(256);
           for (var i = 0; i < 16; ++i) {
             var i16 = i * 16;
             for (var j = 0; j < 16; ++j) {
-              table2[i16 + j] = alphabet[i] + alphabet[j];
+              table[i16 + j] = alphabet[i] + alphabet[j];
             }
           }
-          return table2;
+          return table;
         })();
       })(buffer);
       return buffer;
@@ -9705,7 +9706,7 @@ var require_dist = __commonJS({
         }
       }
     };
-    var AlignmentType = {
+    var AlignmentType2 = {
       /** Align Start */
       START: "start",
       /** Align Center */
@@ -9748,7 +9749,7 @@ var require_dist = __commonJS({
         space: { key: "w:space", value: space === void 0 ? void 0 : pointMeasureValue(space) }
       }
     });
-    var BorderStyle = {
+    var BorderStyle2 = {
       /** a single line */
       SINGLE: "single",
       /** a line with a series of alternating thin and thick strokes */
@@ -9830,7 +9831,7 @@ var require_dist = __commonJS({
         const bottom = createBorderElement("w:bottom", {
           color: "auto",
           space: 1,
-          style: BorderStyle.SINGLE,
+          style: BorderStyle2.SINGLE,
           size: 6
         });
         this.root.push(bottom);
@@ -10000,7 +10001,7 @@ var require_dist = __commonJS({
         type: { key: "w:val", value: type2 }
       }
     });
-    var ShadingType = {
+    var ShadingType2 = {
       /** Clear shading - no pattern, fill color only */
       CLEAR: "clear",
       DIAGONAL_CROSS: "diagCross",
@@ -14944,7 +14945,7 @@ var require_dist = __commonJS({
       }
     });
     var buildMarginChildren = ({
-      marginUnitType = WidthType.DXA,
+      marginUnitType = WidthType2.DXA,
       top,
       left,
       bottom,
@@ -14975,7 +14976,7 @@ var require_dist = __commonJS({
         children
       });
     };
-    var WidthType = {
+    var WidthType2 = {
       /** Auto. */
       AUTO: "auto",
       /** Value is in twentieths of a point */
@@ -14985,9 +14986,9 @@ var require_dist = __commonJS({
       /** Value is in percentage. */
       PERCENTAGE: "pct"
     };
-    var createTableWidthElement = (name, { type: type2 = WidthType.AUTO, size }) => {
+    var createTableWidthElement = (name, { type: type2 = WidthType2.AUTO, size }) => {
       let tableWidthValue = size;
-      if (type2 === WidthType.PERCENTAGE && typeof size === "number") {
+      if (type2 === WidthType2.PERCENTAGE && typeof size === "number") {
         tableWidthValue = `${size}%`;
       }
       return new BuilderElement({
@@ -15165,16 +15166,16 @@ var require_dist = __commonJS({
       }
     };
     var NONE_BORDER = {
-      style: BorderStyle.NONE,
+      style: BorderStyle2.NONE,
       size: 0,
       color: "auto"
     };
     var DEFAULT_BORDER = {
-      style: BorderStyle.SINGLE,
+      style: BorderStyle2.SINGLE,
       size: 4,
       color: "auto"
     };
-    var TableBorders = class extends XmlComponent {
+    var TableBorders2 = class extends XmlComponent {
       constructor(options) {
         var _a, _b, _c, _d, _e, _f;
         super("w:tblBorders");
@@ -15186,7 +15187,7 @@ var require_dist = __commonJS({
         this.root.push(createBorderElement("w:insideV", (_f = options.insideVertical) != null ? _f : DEFAULT_BORDER));
       }
     };
-    __publicField(TableBorders, "NONE", {
+    __publicField(TableBorders2, "NONE", {
       top: NONE_BORDER,
       bottom: NONE_BORDER,
       left: NONE_BORDER,
@@ -15338,7 +15339,7 @@ var require_dist = __commonJS({
           this.root.push(createTableWidthElement("w:tblInd", options.indent));
         }
         if (options.borders) {
-          this.root.push(new TableBorders(options.borders));
+          this.root.push(new TableBorders2(options.borders));
         }
         if (options.shading) {
           this.root.push(createShading(options.shading));
@@ -16249,11 +16250,11 @@ var require_dist = __commonJS({
         this.root.push(component);
       }
       createSectionParagraph(section) {
-        const paragraph2 = new Paragraph2({});
+        const paragraph = new Paragraph2({});
         const properties = new ParagraphProperties({});
         properties.push(section);
-        paragraph2.addChildElement(properties);
-        return paragraph2;
+        paragraph.addChildElement(properties);
+        return paragraph;
       }
     };
     var DocumentBackgroundAttributes = class extends XmlAttributeComponent {
@@ -16502,10 +16503,10 @@ var require_dist = __commonJS({
         });
         this.root.push(spacing);
       }
-      createEndnote(id, paragraph2) {
+      createEndnote(id, paragraph) {
         const endnote = new Endnote({
           id,
-          children: paragraph2
+          children: paragraph
         });
         this.root.push(endnote);
       }
@@ -16743,10 +16744,10 @@ var require_dist = __commonJS({
        * @param id - Unique numeric identifier for the footnote
        * @param paragraph - Array of paragraphs that make up the footnote content
        */
-      createFootNote(id, paragraph2) {
+      createFootNote(id, paragraph) {
         const footnote = new Footnote({
           id,
-          children: paragraph2
+          children: paragraph
         });
         this.root.push(footnote);
       }
@@ -17101,7 +17102,7 @@ var require_dist = __commonJS({
         level,
         format,
         text,
-        alignment = AlignmentType.START,
+        alignment = AlignmentType2.START,
         start = 1,
         style,
         suffix,
@@ -17301,7 +17302,7 @@ var require_dist = __commonJS({
             level: 0,
             format: LevelFormat.BULLET,
             text: "\u25CF",
-            alignment: AlignmentType.LEFT,
+            alignment: AlignmentType2.LEFT,
             style: {
               paragraph: {
                 indent: { left: convertInchesToTwip(0.5), hanging: convertInchesToTwip(0.25) }
@@ -17312,7 +17313,7 @@ var require_dist = __commonJS({
             level: 1,
             format: LevelFormat.BULLET,
             text: "\u25CB",
-            alignment: AlignmentType.LEFT,
+            alignment: AlignmentType2.LEFT,
             style: {
               paragraph: {
                 indent: { left: convertInchesToTwip(1), hanging: convertInchesToTwip(0.25) }
@@ -17323,7 +17324,7 @@ var require_dist = __commonJS({
             level: 2,
             format: LevelFormat.BULLET,
             text: "\u25A0",
-            alignment: AlignmentType.LEFT,
+            alignment: AlignmentType2.LEFT,
             style: {
               paragraph: {
                 indent: { left: 2160, hanging: convertInchesToTwip(0.25) }
@@ -17334,7 +17335,7 @@ var require_dist = __commonJS({
             level: 3,
             format: LevelFormat.BULLET,
             text: "\u25CF",
-            alignment: AlignmentType.LEFT,
+            alignment: AlignmentType2.LEFT,
             style: {
               paragraph: {
                 indent: { left: 2880, hanging: convertInchesToTwip(0.25) }
@@ -17345,7 +17346,7 @@ var require_dist = __commonJS({
             level: 4,
             format: LevelFormat.BULLET,
             text: "\u25CB",
-            alignment: AlignmentType.LEFT,
+            alignment: AlignmentType2.LEFT,
             style: {
               paragraph: {
                 indent: { left: 3600, hanging: convertInchesToTwip(0.25) }
@@ -17356,7 +17357,7 @@ var require_dist = __commonJS({
             level: 5,
             format: LevelFormat.BULLET,
             text: "\u25A0",
-            alignment: AlignmentType.LEFT,
+            alignment: AlignmentType2.LEFT,
             style: {
               paragraph: {
                 indent: { left: 4320, hanging: convertInchesToTwip(0.25) }
@@ -17367,7 +17368,7 @@ var require_dist = __commonJS({
             level: 6,
             format: LevelFormat.BULLET,
             text: "\u25CF",
-            alignment: AlignmentType.LEFT,
+            alignment: AlignmentType2.LEFT,
             style: {
               paragraph: {
                 indent: { left: 5040, hanging: convertInchesToTwip(0.25) }
@@ -17378,7 +17379,7 @@ var require_dist = __commonJS({
             level: 7,
             format: LevelFormat.BULLET,
             text: "\u25CF",
-            alignment: AlignmentType.LEFT,
+            alignment: AlignmentType2.LEFT,
             style: {
               paragraph: {
                 indent: { left: 5760, hanging: convertInchesToTwip(0.25) }
@@ -17389,7 +17390,7 @@ var require_dist = __commonJS({
             level: 8,
             format: LevelFormat.BULLET,
             text: "\u25CF",
-            alignment: AlignmentType.LEFT,
+            alignment: AlignmentType2.LEFT,
             style: {
               paragraph: {
                 indent: { left: 6480, hanging: convertInchesToTwip(0.25) }
@@ -18577,8 +18578,8 @@ var require_dist = __commonJS({
               })
             ];
           }
-          for (const paragraph2 of paragraphs) {
-            content.addChildElement(paragraph2);
+          for (const paragraph of paragraphs) {
+            content.addChildElement(paragraph);
           }
         } else {
           const beginParagraph = new Paragraph2({
@@ -22749,7 +22750,7 @@ var require_dist = __commonJS({
       return (_a = text.match(pattern)) != null ? _a : [];
     };
     exports2.AbstractNumbering = AbstractNumbering;
-    exports2.AlignmentType = AlignmentType;
+    exports2.AlignmentType = AlignmentType2;
     exports2.AnnotationReference = AnnotationReference;
     exports2.Attributes = Attributes;
     exports2.BaseXmlComponent = BaseXmlComponent;
@@ -22758,7 +22759,7 @@ var require_dist = __commonJS({
     exports2.BookmarkEnd = BookmarkEnd;
     exports2.BookmarkStart = BookmarkStart;
     exports2.Border = Border;
-    exports2.BorderStyle = BorderStyle;
+    exports2.BorderStyle = BorderStyle2;
     exports2.BuilderElement = BuilderElement;
     exports2.CarriageReturn = CarriageReturn;
     exports2.CellMerge = CellMerge;
@@ -22915,7 +22916,7 @@ var require_dist = __commonJS({
     exports2.SectionType = SectionType;
     exports2.Separator = Separator;
     exports2.SequentialIdentifier = SequentialIdentifier;
-    exports2.ShadingType = ShadingType;
+    exports2.ShadingType = ShadingType2;
     exports2.SimpleField = SimpleField;
     exports2.SimpleMailMergeField = SimpleMailMergeField;
     exports2.SoftHyphen = SoftHyphen;
@@ -22934,7 +22935,7 @@ var require_dist = __commonJS({
     exports2.TabStopType = TabStopType;
     exports2.Table = Table2;
     exports2.TableAnchorType = TableAnchorType;
-    exports2.TableBorders = TableBorders;
+    exports2.TableBorders = TableBorders2;
     exports2.TableCell = TableCell2;
     exports2.TableCellBorders = TableCellBorders;
     exports2.TableLayoutType = TableLayoutType;
@@ -22963,7 +22964,7 @@ var require_dist = __commonJS({
     exports2.WORKAROUND2 = WORKAROUND2;
     exports2.WORKAROUND3 = WORKAROUND3;
     exports2.WORKAROUND4 = WORKAROUND4;
-    exports2.WidthType = WidthType;
+    exports2.WidthType = WidthType2;
     exports2.WpgGroupRun = WpgGroupRun;
     exports2.WpsShapeRun = WpsShapeRun;
     exports2.XmlAttributeComponent = XmlAttributeComponent;
@@ -23056,9 +23057,23 @@ var require_dist = __commonJS({
 });
 
 // src/skills/runtime/generators/docx.cjs
-var { Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun } = require_dist();
+var {
+  AlignmentType,
+  BorderStyle,
+  Document,
+  HeadingLevel,
+  Packer,
+  Paragraph,
+  ShadingType,
+  Table,
+  TableBorders,
+  TableCell,
+  TableRow,
+  TextRun,
+  WidthType
+} = require_dist();
 var fs = require("fs");
-var HEADING_BY_LEVEL = {
+var HEADING_LEVEL_MAP = {
   1: HeadingLevel.HEADING_1,
   2: HeadingLevel.HEADING_2,
   3: HeadingLevel.HEADING_3,
@@ -23066,33 +23081,121 @@ var HEADING_BY_LEVEL = {
   5: HeadingLevel.HEADING_5,
   6: HeadingLevel.HEADING_6
 };
-function runText(text, options = {}) {
-  return new TextRun({
+var ALIGN_MAP = {
+  left: AlignmentType.LEFT,
+  center: AlignmentType.CENTER,
+  right: AlignmentType.RIGHT,
+  justify: AlignmentType.JUSTIFIED,
+  both: AlignmentType.BOTH
+};
+function hexColor(c) {
+  if (!c) return void 0;
+  return String(c).replace("#", "").toUpperCase().padEnd(6, "0").slice(0, 6);
+}
+function makeTextRun(text, opts = {}) {
+  const cfg = {
     text: String(text ?? ""),
-    bold: Boolean(options.bold),
-    size: Number(options.fontSize || 12) * 2
-  });
+    bold: Boolean(opts.bold),
+    italics: Boolean(opts.italic || opts.italics),
+    strike: Boolean(opts.strikethrough || opts.strike),
+    size: Math.round(Number(opts.fontSize || 12) * 2)
+  };
+  if (opts.underline) cfg.underline = {};
+  if (opts.color) cfg.color = hexColor(opts.color);
+  return new TextRun(cfg);
 }
-function paragraph(text, options = {}) {
-  return new Paragraph({
-    heading: options.heading,
-    bullet: options.bullet ? { level: 0 } : void 0,
-    children: [runText(text, options)]
-  });
+function inlineRuns(child) {
+  if (Array.isArray(child.runs) && child.runs.length) {
+    return child.runs.map((r) => makeTextRun(r.text || "", { ...child, ...r }));
+  }
+  return [makeTextRun(child.text || "", child)];
 }
-function table(rows = []) {
+function resolveHeading(value) {
+  const n = parseInt(String(value || "1"), 10);
+  return HEADING_LEVEL_MAP[Math.min(Math.max(n, 1), 6)] || HeadingLevel.HEADING_1;
+}
+function makeTableNode(rows = [], opts = {}) {
+  if (!rows.length) return null;
+  const colCount = Math.max(...rows.map((r) => Array.isArray(r) ? r.length : 0));
+  if (!colCount) return null;
+  const colWidthDxa = Math.floor(8640 / colCount);
   return new Table({
-    rows: rows.map((row) => new TableRow({
-      children: row.map((cell) => new TableCell({
-        children: [paragraph(cell)]
-      }))
-    }))
+    width: { size: 8640, type: WidthType.DXA },
+    borders: opts.noBorders ? TableBorders.NONE : void 0,
+    rows: rows.map((row, ri) => {
+      const isHeader = ri === 0 && opts.headerRow !== false;
+      const cells = Array.isArray(row) ? row : [];
+      return new TableRow({
+        tableHeader: isHeader,
+        children: Array.from({ length: colCount }, (_, ci) => {
+          const cellText = String(cells[ci] ?? "");
+          return new TableCell({
+            width: { size: colWidthDxa, type: WidthType.DXA },
+            shading: isHeader ? { fill: "E0E0E0", type: ShadingType.CLEAR, color: "auto" } : void 0,
+            children: [new Paragraph({
+              children: [makeTextRun(cellText, { bold: isHeader, fontSize: opts.fontSize || 11 })]
+            })]
+          });
+        })
+      });
+    })
   });
 }
-function headingLevel(value) {
-  const match = String(value || "1").match(/[1-6]/);
-  const level = match ? Number(match[0]) : 1;
-  return HEADING_BY_LEVEL[level] || HeadingLevel.HEADING_1;
+function buildChildren(sections) {
+  const out = [];
+  for (const section of Array.isArray(sections) ? sections : []) {
+    for (const child of Array.isArray(section.children) ? section.children : []) {
+      const type = String(child.type || "paragraph");
+      const align = ALIGN_MAP[child.align || child.alignment];
+      if (type === "heading") {
+        out.push(new Paragraph({
+          heading: resolveHeading(child.heading),
+          alignment: align,
+          children: inlineRuns(child)
+        }));
+      } else if (type === "table") {
+        const node = makeTableNode(child.rows || [], {
+          headerRow: child.headerRow,
+          noBorders: child.noBorders,
+          fontSize: child.fontSize
+        });
+        if (node) out.push(node);
+      } else if (type === "bulletList") {
+        for (const item of Array.isArray(child.items) ? child.items : []) {
+          const itemChild = typeof item === "string" ? { text: item } : item || {};
+          out.push(new Paragraph({
+            bullet: { level: Number(itemChild.level || child.level || 0) },
+            children: inlineRuns({ fontSize: child.fontSize || 12, ...itemChild })
+          }));
+        }
+      } else if (type === "numberedList") {
+        for (let i = 0; i < (Array.isArray(child.items) ? child.items.length : 0); i++) {
+          const item = child.items[i];
+          const itemChild = typeof item === "string" ? { text: item } : item || {};
+          out.push(new Paragraph({
+            children: [makeTextRun(
+              `${i + 1}. ${itemChild.text || ""}`,
+              { fontSize: child.fontSize || 12, ...itemChild }
+            )]
+          }));
+        }
+      } else if (type === "horizontalRule") {
+        out.push(new Paragraph({
+          border: { bottom: { color: "AAAAAA", space: 1, style: BorderStyle.SINGLE, size: 6 } },
+          children: [new TextRun("")]
+        }));
+      } else if (type === "pageBreak") {
+        out.push(new Paragraph({ pageBreakBefore: true, children: [new TextRun("")] }));
+      } else {
+        out.push(new Paragraph({
+          alignment: align,
+          spacing: child.spacing ? { before: child.spacing * 20, after: child.spacing * 20 } : void 0,
+          children: inlineRuns(child)
+        }));
+      }
+    }
+  }
+  return out;
 }
 var run = async (args) => {
   try {
@@ -23102,39 +23205,30 @@ var run = async (args) => {
 `);
       process.exit(1);
     }
-    const data = JSON.parse(fs.readFileSync(inputFile, "utf8"));
-    const { sections = [], title = "Document", margins = { top: 720, right: 720, bottom: 720, left: 720 } } = data || {};
+    let data;
+    try {
+      data = JSON.parse(fs.readFileSync(inputFile, "utf8"));
+    } catch (e) {
+      process.stderr.write(`Error: Invalid JSON in input file: ${e.message}
+`);
+      process.exit(1);
+    }
+    const {
+      sections = [],
+      title = "",
+      margins = { top: 720, right: 720, bottom: 720, left: 720 }
+    } = data || {};
     const children = [];
     if (title) {
-      children.push(paragraph(title, { bold: true, fontSize: 20, heading: HeadingLevel.TITLE }));
+      children.push(new Paragraph({
+        heading: HeadingLevel.TITLE,
+        alignment: AlignmentType.CENTER,
+        children: [makeTextRun(title, { bold: true, fontSize: 24 })]
+      }));
     }
-    for (const section of Array.isArray(sections) ? sections : []) {
-      for (const child of Array.isArray(section.children) ? section.children : []) {
-        if (child.type === "heading") {
-          children.push(paragraph(child.text || "", {
-            bold: true,
-            fontSize: child.fontSize || 16,
-            heading: headingLevel(child.heading)
-          }));
-        } else if (child.type === "table" && Array.isArray(child.rows)) {
-          children.push(table(child.rows));
-        } else if (child.type === "bulletList" && Array.isArray(child.items)) {
-          child.items.forEach((item) => {
-            children.push(paragraph(item || "", {
-              bullet: true,
-              fontSize: child.fontSize || 12
-            }));
-          });
-        } else {
-          children.push(paragraph(child.text || "", {
-            bold: child.bold,
-            fontSize: child.fontSize || 12
-          }));
-        }
-      }
-    }
-    if (children.length === 0) {
-      children.push(paragraph(""));
+    children.push(...buildChildren(sections));
+    if (!children.length) {
+      children.push(new Paragraph({ children: [new TextRun("")] }));
     }
     const doc = new Document({
       sections: [{

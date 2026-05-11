@@ -146,6 +146,7 @@
       cache[name] = {
         markdown: `---\n${Object.entries(skill.frontmatter).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n\n${skill.content}`,
         source: skill.source,
+        version: skill.frontmatter.version || null,
         timestamp: Date.now()
       };
     }
@@ -314,12 +315,18 @@
       for (const entry of entries) {
         const url = typeof entry === 'string' ? entry : entry.url;
         if (!url) continue;
-        // Skip if already cached and fresh (within 24h)
+        // Skip if already cached, fresh (within 24h), and version matches
         const cache = lsGet(LS_KEYS.CACHE, {});
         const cached = cache[entry.name || url];
-        if (cached && (Date.now() - cached.timestamp < 86400000)) {
+        const manifestVersion = typeof entry === 'object' ? (entry.version || null) : null;
+        const cachedVersion = cached?.version || null;
+        const versionMatch = !manifestVersion || manifestVersion === cachedVersion;
+        if (cached && versionMatch && (Date.now() - cached.timestamp < 86400000)) {
           console.debug(`[SkillLoader] Using cached skill: ${entry.name || url}`);
           continue; // already loaded from cache in step 1
+        }
+        if (cached && !versionMatch) {
+          console.log(`[SkillLoader] Version mismatch for ${entry.name || url}: cached=${cachedVersion}, manifest=${manifestVersion}. Re-fetching.`);
         }
         const result = await registerSkillFromUrl(url);
         if (result) results.push(result);

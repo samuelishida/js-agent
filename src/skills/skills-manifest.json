@@ -2,10 +2,10 @@
   "skills": [
     { "name": "algorithmic-art", "url": "src/skills/algorithmic-art/SKILL.md", "description": "Creating algorithmic art using p5.js with seeded randomness and interactive parameter exploration" },
     { "name": "brand-guidelines", "url": "src/skills/brand-guidelines/SKILL.md", "description": "Applies brand colors and typography to artifacts needing a specific look-and-feel" },
-    { "name": "canvas-design", "url": "src/skills/canvas-design/SKILL.md", "description": "Create beautiful visual art in .png and .pdf documents using design philosophy" },
+    { "name": "canvas-design", "url": "src/skills/canvas-design/SKILL.md", "version": "2", "description": "Create visual art as PDF (pdfkit graphics) or SVG/HTML. Uses design philosophy and geometric primitives." },
     { "name": "doc-coauthoring", "url": "src/skills/doc-coauthoring/SKILL.md", "description": "Guide users through structured workflow for co-authoring documentation" },
     { "name": "docx", "url": "src/skills/docx/SKILL.md", "description": "Read/edit existing Word documents. For creating new docs, use file-generation." },
-    { "name": "file-generation", "url": "src/skills/file-generation/SKILL.md", "description": "Generate DOCX, PDF, XLSX, PPTX binary files using Node.js scripts" },
+    { "name": "file-generation", "url": "src/skills/file-generation/SKILL.md", "version": "7", "description": "Generate PDF, DOCX, XLSX, PPTX, HTML, ZIP files from structured data using runtime_generateArtifact" },
     { "name": "frontend-design", "url": "src/skills/frontend-design/SKILL.md", "description": "Create distinctive, production-grade frontend interfaces with high design quality" },
     { "name": "internal-comms", "url": "src/skills/internal-comms/SKILL.md", "description": "Resources for writing internal communications using company-preferred formats" },
     { "name": "mcp-builder", "url": "src/skills/mcp-builder/SKILL.md", "description": "Guide for creating high-quality MCP servers for LLM integration" },

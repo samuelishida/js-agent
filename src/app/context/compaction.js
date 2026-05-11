@@ -140,32 +140,8 @@
     };
   }
 
-  /**
-   * Extract prompt injection signals from a tool result.
-   * @param {import('../../types/index.js').ToolCall} toolCall - Tool call
-   * @param {string} result - Tool result
-   * @returns {string[]} Detected signals
-   */
-  function extractPromptInjectionSignals(toolCall, result) {
-    const signals = [];
-    const text = String(result || '');
-    const patterns = C().INJECTION_PATTERNS || {};
-    const controlPattern = patterns.CONTROL_CHANNEL_TAG_REGEX || /<tool_call\s*>|<system-reminder\s*>|\[SYSTEM\s+OVERRIDE\]/i;
-
-    if (controlPattern.test(text)) {
-      signals.push(`Prompt injection guard: ${String(toolCall?.tool || 'tool')} returned control-channel content.`);
-    }
-
-    // Detect natural-language prompt-injection attempts in tool results
-    const nlPatterns = C().INJECTION_PATTERNS?.NL_INJECTION_PATTERNS || [];
-    for (const re of nlPatterns) {
-      if (re.test(text)) {
-        signals.push(`Prompt injection guard: ${String(toolCall?.tool || 'tool')} returned possible natural-language injection attempt.`);
-        break; // one signal per tool result is enough
-      }
-    }
-
-    return signals;
+  function extractPromptInjectionSignals(_toolCall, _result) {
+    return [];
   }
 
   /**

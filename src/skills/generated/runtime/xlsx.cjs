@@ -1,3 +1,4 @@
+"use strict";
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -5688,7 +5689,7 @@ var require_xlsx = __commonJS({
           }
           return o;
         }
-        function find(cfb, path2) {
+        function find(cfb, path) {
           var UCFullPaths = cfb.FullPaths.map(function(x) {
             return x.toUpperCase();
           });
@@ -5697,11 +5698,11 @@ var require_xlsx = __commonJS({
             return y[y.length - (x.slice(-1) == "/" ? 2 : 1)];
           });
           var k = false;
-          if (path2.charCodeAt(0) === 47) {
+          if (path.charCodeAt(0) === 47) {
             k = true;
-            path2 = UCFullPaths[0].slice(0, -1) + path2;
-          } else k = path2.indexOf("/") !== -1;
-          var UCPath = path2.toUpperCase();
+            path = UCFullPaths[0].slice(0, -1) + path;
+          } else k = path.indexOf("/") !== -1;
+          var UCPath = path.toUpperCase();
           var w = k === true ? UCFullPaths.indexOf(UCPath) : UCPaths.indexOf(UCPath);
           if (w !== -1) return cfb.FileIndex[w];
           var m = !UCPath.match(chr1);
@@ -6682,11 +6683,11 @@ var require_xlsx = __commonJS({
         }
         throw new Error("cannot save file " + fname);
       }
-      function read_binary(path2) {
-        if (typeof _fs !== "undefined") return _fs.readFileSync(path2);
-        if (typeof Deno !== "undefined") return Deno.readFileSync(path2);
+      function read_binary(path) {
+        if (typeof _fs !== "undefined") return _fs.readFileSync(path);
+        if (typeof Deno !== "undefined") return Deno.readFileSync(path);
         if (typeof $ !== "undefined" && typeof File !== "undefined" && typeof Folder !== "undefined") try {
-          var infile = File(path2);
+          var infile = File(path);
           infile.open("r");
           infile.encoding = "binary";
           var data = infile.read();
@@ -6695,7 +6696,7 @@ var require_xlsx = __commonJS({
         } catch (e) {
           if (!e.message || !e.message.match(/onstruct/)) throw e;
         }
-        throw new Error("Cannot access file " + path2);
+        throw new Error("Cannot access file " + path);
       }
       function keys(o) {
         var ks = Object.keys(o), o2 = [];
@@ -6972,16 +6973,16 @@ var require_xlsx = __commonJS({
         for (var i = 0; i < k.length; ++i) if (k[i].slice(-1) != "/") o.push(k[i].replace(/^Root Entry[\/]/, ""));
         return o.sort();
       }
-      function zip_add_file(zip, path2, content) {
+      function zip_add_file(zip, path, content) {
         if (zip.FullPaths) {
           if (typeof content == "string") {
             var res;
             if (has_buf) res = Buffer_from(content);
             else res = utf8decode(content);
-            return CFB.utils.cfb_add(zip, path2, res);
+            return CFB.utils.cfb_add(zip, path, res);
           }
-          CFB.utils.cfb_add(zip, path2, content);
-        } else zip.file(path2, content);
+          CFB.utils.cfb_add(zip, path, content);
+        } else zip.file(path, content);
       }
       function zip_new() {
         return CFB.utils.cfb_new();
@@ -6998,11 +6999,11 @@ var require_xlsx = __commonJS({
         }
         throw new Error("Unrecognized type " + o.type);
       }
-      function resolve_path(path2, base) {
-        if (path2.charAt(0) == "/") return path2.slice(1);
+      function resolve_path(path, base) {
+        if (path.charAt(0) == "/") return path.slice(1);
         var result = base.split("/");
         if (base.slice(-1) != "/") result.pop();
-        var target = path2.split("/");
+        var target = path.split("/");
         while (target.length !== 0) {
           var step = target.shift();
           if (step === "..") result.pop();
@@ -31656,19 +31657,19 @@ var require_xlsx = __commonJS({
         }
         return !wbrels || wbrels.length === 0 ? null : wbrels;
       }
-      function safe_parse_sheet(zip, path2, relsPath, sheet, idx, sheetRels, sheets, stype, opts, wb, themes, styles) {
+      function safe_parse_sheet(zip, path, relsPath, sheet, idx, sheetRels, sheets, stype, opts, wb, themes, styles) {
         try {
-          sheetRels[sheet] = parse_rels(getzipstr(zip, relsPath, true), path2);
-          var data = getzipdata(zip, path2);
+          sheetRels[sheet] = parse_rels(getzipstr(zip, relsPath, true), path);
+          var data = getzipdata(zip, path);
           var _ws;
           switch (stype) {
             case "sheet":
-              _ws = parse_ws(data, path2, idx, opts, sheetRels[sheet], wb, themes, styles);
+              _ws = parse_ws(data, path, idx, opts, sheetRels[sheet], wb, themes, styles);
               break;
             case "chart":
-              _ws = parse_cs(data, path2, idx, opts, sheetRels[sheet], wb, themes, styles);
+              _ws = parse_cs(data, path, idx, opts, sheetRels[sheet], wb, themes, styles);
               if (!_ws || !_ws["!drawel"]) break;
-              var dfile = resolve_path(_ws["!drawel"].Target, path2);
+              var dfile = resolve_path(_ws["!drawel"].Target, path);
               var drelsp = get_rels_path(dfile);
               var draw = parse_drawing(getzipstr(zip, dfile, true), parse_rels(getzipstr(zip, drelsp, true), dfile));
               var chartp = resolve_path(draw, dfile);
@@ -31676,10 +31677,10 @@ var require_xlsx = __commonJS({
               _ws = parse_chart(getzipstr(zip, chartp, true), chartp, opts, parse_rels(getzipstr(zip, crelsp, true), chartp), wb, _ws);
               break;
             case "macro":
-              _ws = parse_ms(data, path2, idx, opts, sheetRels[sheet], wb, themes, styles);
+              _ws = parse_ms(data, path, idx, opts, sheetRels[sheet], wb, themes, styles);
               break;
             case "dialog":
-              _ws = parse_ds(data, path2, idx, opts, sheetRels[sheet], wb, themes, styles);
+              _ws = parse_ds(data, path, idx, opts, sheetRels[sheet], wb, themes, styles);
               break;
             default:
               throw new Error("Unrecognized sheet type " + stype);
@@ -31689,13 +31690,13 @@ var require_xlsx = __commonJS({
           if (sheetRels && sheetRels[sheet]) keys(sheetRels[sheet]).forEach(function(n) {
             var dfile2 = "";
             if (sheetRels[sheet][n].Type == RELS.CMNT) {
-              dfile2 = resolve_path(sheetRels[sheet][n].Target, path2);
+              dfile2 = resolve_path(sheetRels[sheet][n].Target, path);
               var comments = parse_cmnt(getzipdata(zip, dfile2, true), dfile2, opts);
               if (!comments || !comments.length) return;
               sheet_insert_comments(_ws, comments, false);
             }
             if (sheetRels[sheet][n].Type == RELS.TCMNT) {
-              dfile2 = resolve_path(sheetRels[sheet][n].Target, path2);
+              dfile2 = resolve_path(sheetRels[sheet][n].Target, path);
               tcomments = tcomments.concat(parse_tcmnt_xml(getzipdata(zip, dfile2, true), opts));
             }
           });
@@ -31799,7 +31800,7 @@ var require_xlsx = __commonJS({
         if (opts.bookDeps && dir.calcchain) deps = parse_cc(getzipdata(zip, strip_front_slash(dir.calcchain)), dir.calcchain, opts);
         var i = 0;
         var sheetRels = {};
-        var path2, relsPath;
+        var path, relsPath;
         {
           var wbsheets = wb.Sheets;
           props.Worksheets = wbsheets.length;
@@ -31824,15 +31825,15 @@ var require_xlsx = __commonJS({
         wsloop: for (i = 0; i != props.Worksheets; ++i) {
           var stype = "sheet";
           if (wbrels && wbrels[i]) {
-            path2 = "xl/" + wbrels[i][1].replace(/[\/]?xl\//, "");
-            if (!safegetzipfile(zip, path2)) path2 = wbrels[i][1];
-            if (!safegetzipfile(zip, path2)) path2 = wbrelsfile.replace(/_rels\/.*$/, "") + wbrels[i][1];
+            path = "xl/" + wbrels[i][1].replace(/[\/]?xl\//, "");
+            if (!safegetzipfile(zip, path)) path = wbrels[i][1];
+            if (!safegetzipfile(zip, path)) path = wbrelsfile.replace(/_rels\/.*$/, "") + wbrels[i][1];
             stype = wbrels[i][2];
           } else {
-            path2 = "xl/worksheets/sheet" + (i + 1 - nmode) + "." + wbext;
-            path2 = path2.replace(/sheet0\./, "sheet.");
+            path = "xl/worksheets/sheet" + (i + 1 - nmode) + "." + wbext;
+            path = path.replace(/sheet0\./, "sheet.");
           }
-          relsPath = path2.replace(/^(.*)(\/)([^\/]*)$/, "$1/_rels/$3.rels");
+          relsPath = path.replace(/^(.*)(\/)([^\/]*)$/, "$1/_rels/$3.rels");
           if (opts && opts.sheets != null) switch (typeof opts.sheets) {
             case "number":
               if (i != opts.sheets) continue wsloop;
@@ -31850,7 +31851,7 @@ var require_xlsx = __commonJS({
                 if (!snjseen) continue wsloop;
               }
           }
-          safe_parse_sheet(zip, path2, relsPath, props.SheetNames[i], i, sheetRels, sheets, stype, opts, wb, themes, styles);
+          safe_parse_sheet(zip, path, relsPath, props.SheetNames[i], i, sheetRels, sheets, stype, opts, wb, themes, styles);
         }
         out = {
           Directory: dir,
@@ -33228,7 +33229,43 @@ var require_xlsx = __commonJS({
 // src/skills/runtime/generators/xlsx.cjs
 var XLSX = require_xlsx();
 var fs = require("fs");
-var path = require("path");
+function autoColWidths(rows) {
+  if (!rows.length) return [];
+  const colCount = Math.max(...rows.map((r) => Array.isArray(r) ? r.length : 0));
+  const widths = Array(colCount).fill(8);
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    row.forEach((cell, ci) => {
+      const len = String(cell ?? "").length;
+      if (len > widths[ci]) widths[ci] = Math.min(len + 2, 60);
+    });
+  }
+  return widths.map((w) => ({ wch: w }));
+}
+function styleHeaderRow(ws, colCount) {
+  for (let ci = 0; ci < colCount; ci++) {
+    const addr = XLSX.utils.encode_cell({ r: 0, c: ci });
+    if (!ws[addr]) continue;
+    ws[addr].s = {
+      font: { bold: true },
+      fill: { patternType: "solid", fgColor: { rgb: "E0E0E0" } },
+      alignment: { horizontal: "center" }
+    };
+  }
+}
+function applyCellFormats(ws, formats, rowCount, colCount) {
+  if (!Array.isArray(formats)) return;
+  for (let ri = 1; ri < rowCount; ri++) {
+    for (let ci = 0; ci < formats.length && ci < colCount; ci++) {
+      const fmt = formats[ci];
+      if (!fmt) continue;
+      const addr = XLSX.utils.encode_cell({ r: ri, c: ci });
+      if (!ws[addr]) continue;
+      ws[addr].s = ws[addr].s || {};
+      ws[addr].s.numFmt = fmt;
+    }
+  }
+}
 var run = async (args) => {
   try {
     const inputFile = args.input;
@@ -33237,22 +33274,44 @@ var run = async (args) => {
 `);
       process.exit(1);
     }
-    const data = JSON.parse(fs.readFileSync(inputFile, "utf8"));
+    let data;
+    try {
+      data = JSON.parse(fs.readFileSync(inputFile, "utf8"));
+    } catch (e) {
+      process.stderr.write(`Error: Invalid JSON in input file: ${e.message}
+`);
+      process.exit(1);
+    }
     const { sheets = [] } = data || {};
     const workbook = XLSX.utils.book_new();
-    sheets.forEach((sheet) => {
-      const { name = "Sheet", data: rows = [], options = { header: true } } = sheet || {};
-      const worksheet = XLSX.utils.aoa_to_sheet(rows);
-      if (options.header) {
-        worksheet["!cols"] = [
-          { wch: 10 }
-        ];
+    for (const sheet of Array.isArray(sheets) ? sheets : []) {
+      const {
+        name = "Sheet",
+        data: rows = [],
+        options = {},
+        colWidths,
+        formats
+      } = sheet || {};
+      const ws = XLSX.utils.aoa_to_sheet(Array.isArray(rows) ? rows : []);
+      const colCount = rows.length ? Math.max(...rows.map((r) => Array.isArray(r) ? r.length : 0)) : 0;
+      if (Array.isArray(colWidths) && colWidths.length) {
+        ws["!cols"] = colWidths.map((w) => ({ wch: Number(w) || 10 }));
+      } else {
+        ws["!cols"] = autoColWidths(Array.isArray(rows) ? rows : []);
       }
-      XLSX.utils.book_append_sheet(workbook, worksheet, name);
-    });
-    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
-    const base64 = buffer.toString("base64");
-    console.log(base64);
+      if (options.header !== false && rows.length > 0) {
+        styleHeaderRow(ws, colCount);
+      }
+      if (Array.isArray(formats)) {
+        applyCellFormats(ws, formats, rows.length, colCount);
+      }
+      XLSX.utils.book_append_sheet(workbook, ws, String(name || "Sheet").slice(0, 31));
+    }
+    if (!workbook.SheetNames.length) {
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([[]]), "Sheet1");
+    }
+    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx", cellStyles: true });
+    console.log(buffer.toString("base64"));
   } catch (e) {
     process.stderr.write(`Error: ${e.message}
 `);
@@ -33260,8 +33319,7 @@ var run = async (args) => {
   }
 };
 if (require.main === module) {
-  const inputFile = process.argv[2];
-  run({ input: inputFile });
+  run({ input: process.argv[2] });
 }
 module.exports = run;
 /*! Bundled license information:

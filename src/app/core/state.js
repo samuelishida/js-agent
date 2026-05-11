@@ -46,7 +46,7 @@ let enabledTools = {
   runtime_listDir:true, runtime_glob:true, runtime_searchCode:true,
   runtime_runTerminal:true, runtime_webFetch:true, runtime_getDiagnostics:true,
   runtime_fileDiff:true, runtime_todoWrite:true, runtime_memoryRead:true, runtime_memoryWrite:true,
-  runtime_lsp:true, runtime_spawnAgent:true, runtime_generateFile:true, tool_search:true,
+  runtime_lsp:true, runtime_spawnAgent:true, runtime_generateFile:true, runtime_generateArtifact:true, tool_search:true,
   skill_search:true, skill_load:true,
   snapshot_tool_catalog:true, fs_append_file:true,
   github_search_code:true, github_get_pr:true, github_list_prs:true,

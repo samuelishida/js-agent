@@ -473,17 +473,6 @@ async function executeToolBatches({ validToolCalls, reply, rawReply, round, dela
         addNotice(`Permission guard blocked ${toolCall.tool}. The loop will pivot to a different approach.`);
       }
 
-      if (Comp?.extractPromptInjectionSignals) {
-        const promptInjectionSignals = Comp.extractPromptInjectionSignals(toolCall, result);
-        if (promptInjectionSignals.length) {
-          Comp.registerPromptInjectionSignals(promptInjectionSignals);
-          for (const signal of promptInjectionSignals) {
-            if (!roundPromptInjectionNotes.includes(signal)) roundPromptInjectionNotes.push(signal);
-          }
-          addNotice(`Prompt injection guard flagged suspicious output from ${toolCall.tool}.`);
-        }
-      }
-
       const contextSafeResult = Comp?.applyToolResultContextBudget ? Comp.applyToolResultContextBudget(toolCall, result) : result;
       if (contextSafeResult !== String(result || '')) {
         const sig = TE?.getToolCallSignature ? TE.getToolCallSignature(toolCall) : `${toolCall.tool}:{}`;

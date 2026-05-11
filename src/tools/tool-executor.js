@@ -638,6 +638,49 @@ const fs = typeof require !== 'undefined' ? require('fs') : null;
       } catch { /* localStorage unavailable — fall through */ }
     }
 
+    // Auto-fix: detect double-escaped newlines — model writes \\n in JSON which parses to
+    // literal backslash-n chars (not actual newlines). Detect: no real newlines, but has \n sequences.
+    if (resolvedContent && !resolvedContent.includes('\n') && resolvedContent.includes('\\n')) {
+      // String-aware fix: replace \n outside single/double-quoted strings with actual newlines.
+      // Preserve \n inside single/double-quoted strings (valid JS escape there).
+      // In template literals, convert \n to actual newline (backtick strings are multiline-safe).
+      const _BS = String.fromCharCode(92); // backslash
+      const _NL = String.fromCharCode(10); // actual newline
+      const _SQ = String.fromCharCode(39); // single quote
+      const _DQ = String.fromCharCode(34); // double quote
+      const _BT = String.fromCharCode(96); // backtick
+      let fixed = ''; let si = 0; const src = resolvedContent;
+      while (si < src.length) {
+        const ch = src[si];
+        if ((ch === _SQ || ch === _DQ) && (si === 0 || src[si - 1] !== _BS)) {
+          const q = ch; fixed += ch; si++;
+          while (si < src.length) {
+            const sc = src[si];
+            if (sc === _BS && si + 1 < src.length) { fixed += sc + src[si + 1]; si += 2; }
+            else if (sc === q) { fixed += sc; si++; break; }
+            else { fixed += sc; si++; }
+          }
+        } else if (ch === _BT) {
+          fixed += ch; si++;
+          while (si < src.length) {
+            const sc = src[si];
+            if (sc === _BS && si + 1 < src.length) {
+              const nx = src[si + 1];
+              if (nx === 'n') { fixed += _NL; si += 2; }
+              else if (nx === 't') { fixed += '\t'; si += 2; }
+              else { fixed += sc + nx; si += 2; }
+            } else if (sc === _BT) { fixed += sc; si++; break; }
+            else { fixed += sc; si++; }
+          }
+        } else if (ch === _BS && si + 1 < src.length && src[si + 1] === 'n') {
+          fixed += _NL; si += 2;
+        } else if (ch === _BS && si + 1 < src.length && src[si + 1] === 't') {
+          fixed += '\t'; si += 2;
+        } else { fixed += ch; si++; }
+      }
+      resolvedContent = fixed;
+    }
+
     // Validate: runtime_generateFile expects a Node.js script, not plain text/markdown
     if (resolvedContent) {
       const looksLikeMarkdown = /^\s*#+\s/.test(resolvedContent) || /^\s*\*\s/.test(resolvedContent) || /^\s*-\s/.test(resolvedContent);
@@ -697,11 +740,7 @@ const fs = typeof require !== 'undefined' ? require('fs') : null;
           data: b64,
           preview: `Generated ${downloadName} (${bytes.length} bytes)`
         });
-        const saveResult = await (window.ElectronFileSave?.saveGeneratedArtifact?.({ name: downloadName, mimeType: mime, base64: b64 }) || Promise.resolve({ mode: 'browser', name: downloadName, size: bytes.length }));
-        if (saveResult.mode === 'electron') {
-          return formatToolResult('runtime_generateFile', `✅ Generated and saved ${artifact.name} (${artifact.size} bytes) to ${saveResult.path}. Artifact id: ${artifact.id}`);
-        }
-        return formatToolResult('runtime_generateFile', `✅ Generated and downloaded ${artifact.name} (${artifact.size} bytes). Artifact id: ${artifact.id}`);
+        return await saveGeneratedBytes({ artifact, bytes, b64, mime, downloadName, toolName: 'runtime_generateFile' });
       } catch (e) {
         // Fallback: save to localStorage + artifact registry
         try { localStorage.setItem('__last_generated_base64__', b64); } catch {}
@@ -721,13 +760,13 @@ const fs = typeof require !== 'undefined' ? require('fs') : null;
     }
     // If node failed, make the error actionable instead of just dumping raw output
     if (!b64 && rawOutput) {
-      // Detect SyntaxError from raw newlines in JS strings — common model mistake
+      // Detect SyntaxError — likely double-escaped newlines (model writes \\n instead of \n in JSON)
       if (/SyntaxError.*Invalid or unexpected token/i.test(rawOutput)) {
         const ext = extensionOf(outputFilename || scriptPath);
         if (['pdf', 'docx', 'xlsx', 'pptx', 'html', 'htm', 'svg', 'txt', 'zip'].includes(ext)) {
-          return formatToolResult('runtime_generateFile', `HINT: Your custom generator script has a SyntaxError. For ${ext.toUpperCase()} output, do not retry by hand-writing JavaScript. Use runtime_generateArtifact with structured input instead.\n\nExample for DOCX:\n  runtime_generateArtifact(generator="docx", filename="report.docx", input={ title: "Report", sections: [{ children: [{ type: "paragraph", text: "Hello" }] }] })\n\nThis avoids raw-newline and bundled-library syntax errors.`);
+          return formatToolResult('runtime_generateFile', `HINT: Script SyntaxError for ${ext.toUpperCase()} output. Use runtime_generateArtifact instead — it accepts structured JSON and avoids script encoding issues entirely.\n\nExample:\n  runtime_generateArtifact(generator="pdf", filename="report.pdf", input={ title: "Report", sections: [{ children: [{ type: "heading", text: "Section", heading: 1 }, { type: "paragraph", text: "Content" }] }] })`);
         }
-        return formatToolResult('runtime_generateFile', `HINT: Your script has a SyntaxError — most likely raw newlines inside a double-quoted string. JS strings cannot span multiple lines with real newlines.\n\nFix: Use backtick template literals (\`...\`) for multi-line text, or use \\n escape sequences.\n\nExample:\n  const text = \`line 1\nline 2\nline 3\`;  // ← backticks, not quotes\n\nRewrite your script with backtick strings and try again.`);
+        return formatToolResult('runtime_generateFile', `HINT: Script SyntaxError. Most common cause: the content field had double-escaped newlines (\\\\n instead of \\n in JSON), which writes literal backslash-n chars between statements.\n\nFix: In the <tool_call> JSON, use \\n (ONE backslash) for newlines in the content string — never \\\\n.\n\nAlternatively, use runtime_generateArtifact for PDF/DOCX/XLSX/PPTX/HTML/ZIP which avoids this encoding issue entirely.`);
       }
       // Detect MODULE_NOT_FOUND
       if (/MODULE_NOT_FOUND|Cannot find module/i.test(rawOutput)) {
@@ -773,13 +812,91 @@ const fs = typeof require !== 'undefined' ? require('fs') : null;
     return btoa(unescape(encodeURIComponent(String(text || ''))));
   }
 
+  async function saveGeneratedBytes({ artifact, bytes, b64, mime, downloadName, toolName }) {
+    // Priority 1: Electron IPC
+    if (window.ElectronFileSave?.isElectron?.()) {
+      try {
+        const r = await window.ElectronFileSave.saveGeneratedArtifact({ name: downloadName, mimeType: mime, base64: b64 });
+        if (r?.mode === 'electron') {
+          return formatToolResult(toolName, `✅ Saved ${artifact.name} (${artifact.size} bytes) to ${r.path}. Artifact id: ${artifact.id}`);
+        }
+      } catch (err) {
+        console.warn(`[${toolName}] Electron save failed, trying next:`, err);
+      }
+    }
+
+    // Priority 2: Authorized File System Access API folder
+    if (state.roots.size > 0) {
+      try {
+        const rootId = state.defaultRootId || [...state.roots.keys()][0];
+        const rootHandle = state.roots.get(rootId);
+        const fileHandle = await rootHandle.getFileHandle(downloadName, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(bytes);
+        await writable.close();
+        return formatToolResult(toolName, `✅ Saved ${artifact.name} (${artifact.size} bytes) to authorized folder "${rootId}/${downloadName}". Artifact id: ${artifact.id}`);
+      } catch (folderErr) {
+        console.warn(`[${toolName}] Authorized folder write failed, falling back to browser:`, folderErr);
+      }
+    }
+
+    // Priority 3: Sandbox copy + browser blob download
+    const sandboxPath = `agent-sandbox/${downloadName}`;
+    let sandboxNote = '';
+    try {
+      await callLocalCompatApi('/api/terminal-files', {
+        command: `echo "saved"`,
+        cwd: '',
+        files: [{ path: sandboxPath, content: b64, mode: 0o644 }]
+      });
+      sandboxNote = ` Saved copy to sandbox: ${sandboxPath}.`;
+    } catch (sandboxErr) {
+      console.warn(`[${toolName}] Sandbox save failed:`, sandboxErr);
+    }
+
+    try {
+      const blob = new Blob([bytes], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = downloadName;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (dlErr) {
+      console.warn(`[${toolName}] Browser download failed:`, dlErr);
+      return formatToolResult(toolName, `Artifact id: ${artifact.id}\n[Download failed: ${dlErr.message}.${sandboxNote} Use fs_download_file(artifactId="${artifact.id}") to retry.]`);
+    }
+
+    return formatToolResult(toolName, `✅ Generated ${artifact.name} (${artifact.size} bytes).${sandboxNote} Downloading via browser. Artifact id: ${artifact.id}`);
+  }
+
   async function runtimeGenerateArtifact(args = {}) {
     const generator = String(args.generator || '').trim().toLowerCase();
     const filename = String(args.filename || '').trim();
     const input = args.input ?? {};
 
-    if (!generator) throw new Error('runtime_generateArtifact requires generator.');
-    if (!filename) throw new Error('runtime_generateArtifact requires filename.');
+    if (!generator) {
+      const unknownKeys = Object.keys(args).filter(k => !['generator','filename','input','options'].includes(k));
+      const wrongNote = unknownKeys.length ? ` Unexpected args: ${unknownKeys.join(', ')}.` : '';
+      throw new Error(
+        `HINT: runtime_generateArtifact requires a "generator" field.${wrongNote}\n\n` +
+        `Correct call format:\n` +
+        `  runtime_generateArtifact(generator="docx", filename="report.docx", input={"title":"My Doc","sections":[{"children":[{"type":"heading","heading":1,"text":"Section Title"},{"type":"paragraph","text":"Body text here."}]}]})\n\n` +
+        `Available generators: pdf | docx | xlsx | pptx | html | zip\n` +
+        `  pdf   → report.pdf   — paragraphs, headings, tables, lists\n` +
+        `  docx  → report.docx  — Word doc with rich formatting\n` +
+        `  xlsx  → data.xlsx    — Excel with sheets, auto-column widths\n` +
+        `  pptx  → deck.pptx   — PowerPoint with title slide + content slides\n` +
+        `  html  → page.html   — Standalone HTML5 with optional CSS\n` +
+        `  zip   → bundle.zip  — ZIP of multiple text/binary files\n\n` +
+        `The "input" field is always a JSON object — never write a script. ` +
+        `Call skill_load("file-generation") for full examples.`
+      );
+    }
+    if (!filename) throw new Error('HINT: runtime_generateArtifact requires a "filename" field, e.g. filename="report.docx".');
 
     const manifest = await loadSkillsRuntimeManifest();
     const knownGenerators = new Set(manifest.generators.map(g => g.id.toLowerCase()));
@@ -824,13 +941,11 @@ const fs = typeof require !== 'undefined' ? require('fs') : null;
       throw new Error(`HINT: Generator "${generator}" produced no output. Check stderr for errors.\n\n${rawOutput}`);
     }
 
-    // Save via Electron IPC or browser Blob download
     try {
       const bytes = base64ToUint8Array(b64);
       const downloadName = resolveGeneratedDownloadName({ outputFilename: filename, scriptPath: generatorBundlePath, bytes });
       const ext = extensionOf(downloadName) || 'bin';
       const mime = GENERATED_MIME_BY_EXT[ext] || 'application/octet-stream';
-
       const artifact = registerArtifact({
         id: `art_gen_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         name: downloadName,
@@ -840,15 +955,8 @@ const fs = typeof require !== 'undefined' ? require('fs') : null;
         data: b64,
         preview: `Generated ${downloadName} (${bytes.length} bytes)`
       });
-
-      const saveResult = await (window.ElectronFileSave?.saveGeneratedArtifact?.({ name: downloadName, mimeType: mime, base64: b64 }) || Promise.resolve({ mode: 'browser', name: downloadName, size: bytes.length }));
-
-      if (saveResult.mode === 'electron') {
-        return formatToolResult('runtime_generateArtifact', `✅ Generated and saved ${artifact.name} (${artifact.size} bytes) to ${saveResult.path}. Artifact id: ${artifact.id}`);
-      }
-      return formatToolResult('runtime_generateArtifact', `✅ Generated and downloaded ${artifact.name} (${artifact.size} bytes). Artifact id: ${artifact.id}`);
+      return await saveGeneratedBytes({ artifact, bytes, b64, mime, downloadName, toolName: 'runtime_generateArtifact' });
     } catch (e) {
-      // Fallback: save to localStorage + artifact registry
       try { localStorage.setItem('__last_generated_base64__', b64); } catch {}
       const fallbackName = resolveGeneratedDownloadName({ outputFilename: filename, scriptPath: generatorBundlePath, bytes: null });
       const fallbackExt = extensionOf(fallbackName) || 'bin';

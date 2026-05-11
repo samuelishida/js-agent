@@ -8,31 +8,26 @@ These are instructions for creating design philosophies - aesthetic movements th
 
 ## ⚠️ Browser Compatibility
 
-This skill provides canvas design methodology and guidelines. Prefer the browser-friendly dev-server flow: `runtime_generateFile` runs one Node.js generator script and auto-downloads the final `.png` or `.pdf` artifact.
+This skill provides canvas design methodology and guidelines. Prefer the browser-friendly dev-server flow: `runtime_generateArtifact` for PDF output, `runtime_generateFile` for PNG output.
 
-| Environment | File Generation |
-|-------------|-----------------|
-| Dev server (`node proxy/dev-server.js`) | Use `runtime_generateFile(path="agent-sandbox/gen.cjs", content=script, filename="output.png")` |
-| Pure browser (file:// or static server) | Use `fs_download_file` directly only when final content already exists in browser memory |
+| Format | Method |
+|--------|--------|
+| PDF | `runtime_generateArtifact(generator="pdf", filename="output.pdf", input={...})` |
+| PNG | `runtime_generateFile(path="agent-sandbox/gen.cjs", content=script, filename="output.png")` |
+
+**For PDF**: Use `runtime_generateArtifact` with structured input data. The precompiled PDF generator handles text, pages, and styling.
+
+**For PNG**: Use `runtime_generateFile` with a custom canvas/pdfkit script (no PNG generator available yet).
 
 **In pure browser mode**, do not create a staging script. Generate the final HTML/SVG/text/blob content in browser memory and download it with `fs_download_file`. For Node libraries such as `pdfkit` or `canvas`, use the dev-server path below.
 
 ## ⚠️ File Generation Paths
 
-**Dev server path (scripted):** use `runtime_generateFile` once. The script writes base64 to stdout; the tool infers/downloads the final artifact from `filename`.
-**Pure browser path (direct):** use `fs_download_file` only for already-complete final content, not as a follow-up to `runtime_generateFile`.
+**PDF (preferred)**: `runtime_generateArtifact(generator="pdf", filename="output.pdf", input={text: "...", pages: [...]})`
 
-**Avoid `runtime_runTerminal`** for file generation. `runtime_generateFile` already writes, runs, captures output, and downloads.
+**PNG (custom script)**: `runtime_generateFile(path="agent-sandbox/generate_canvas.cjs", content="<JavaScript script using pdfkit or node-canvas>", filename="output.png")`
 
-**Dev server example:**
-
-```
-runtime_generateFile(
-  path="agent-sandbox/generate_canvas.cjs",
-  content="<JavaScript script using pdfkit or node-canvas>",
-  filename="output.png"
-)
-```
+**Avoid `runtime_runTerminal`** for file generation. `runtime_generateArtifact` and `runtime_generateFile` already write, run, capture output, and download.
 
 Complete this in two steps:
 1. Design Philosophy Creation (.md file)

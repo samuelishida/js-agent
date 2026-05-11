@@ -27,6 +27,10 @@ coverage/
 *.tmp
 *.temp
 .*
+!.github/
+!.github/workflows/
+!.github/workflows/ci.yml
+.github/workflows/deploy-*.yml
 
 # Agent sandbox (generated files)
 agent-sandbox/

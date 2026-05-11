@@ -3,6 +3,9 @@
 // Reads from window.AgentToolModules, window.AgentToolBroadcast, window.AgentToolMemory.
 // Publishes: window.AgentToolExecutor
 
+const path = typeof require !== 'undefined' ? require('path') : null;
+const fs = typeof require !== 'undefined' ? require('fs') : null;
+
 (() => {
   'use strict';
 
@@ -720,17 +723,148 @@
     if (!b64 && rawOutput) {
       // Detect SyntaxError from raw newlines in JS strings — common model mistake
       if (/SyntaxError.*Invalid or unexpected token/i.test(rawOutput)) {
+        const ext = extensionOf(outputFilename || scriptPath);
+        if (['pdf', 'docx', 'xlsx', 'pptx', 'html', 'htm', 'svg', 'txt', 'zip'].includes(ext)) {
+          return formatToolResult('runtime_generateFile', `HINT: Your custom generator script has a SyntaxError. For ${ext.toUpperCase()} output, do not retry by hand-writing JavaScript. Use runtime_generateArtifact with structured input instead.\n\nExample for DOCX:\n  runtime_generateArtifact(generator="docx", filename="report.docx", input={ title: "Report", sections: [{ children: [{ type: "paragraph", text: "Hello" }] }] })\n\nThis avoids raw-newline and bundled-library syntax errors.`);
+        }
         return formatToolResult('runtime_generateFile', `HINT: Your script has a SyntaxError — most likely raw newlines inside a double-quoted string. JS strings cannot span multiple lines with real newlines.\n\nFix: Use backtick template literals (\`...\`) for multi-line text, or use \\n escape sequences.\n\nExample:\n  const text = \`line 1\nline 2\nline 3\`;  // ← backticks, not quotes\n\nRewrite your script with backtick strings and try again.`);
       }
       // Detect MODULE_NOT_FOUND
       if (/MODULE_NOT_FOUND|Cannot find module/i.test(rawOutput)) {
         const modMatch = rawOutput.match(/Cannot find module\s+'([^']+)'/i);
         const missing = modMatch ? modMatch[1] : 'unknown';
-        return formatToolResult('runtime_generateFile', `HINT: Module "${missing}" is not installed. Use a library that IS available (pdfkit, docx, exceljs, puppeteer, sharp, canvas).\n\nRewrite your script to use pdfkit (already installed) and try again.`);
+        return formatToolResult('runtime_generateFile', `HINT: Module "${missing}" is not installed. Use a library that IS available (pdfkit, docx, pptxgenjs, xlsx, pdf-lib).\n\nRewrite your script to use pdfkit (already installed) and try again.`);
       }
     }
     return formatToolResult('runtime_generateFile', rawOutput || 'Script executed.');
   }
+
+  // ── runtime_generateArtifact (precompiled generators) ─────────────────────────────────────────────────────────────────────────────
+  const SKILLS_RUNTIME_MANIFEST_FALLBACK = {
+    generators: [
+      { id: 'pdf', extensions: ['pdf'] },
+      { id: 'docx', extensions: ['docx'] },
+      { id: 'xlsx', extensions: ['xlsx'] },
+      { id: 'pptx', extensions: ['pptx'] },
+      { id: 'html', extensions: ['html', 'htm', 'svg', 'txt'] },
+      { id: 'zip', extensions: ['zip'] }
+    ]
+  };
+
+  async function loadSkillsRuntimeManifest() {
+    try {
+      const response = await fetch('src/skills/generated/runtime/manifest.json', { cache: 'no-store' });
+      if (response.ok) return await response.json();
+    } catch {}
+    return SKILLS_RUNTIME_MANIFEST_FALLBACK;
+  }
+
+  function encodeUtf8Base64(text) {
+    if (typeof TextEncoder !== 'undefined') {
+      const bytes = new TextEncoder().encode(String(text || ''));
+      const CHUNK = 8192;
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        const slice = bytes.subarray(i, Math.min(i + CHUNK, bytes.length));
+        binary += String.fromCharCode.apply(null, slice);
+      }
+      return btoa(binary);
+    }
+    return btoa(unescape(encodeURIComponent(String(text || ''))));
+  }
+
+  async function runtimeGenerateArtifact(args = {}) {
+    const generator = String(args.generator || '').trim().toLowerCase();
+    const filename = String(args.filename || '').trim();
+    const input = args.input ?? {};
+
+    if (!generator) throw new Error('runtime_generateArtifact requires generator.');
+    if (!filename) throw new Error('runtime_generateArtifact requires filename.');
+
+    const manifest = await loadSkillsRuntimeManifest();
+    const knownGenerators = new Set(manifest.generators.map(g => g.id.toLowerCase()));
+    if (!knownGenerators.has(generator)) {
+      throw new Error(`HINT: Unknown generator "${generator}". Available: ${Array.from(knownGenerators).join(', ')}`);
+    }
+
+    const ext = extensionOf(filename);
+    const generatorInfo = manifest.generators.find(g => g.id.toLowerCase() === generator);
+    const allowedExts = generatorInfo?.extensions || [];
+    if (!allowedExts.includes(ext)) {
+      throw new Error(`HINT: Filename "${filename}" has extension ".${ext}" but generator "${generator}" expects: ${allowedExts.join(', ')}`);
+    }
+
+    const randomId = Math.random().toString(36).slice(2, 10);
+    const inputFile = `agent-sandbox/runtime-input-${randomId}.json`;
+    const generatorBundlePath = `src/skills/generated/runtime/${generator}.cjs`;
+
+    let inputJson;
+    try {
+      inputJson = JSON.stringify(input, null, 2);
+    } catch (e) {
+      throw new Error(`runtime_generateArtifact input must be JSON-serializable: ${e.message}`);
+    }
+
+    const payload = {
+      command: `node "${generatorBundlePath}" "${inputFile}"`,
+      cwd: '',
+      files: [{ path: inputFile, content: encodeUtf8Base64(inputJson), mode: 0o644 }]
+    };
+    const result = await callLocalCompatApi('/api/terminal-files', payload);
+    const rawOutput = String(result?.result || result?.output || '');
+
+    // Extract base64 from STDOUT
+    const stdoutMatch = rawOutput.match(/STDOUT:\s*([A-Za-z0-9+/=\r\n]{40,}?)(?:\r?\nSTDERR:|$)/);
+    const b64 = stdoutMatch ? stdoutMatch[1].replace(/[\r\n\s]/g, '') : '';
+
+    if (!b64) {
+      if (/Cannot find module|MODULE_NOT_FOUND|ENOENT/i.test(rawOutput)) {
+        throw new Error(`HINT: Generator bundle "${generator}" was not found or could not load. Run: npm run build:skills-runtime\n\n${rawOutput}`);
+      }
+      throw new Error(`HINT: Generator "${generator}" produced no output. Check stderr for errors.\n\n${rawOutput}`);
+    }
+
+    // Save via Electron IPC or browser Blob download
+    try {
+      const bytes = base64ToUint8Array(b64);
+      const downloadName = resolveGeneratedDownloadName({ outputFilename: filename, scriptPath: generatorBundlePath, bytes });
+      const ext = extensionOf(downloadName) || 'bin';
+      const mime = GENERATED_MIME_BY_EXT[ext] || 'application/octet-stream';
+
+      const artifact = registerArtifact({
+        id: `art_gen_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        name: downloadName,
+        mimeType: mime,
+        size: bytes.length,
+        source: 'runtime_generateArtifact',
+        data: b64,
+        preview: `Generated ${downloadName} (${bytes.length} bytes)`
+      });
+
+      const saveResult = await (window.ElectronFileSave?.saveGeneratedArtifact?.({ name: downloadName, mimeType: mime, base64: b64 }) || Promise.resolve({ mode: 'browser', name: downloadName, size: bytes.length }));
+
+      if (saveResult.mode === 'electron') {
+        return formatToolResult('runtime_generateArtifact', `✅ Generated and saved ${artifact.name} (${artifact.size} bytes) to ${saveResult.path}. Artifact id: ${artifact.id}`);
+      }
+      return formatToolResult('runtime_generateArtifact', `✅ Generated and downloaded ${artifact.name} (${artifact.size} bytes). Artifact id: ${artifact.id}`);
+    } catch (e) {
+      // Fallback: save to localStorage + artifact registry
+      try { localStorage.setItem('__last_generated_base64__', b64); } catch {}
+      const fallbackName = resolveGeneratedDownloadName({ outputFilename: filename, scriptPath: generatorBundlePath, bytes: null });
+      const fallbackExt = extensionOf(fallbackName) || 'bin';
+      const artifact = registerArtifact({
+        id: `art_gen_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        name: fallbackName,
+        mimeType: GENERATED_MIME_BY_EXT[fallbackExt] || 'application/octet-stream',
+        size: Math.floor(b64.length * 0.75),
+        source: 'runtime_generateArtifact',
+        data: b64,
+        preview: 'Base64 fallback (save failed)'
+      });
+      return formatToolResult('runtime_generateArtifact', `Artifact id: ${artifact.id}\n[Save failed: ${e.message}. Use fs_download_file(artifactId="${artifact.id}") or storageKey="__last_generated_base64__" to download.]`);
+    }
+  }
+
   async function runtimeEditFile(args = {}) { return editLocalFile({ path: args.path, oldText: args.oldString ?? args.oldText, newText: args.newString ?? args.newText, replaceAll: args.replaceAll === true }); }
   async function runtimeMultiEdit(args = {}) { return multiEditFiles({ edits: Array.isArray(args.edits) ? args.edits : [] }); }
   async function runtimeListDir(args = {}, context = {}) { return listDirectory(deriveFilesystemPathArg(args, context, 'list_dir')); }
@@ -878,6 +1012,7 @@
     runtimeWriteFile,
     runtimeAppendFile,
     runtimeGenerateFile,
+    runtimeGenerateArtifact,
     runtimeEditFile,
     runtimeMultiEdit,
     runtimeListDir,

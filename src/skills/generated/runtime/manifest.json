@@ -1,0 +1,66 @@
+{
+  "generators": [
+    {
+      "id": "pdf",
+      "description": "Generate PDF documents",
+      "inputSchema": {
+        "text": "string",
+        "pages": "Array<{ text: string, fontSize?: number, bold?: boolean, title?: string }>",
+        "title": "string",
+        "margin": "number"
+      },
+      "outputMime": "application/pdf",
+      "extensions": ["pdf"]
+    },
+    {
+      "id": "docx",
+      "description": "Generate Word documents",
+      "inputSchema": {
+        "sections": "Array<{ children: Array<{ type: 'paragraph'|'heading'|'table'|'bulletList', text?: string, heading?: string, rows?: string[][], items?: string[], bold?: boolean, fontSize?: number }> }",
+        "title": "string",
+        "margins": "object"
+      },
+      "outputMime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "extensions": ["docx"]
+    },
+    {
+      "id": "xlsx",
+      "description": "Generate Excel spreadsheets",
+      "inputSchema": {
+        "sheets": "Array<{ name?: string, data: string[][], options?: { header?: boolean } }>"
+      },
+      "outputMime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "extensions": ["xlsx"]
+    },
+    {
+      "id": "pptx",
+      "description": "Generate PowerPoint presentations",
+      "inputSchema": {
+        "slides": "Array<{ title?: string, text?: string, bullets?: string[], fontSize?: number }>",
+        "title": "string"
+      },
+      "outputMime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "extensions": ["pptx"]
+    },
+    {
+      "id": "html",
+      "description": "Generate standalone HTML/text artifacts",
+      "inputSchema": {
+        "html": "string",
+        "title": "string",
+        "type": "'html'|'htm'|'svg'|'text'"
+      },
+      "outputMime": "text/html",
+      "extensions": ["html", "htm", "svg", "txt"]
+    },
+    {
+      "id": "zip",
+      "description": "Generate ZIP archives with multiple files",
+      "inputSchema": {
+        "files": "Array<{ path: string, content: string, encoding?: 'utf8'|'base64' }>"
+      },
+      "outputMime": "application/zip",
+      "extensions": ["zip"]
+    }
+  ]
+}

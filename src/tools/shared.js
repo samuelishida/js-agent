@@ -98,7 +98,8 @@
         skill_load: args => Executor.skillLoad(args),
         attachment_list: () => Executor.attachmentList(),
         attachment_preview: args => Executor.attachmentPreview(args),
-        attachment_read_text: args => Executor.attachmentReadText(args)
+        attachment_read_text: args => Executor.attachmentReadText(args),
+        runtime_generateArtifact: args => Executor.runtimeGenerateArtifact(args)
       })
     : { registry: {}, toolGroups: {} };
 
@@ -137,7 +138,8 @@
     { name: 'skill_load', signature: 'skill_load(name)', description: 'Load a skill\'s full content by name. Use after skill_search to get the complete methodology/guidelines for a specific skill.', run: Executor.skillLoad },
     { name: 'attachment_list', signature: 'attachment_list()', description: 'List current turn attachments (files/images the user uploaded).', run: Executor.attachmentList },
     { name: 'attachment_preview', signature: 'attachment_preview(id)', description: 'Preview a specific attachment by its id.', run: Executor.attachmentPreview },
-    { name: 'attachment_read_text', signature: 'attachment_read_text(id)', description: 'Read the full text preview of a specific attachment by its id.', run: Executor.attachmentReadText }
+    { name: 'attachment_read_text', signature: 'attachment_read_text(id)', description: 'Read the full text preview of a specific attachment by its id.', run: Executor.attachmentReadText },
+    { name: 'runtime_generateArtifact', signature: 'runtime_generateArtifact(generator, filename, input, options?)', description: 'Generate binary files using precompiled generators: pdf, docx, xlsx, pptx, html, zip. Pass structured input data (not a script). Auto-saves and registers an artifact.', run: Executor.runtimeGenerateArtifact }
   ];
 
   compatTools.forEach(tool => Registry.registerCompatTool(registry, toolGroups, tool));

@@ -8,6 +8,25 @@ This skill guides creation of distinctive, production-grade frontend interfaces 
 
 The user provides frontend requirements: a component, page, application, or interface to build. They may include context about the purpose, audience, or technical constraints.
 
+## File Generation for Frontend Artifacts
+
+### Single HTML Files
+For standalone HTML frontend designs, use `runtime_generateArtifact`:
+
+```javascript
+runtime_generateArtifact(
+  generator="html",
+  filename="design.html",
+  input={
+    html: "<!DOCTYPE html><html><head><title>My Design</title></head><body><h1>Hello</h1></body></html>",
+    title: "My Frontend Design"
+  }
+)
+```
+
+### Alternative: Direct File Download
+For simple HTML content, you can also use `fs_download_file` with the HTML string directly.
+
 ## Design Thinking
 
 Before coding, understand the context and commit to a BOLD aesthetic direction:

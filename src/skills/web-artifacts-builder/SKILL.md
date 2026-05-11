@@ -6,7 +6,7 @@ license: Complete terms in LICENSE.txt
 
 # Web Artifacts Builder
 
-> **Browser compatibility note**: The `bash scripts/...` commands below require the **dev server** (`node proxy/dev-server.js`). `runtime_generateFile` is for one-step Node generator scripts that emit downloadable artifacts, not for shell-script orchestration. In a pure browser environment without the sandbox, **fall back to creating single-file HTML artifacts directly** using inline CSS/JS and export them with `fs_download_file`; for zipped/binary bundles, use `runtime_generateFile(path="agent-sandbox/gen.cjs", content=script, filename="artifact.ext")`.
+> **Browser compatibility note**: The `bash scripts/...` commands below require the **dev server** (`node proxy/dev-server.js`). For simple HTML/ZIP artifacts, prefer `runtime_generateArtifact` with structured input. `runtime_generateFile` is for custom scripts that emit downloadable artifacts. In a pure browser environment without the sandbox, **fall back to creating single-file HTML artifacts directly** using inline CSS/JS and export them with `fs_download_file`; for zipped/binary bundles, use `runtime_generateArtifact(generator="zip", filename="artifact.zip", input={files: [...]})`.
 
 To build powerful frontend claude.ai artifacts, follow these steps:
 1. Initialize the frontend repo using `scripts/init-artifact.sh`
@@ -16,10 +16,6 @@ To build powerful frontend claude.ai artifacts, follow these steps:
 5. (Optional) Test the artifact
 
 **Stack**: React 18 + TypeScript + Vite + Parcel (bundling) + Tailwind CSS + shadcn/ui
-
-## Design & Style Guidelines
-
-VERY IMPORTANT: To avoid what is often referred to as "AI slop", avoid using excessive centered layouts, purple gradients, uniform rounded corners, and Inter font.
 
 ## Quick Start
 
@@ -71,6 +67,38 @@ Note: This is a completely optional step. Only perform if necessary or requested
 
 To test/visualize the artifact, use available tools (including other Skills or built-in tools like Playwright or Puppeteer). In general, avoid testing the artifact upfront as it adds latency between the request and when the finished artifact can be seen. Test later, after presenting the artifact, if requested or if issues arise.
 
-## Reference
+## File Generation for Artifacts
 
-- **shadcn/ui components**: https://ui.shadcn.com/docs/components
+### Single HTML Files
+For simple standalone HTML artifacts, use `runtime_generateArtifact`:
+
+```javascript
+runtime_generateArtifact(
+  generator="html",
+  filename="artifact.html",
+  input={
+    html: "<!DOCTYPE html><html><head><title>My Artifact</title></head><body><h1>Hello</h1></body></html>",
+    title: "My Artifact"
+  }
+)
+```
+
+### Multi-File ZIP Bundles
+For bundling multiple files (HTML + assets), use `runtime_generateArtifact`:
+
+```javascript
+runtime_generateArtifact(
+  generator="zip",
+  filename="artifact.zip",
+  input={
+    files: [
+      { path: "index.html", content: "<!DOCTYPE html>...", encoding: "utf8" },
+      { path: "styles.css", content: "body { ... }", encoding: "utf8" },
+      { path: "script.js", content: "console.log(...)", encoding: "utf8" }
+    ]
+  }
+)
+```
+
+### Complex Shell Orchestration
+For complex builds requiring shell scripts, use the existing `bash scripts/...` workflow.
